@@ -157,6 +157,8 @@ Qt::ItemFlags PinTableModel::flags(const QModelIndex &index) const
 
 QVariant PinTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
+    if (role == Qt::ToolTipRole && orientation == Qt::Horizontal && section == Seal)
+        return tr("Seal part number. For a cavity plug, enter the plug's part number here.");
     if (role != Qt::DisplayRole)
         return {};
     if (orientation == Qt::Vertical)

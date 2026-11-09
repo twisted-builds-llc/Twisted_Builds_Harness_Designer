@@ -7,6 +7,8 @@ add_library(tbh_core STATIC
     model/Library.h model/Library.cpp
     model/PinLabels.h model/PinLabels.cpp
     model/Queries.h model/Queries.cpp
+    bom/Bom.h bom/Bom.cpp
+    bom/BomCsv.h bom/BomCsv.cpp
     calc/Bundle.h calc/Bundle.cpp
     calc/Highlight.h calc/Highlight.cpp
     calc/WireLength.h calc/WireLength.cpp
