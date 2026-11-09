@@ -3,6 +3,7 @@
 
 #include "calc/Highlight.h"
 #include "layout/LayoutItems.h"
+#include "ui/NoteItem.h"
 #include "model/HarnessModel.h"
 
 #include <QGraphicsScene>
@@ -13,7 +14,7 @@ namespace tbh::app {
 class SelectionModel;
 
 // Renders the layout graph (nodes and segments) and keeps it in sync with the model.
-// Segment captions show the entered length and how many routed wires pass through.
+// Segments draw their routed wires as colored stripes and caption the entered length.
 class LayoutScene : public QGraphicsScene
 {
     Q_OBJECT
@@ -28,6 +29,9 @@ public:
 
     LayoutNodeItem *nodeItem(const QString &id) const { return m_nodes.value(id); }
     LayoutSegmentItem *segmentItem(const QString &id) const { return m_segments.value(id); }
+    NoteItem *noteItem(const QString &id) const { return m_notes.value(id); }
+    // Draws `segment` (e.g. while its bend is dragged) without changing the model.
+    void previewSegment(const LayoutSegment &segment);
 
     void setHighlight(const std::optional<calc::HighlightSet> &set);
     void setShowBundleDiameters(bool on);
@@ -45,7 +49,10 @@ private:
     void onRemoved(EntityKind kind, const QString &id);
     void addNode(const LayoutNode &node);
     void addSegment(const LayoutSegment &segment);
+    void addNote(const Note &note);
     void updateSegmentEnds(LayoutSegmentItem *item);
+    // Tells a node which way its segments leave (branch point drawing).
+    void updateLegs(LayoutNodeItem *node);
     // Labels and wire counts depend on the whole model; recompute once per event loop pass.
     void scheduleRefresh();
     void refreshCaptions();
@@ -57,11 +64,12 @@ private:
     bool m_snap = true;
     bool m_syncingSelection = false;
     bool m_refreshPending = false;
-    bool m_showDiameters = true;
+    bool m_showDiameters = false;
     std::optional<calc::HighlightSet> m_highlight;
     void applyHighlight();
     QHash<QString, LayoutNodeItem *> m_nodes;
     QHash<QString, LayoutSegmentItem *> m_segments;
+    QHash<QString, NoteItem *> m_notes;
 };
 
 } // namespace tbh::app

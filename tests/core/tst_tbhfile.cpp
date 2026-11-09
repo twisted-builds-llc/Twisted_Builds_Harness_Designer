@@ -85,10 +85,13 @@ Harness sampleHarness()
         LayoutNode{u"n4"_s, LayoutNodeType::Splice, u"sp1"_s, QPointF(150, 80), {}},
     };
     h.layoutSegments = {
-        LayoutSegment{u"seg1"_s, u"n1"_s, u"n2"_s, 250.0, u"Trunk"_s, {}, SleevingCoverage::Full, {}},
-        LayoutSegment{u"seg2"_s, u"n2"_s, u"n3"_s, 0.1, {}, u"sleeve-x"_s, SleevingCoverage::Full, {}},
-        LayoutSegment{u"seg3"_s, u"n2"_s, u"n4"_s, 75.0, {}, {}, SleevingCoverage::Full, {}},
+        LayoutSegment{u"seg1"_s, u"n1"_s, u"n2"_s, 250.0, u"Trunk"_s, {}, SleevingCoverage::Full, std::nullopt, {}},
+        LayoutSegment{u"seg2"_s, u"n2"_s, u"n3"_s, 0.1, {}, u"sleeve-x"_s, SleevingCoverage::Full, std::nullopt, {}},
+        LayoutSegment{u"seg3"_s, u"n2"_s, u"n4"_s, 75.0, {}, {}, SleevingCoverage::Full, QPointF(0.5, -0.25), {}},
     };
+    // Layout notes first: files list layout.json notes before schematic.json notes.
+    h.notes = {Note{u"note1"_s, NoteCanvas::Layout, u"Signal is blue, not yellow"_s, QPointF(-40, 120.5), {}},
+               Note{u"note2"_s, NoteCanvas::Schematic, u"Check ECU pinout rev B"_s, QPointF(500, -80), {}}};
 
     h.otherEntries[u"future.json"_s] = QByteArrayLiteral("{\"future\": true}\n");
     h.bomExtras = {BomExtra{u"x1"_s, u"TAPE-19"_s, u"Cloth tape"_s, 2.5, u"roll"_s, {}, {}}};
@@ -167,6 +170,7 @@ private slots:
         QVERIFY(loaded->splices == original.splices);
         QVERIFY(loaded->layoutNodes == original.layoutNodes);
         QVERIFY(loaded->layoutSegments == original.layoutSegments);
+        QVERIFY(loaded->notes == original.notes);
         QVERIFY(loaded->otherEntries == original.otherEntries);
         QVERIFY(loaded->schematic == original.schematic);
         QVERIFY(loaded->bomExtras == original.bomExtras);
@@ -355,6 +359,72 @@ private slots:
         QVERIFY2(error.contains(u"sp1"), qPrintable(error));
     }
 
+    // Files written before curved segments and notes still load: straight, no notes.
+    void layoutWithoutBendsOrNotesLoads()
+    {
+        const QString file = path(u"old-layout.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
+        io::ZipEntries entries = readRaw(file);
+        QJsonObject layout = QJsonDocument::fromJson(entries.at(u"layout.json"_s)).object();
+        layout.remove(u"notes"_s);
+        QJsonArray segments = layout[u"segments"].toArray();
+        QJsonObject seg3 = segments[2].toObject();
+        QVERIFY(seg3.contains(u"bend"_s));
+        seg3.remove(u"bend"_s);
+        segments[2] = seg3;
+        layout[u"segments"] = segments;
+        entries[u"layout.json"_s] = QJsonDocument(layout).toJson();
+        QJsonObject schematic = QJsonDocument::fromJson(entries.at(u"schematic.json"_s)).object();
+        schematic.remove(u"notes"_s);
+        entries[u"schematic.json"_s] = QJsonDocument(schematic).toJson();
+        writeRaw(file, entries);
+        QString error;
+        const auto loaded = io::readTbhFile(file, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QVERIFY(loaded->notes.empty());
+        QVERIFY(!loaded->layoutSegments[2].bend);
+    }
+
+    // Each canvas file holds its own notes; the canvas comes from the file.
+    void notesAreSavedWithTheirCanvas()
+    {
+        const io::ZipEntries entries = io::serializeHarness(sampleHarness());
+        const QJsonArray layoutNotes =
+            QJsonDocument::fromJson(entries.at(u"layout.json"_s)).object()[u"notes"].toArray();
+        const QJsonArray schematicNotes =
+            QJsonDocument::fromJson(entries.at(u"schematic.json"_s)).object()[u"notes"].toArray();
+        QCOMPARE(layoutNotes.size(), 1);
+        QCOMPARE(layoutNotes[0].toObject()[u"id"].toString(), u"note1"_s);
+        QCOMPARE(schematicNotes.size(), 1);
+        QCOMPARE(schematicNotes[0].toObject()[u"id"].toString(), u"note2"_s);
+        QVERIFY(!schematicNotes[0].toObject().contains(u"canvas"_s));
+        const auto loaded = io::deserializeHarness(entries, nullptr);
+        QVERIFY(loaded);
+        QCOMPARE(loaded->notes[1].canvas, NoteCanvas::Schematic);
+    }
+
+    void malformedBendAndDuplicateNotesAreRejected()
+    {
+        QString error = readErrorAfter([](io::ZipEntries &e) {
+            QJsonObject layout = QJsonDocument::fromJson(e.at(u"layout.json"_s)).object();
+            QJsonArray segments = layout[u"segments"].toArray();
+            QJsonObject seg3 = segments[2].toObject();
+            seg3[u"bend"] = QJsonObject{{u"x"_s, 0.5}}; // "y" missing
+            segments[2] = seg3;
+            layout[u"segments"] = segments;
+            e[u"layout.json"_s] = QJsonDocument(layout).toJson();
+        });
+        QVERIFY2(error.contains(u"bend") && error.contains(u"\"y\""), qPrintable(error));
+        error = readErrorAfter([](io::ZipEntries &e) {
+            QJsonObject layout = QJsonDocument::fromJson(e.at(u"layout.json"_s)).object();
+            QJsonArray notes = layout[u"notes"].toArray();
+            notes.append(notes[0]);
+            layout[u"notes"] = notes;
+            e[u"layout.json"_s] = QJsonDocument(layout).toJson();
+        });
+        QVERIFY2(error.contains(u"note1"), qPrintable(error));
+    }
+
     void pinCountLimits()
     {
         Harness h = sampleHarness();
@@ -421,11 +491,16 @@ private slots:
         Harness h = sampleHarness();
         h.schematic.placements[u"gone"_s] = SchematicPlacement{};
         h.schematic.placements[freeEndPlacementKey(u"w1"_s, false)] = SchematicPlacement{}; // pin end
+        h.schematic.placements[u"gone-wire"_s] = SchematicPlacement{QPointF(100, 0), false, 0, {}};
+        // A dragged wire route (keyed by an existing wire id) is kept.
+        h.schematic.placements[u"w1"_s] = SchematicPlacement{QPointF(250, 0), false, 0, {}};
         const QString file = path(u"orphans.tbh"_s);
         QVERIFY(io::writeTbhFile(file, h, nullptr));
         const auto loaded = io::readTbhFile(file, nullptr);
         QVERIFY(loaded);
-        QVERIFY(loaded->schematic == sampleHarness().schematic);
+        Schematic expected = sampleHarness().schematic;
+        expected.placements[u"w1"_s] = SchematicPlacement{QPointF(250, 0), false, 0, {}};
+        QVERIFY(loaded->schematic == expected);
     }
 
     void saveOverwritesExistingFile()

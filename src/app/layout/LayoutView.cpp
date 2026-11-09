@@ -9,9 +9,12 @@
 #include "ui/Format.h"
 
 #include <QGraphicsLineItem>
+#include <QLineF>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
+#include <QContextMenuEvent>
 #include <QPushButton>
 #include <QSplitter>
 #include <QTimer>
@@ -57,6 +60,27 @@ LayoutNodeItem *LayoutView::nodeAt(const QPoint &viewPos) const
             return static_cast<LayoutNodeItem *>(item);
     }
     return nullptr;
+}
+
+LayoutNodeItem *LayoutView::nodeNear(const QPointF &scenePos, const QSet<QString> &exclude,
+                                     qreal toleranceGrid, qreal tolerancePixels) const
+{
+    const qreal tolerance = std::max(toleranceGrid * kCanvasGrid, tolerancePixels / std::max(transform().m11(), 1e-6));
+    LayoutNodeItem *best = nullptr;
+    qreal bestDistance = tolerance;
+    for (const LayoutNode &node : m_document->model()->harness().layoutNodes) {
+        if (exclude.contains(node.id))
+            continue;
+        LayoutNodeItem *item = m_scene->nodeItem(node.id);
+        if (!item)
+            continue;
+        const qreal distance = QLineF(item->pos(), scenePos).length();
+        if (distance <= bestDistance) {
+            best = item;
+            bestDistance = distance;
+        }
+    }
+    return best;
 }
 
 LayoutNodeItem *LayoutView::nodeLeadAt(const QPoint &viewPos) const
@@ -109,13 +133,53 @@ void LayoutView::placeRef(const LayoutRef &ref)
     m_selection->setSelection(s);
 }
 
+void LayoutView::addNote()
+{
+    const QPointF position = nextPlacePosition();
+    editText(QRectF(position, QSizeF(NoteItem::kWidth, 18)), {}, [this, position](const QString &value, Nav) {
+        const QString text = value.trimmed();
+        if (text.isEmpty())
+            return; // nothing typed: no note
+        Note note{newId(), NoteCanvas::Layout, text, position, {}};
+        const QString id = note.id;
+        m_document->undoStack()->push(
+            new AddEntityCommand<Note>(m_document->model(), std::move(note), {}, tr("Add note")));
+        Selection s;
+        s.notes.insert(id);
+        m_selection->setSelection(s);
+    });
+}
+
+void LayoutView::editNote(const QString &noteId)
+{
+    NoteItem *item = m_scene->noteItem(noteId);
+    if (!item)
+        return;
+    const QRectF rect(item->pos(), QSizeF(NoteItem::kWidth, 18));
+    editText(rect, item->note().text, [this, noteId](const QString &value, Nav) {
+        if (auto command = setNoteText(m_document->model(), noteId, value)) // empty text deletes
+            m_document->undoStack()->push(command.release());
+    });
+}
+
+void LayoutView::straightenSegment(const QString &segmentId)
+{
+    HarnessModel *model = m_document->model();
+    const LayoutSegment *current = model->find<LayoutSegment>(segmentId);
+    if (!current || !current->bend)
+        return;
+    LayoutSegment updated = *current;
+    updated.bend.reset();
+    m_document->undoStack()->push(new UpdateEntityCommand<LayoutSegment>(model, updated, tr("Straighten segment")));
+}
+
 void LayoutView::deleteSelection()
 {
     const Selection &s = m_selection->selection();
-    if (s.layoutNodes.isEmpty() && s.layoutSegments.isEmpty())
+    if (s.layoutNodes.isEmpty() && s.layoutSegments.isEmpty() && s.notes.isEmpty())
         return;
     m_document->undoStack()->push(
-        removeLayoutItems(m_document->model(), s.layoutNodes, s.layoutSegments).release());
+        removeLayoutItems(m_document->model(), s.layoutNodes, s.layoutSegments, s.notes).release());
 }
 
 void LayoutView::selectAll()
@@ -157,9 +221,41 @@ void LayoutView::editSegmentLength(const QString &segmentId)
              });
 }
 
+LayoutSegmentItem *LayoutView::bendHandleAt(const QPoint &viewPos) const
+{
+    const QPointF scenePos = mapToScene(viewPos);
+    const qreal tolerance = 3.0 / std::max(transform().m11(), 1e-6);
+    for (QGraphicsItem *item : m_scene->selectedItems()) {
+        if (item->type() == LayoutSegmentItemType) {
+            auto *segment = static_cast<LayoutSegmentItem *>(item);
+            if (segment->isBendHandleAt(scenePos, tolerance))
+                return segment;
+        }
+    }
+    return nullptr;
+}
+
+void LayoutView::recordPressPositions()
+{
+    m_pressPositions.clear();
+    m_notePressPositions.clear();
+    for (QGraphicsItem *item : m_scene->selectedItems()) {
+        if (item->type() == LayoutNodeItemType)
+            m_pressPositions[static_cast<LayoutNodeItem *>(item)->id()] = item->pos();
+        else if (item->type() == NoteItemType)
+            m_notePressPositions[static_cast<NoteItem *>(item)->id()] = item->pos();
+    }
+}
+
 void LayoutView::mousePressEvent(QMouseEvent *event)
 {
     closeEditor();
+    if (event->button() == Qt::LeftButton && m_tool == Tool::Select) {
+        if (LayoutSegmentItem *segment = bendHandleAt(event->pos())) {
+            m_bendSegment = segment->id();
+            return;
+        }
+    }
     if (event->button() == Qt::LeftButton) {
         LayoutNodeItem *node = m_tool == Tool::Segment ? nodeAt(event->pos()) : nodeLeadAt(event->pos());
         if (node) {
@@ -172,31 +268,54 @@ void LayoutView::mousePressEvent(QMouseEvent *event)
         }
     }
     CanvasView::mousePressEvent(event);
-    if (event->button() == Qt::LeftButton) {
-        m_pressPositions.clear();
-        for (QGraphicsItem *item : m_scene->selectedItems()) {
-            if (item->type() == LayoutNodeItemType)
-                m_pressPositions[static_cast<LayoutNodeItem *>(item)->id()] = item->pos();
-        }
-    }
+    if (event->button() == Qt::LeftButton)
+        recordPressPositions();
 }
 
 void LayoutView::mouseMoveEvent(QMouseEvent *event)
 {
+    if (!m_bendSegment.isEmpty()) {
+        if (const LayoutSegment *current = m_document->model()->find<LayoutSegment>(m_bendSegment)) {
+            LayoutSegment preview = *current;
+            preview.bend = bendFor(preview, mapToScene(event->pos()));
+            m_scene->previewSegment(preview);
+        }
+        return;
+    }
     if (m_preview) {
         QPointF end = mapToScene(event->pos());
-        if (LayoutNodeItem *node = nodeAt(event->pos()))
+        LayoutNodeItem *node = nodeAt(event->pos());
+        if (!node)
+            node = nodeNear(snapToCanvasGrid(end), {m_segmentStart});
+        if (node)
             end = node->pos();
         m_preview->setLine(QLineF(m_preview->line().p1(), end));
         return;
     }
-    if (event->buttons() == Qt::NoButton && !isPanning())
+    if (event->buttons() == Qt::NoButton && !isPanning()) {
         setHoveredLead(nodeLeadAt(event->pos()));
+        if (m_hoveredLead.isEmpty() && m_tool == Tool::Select)
+            viewport()->setCursor(bendHandleAt(event->pos()) ? Qt::SizeAllCursor : Qt::ArrowCursor);
+    }
     CanvasView::mouseMoveEvent(event);
 }
 
 void LayoutView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (!m_bendSegment.isEmpty() && event->button() == Qt::LeftButton) {
+        const QString id = std::exchange(m_bendSegment, QString());
+        HarnessModel *model = m_document->model();
+        if (const LayoutSegment *current = model->find<LayoutSegment>(id)) {
+            LayoutSegment updated = *current;
+            updated.bend = bendFor(updated, mapToScene(event->pos()));
+            if (updated.bend != current->bend)
+                m_document->undoStack()->push(new UpdateEntityCommand<LayoutSegment>(
+                    model, updated, updated.bend ? tr("Bend segment") : tr("Straighten segment")));
+            else
+                m_scene->previewSegment(*current);
+        }
+        return;
+    }
     if (m_preview && event->button() == Qt::LeftButton) {
         finishSegment(event->pos());
         return;
@@ -214,6 +333,8 @@ void LayoutView::finishSegment(const QPoint &viewPos)
     cancelSegment();
     HarnessModel *model = m_document->model();
     LayoutNodeItem *target = nodeAt(viewPos);
+    if (!target) // dropped next to a point: join it rather than stack a new one on it
+        target = nodeNear(snapToCanvasGrid(scenePos), {from});
     if (target && target->id() == from)
         return;
     if (!target && QLineF(startPos, scenePos).length() < 15)
@@ -228,7 +349,7 @@ void LayoutView::finishSegment(const QPoint &viewPos)
         to = branch.id;
         new AddEntityCommand<LayoutNode>(model, std::move(branch), {}, {}, macro.get());
     }
-    LayoutSegment segment{newId(), from, to, 0.0, {}, {}, SleevingCoverage::Full, {}};
+    LayoutSegment segment{newId(), from, to, 0.0, {}, {}, SleevingCoverage::Full, std::nullopt, {}};
     const QString segmentId = segment.id;
     new AddEntityCommand<LayoutSegment>(model, std::move(segment), {}, {}, macro.get());
     m_document->undoStack()->push(macro.release());
@@ -237,6 +358,21 @@ void LayoutView::finishSegment(const QPoint &viewPos)
     m_selection->setSelection(s);
     // Lengths are entered, not measured: ask for it right away.
     QTimer::singleShot(0, this, [this, segmentId] { editSegmentLength(segmentId); });
+}
+
+std::optional<QPointF> LayoutView::bendFor(const LayoutSegment &segment, const QPointF &scenePos) const
+{
+    LayoutSegmentItem *item = m_scene->segmentItem(segment.id);
+    if (!item)
+        return segment.bend;
+    return bendThroughMidpoint(item->endA(), item->endB(), scenePos);
+}
+
+void LayoutView::cancelBend()
+{
+    const QString id = std::exchange(m_bendSegment, QString());
+    if (const LayoutSegment *current = m_document->model()->find<LayoutSegment>(id))
+        m_scene->previewSegment(*current);
 }
 
 void LayoutView::cancelSegment()
@@ -248,32 +384,66 @@ void LayoutView::cancelSegment()
 
 void LayoutView::commitMoves()
 {
+    HarnessModel *model = m_document->model();
     auto macro = std::make_unique<QUndoCommand>(tr("Move"));
+    QSet<QString> moved;
     for (const auto &[id, before] : m_pressPositions) {
         LayoutNodeItem *item = m_scene->nodeItem(id);
-        const LayoutNode *node = m_document->model()->find<LayoutNode>(id);
+        const LayoutNode *node = model->find<LayoutNode>(id);
         if (!item || !node || item->pos() == before)
             continue;
         LayoutNode updated = *node;
         updated.position = item->pos();
-        new UpdateEntityCommand<LayoutNode>(m_document->model(), updated, {}, macro.get());
+        new UpdateEntityCommand<LayoutNode>(model, updated, {}, macro.get());
+        moved.insert(id);
     }
     m_pressPositions.clear();
-    if (macro->childCount() > 0)
-        m_document->undoStack()->push(macro.release());
+    for (const auto &[id, before] : m_notePressPositions) {
+        NoteItem *item = m_scene->noteItem(id);
+        const Note *note = model->find<Note>(id);
+        if (!item || !note || item->pos() == before)
+            continue;
+        Note updated = *note;
+        updated.position = item->pos();
+        new UpdateEntityCommand<Note>(model, updated, {}, macro.get());
+    }
+    m_notePressPositions.clear();
+    if (macro->childCount() == 0)
+        return;
+    // A point dropped onto another joins it: the branch point of the two goes away.
+    std::vector<std::pair<QString, QString>> joins; // branch id, into id
+    if (moved.size() == 1) {
+        const QString id = *moved.begin();
+        if (LayoutNodeItem *other = nodeNear(m_scene->nodeItem(id)->pos(), moved, 0.4, 5)) {
+            if (model->find<LayoutNode>(id)->type == LayoutNodeType::Branch)
+                joins.emplace_back(id, other->id());
+            else if (other->node().type == LayoutNodeType::Branch)
+                joins.emplace_back(other->id(), id);
+        }
+    }
+    QUndoStack *stack = m_document->undoStack();
+    if (joins.empty()) {
+        stack->push(macro.release());
+        return;
+    }
+    stack->beginMacro(tr("Join points"));
+    stack->push(macro.release());
+    for (const auto &[branch, into] : joins) {
+        if (auto join = mergeBranchInto(model, branch, into))
+            stack->push(join.release());
+    }
+    stack->endMacro();
 }
 
 bool LayoutView::nudgeSelection(const QPointF &delta)
 {
-    m_pressPositions.clear();
-    for (QGraphicsItem *item : m_scene->selectedItems()) {
-        if (item->type() == LayoutNodeItemType)
-            m_pressPositions[static_cast<LayoutNodeItem *>(item)->id()] = item->pos();
-    }
-    if (m_pressPositions.empty())
+    recordPressPositions();
+    if (m_pressPositions.empty() && m_notePressPositions.empty())
         return false;
     for (const auto &[id, pos] : m_pressPositions)
         m_scene->nodeItem(id)->setPos(pos + delta);
+    for (const auto &[id, pos] : m_notePressPositions)
+        m_scene->noteItem(id)->setPos(pos + delta);
     commitMoves();
     return true;
 }
@@ -282,6 +452,10 @@ void LayoutView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         for (QGraphicsItem *item : items(event->pos())) {
+            if (item->type() == NoteItemType) {
+                editNote(static_cast<NoteItem *>(item)->id());
+                return;
+            }
             if (item->type() == LayoutSegmentItemType) {
                 editSegmentLength(static_cast<LayoutSegmentItem *>(item)->id());
                 return;
@@ -294,13 +468,37 @@ void LayoutView::mouseDoubleClickEvent(QMouseEvent *event)
 void LayoutView::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
-        if (m_preview)
+        if (!m_bendSegment.isEmpty())
+            cancelBend();
+        else if (m_preview)
             cancelSegment();
         else
             m_scene->clearSelection();
         return;
     }
     CanvasView::keyPressEvent(event);
+}
+
+void LayoutView::contextMenuEvent(QContextMenuEvent *event)
+{
+    for (QGraphicsItem *item : items(event->pos())) {
+        QMenu menu(this);
+        if (item->type() == NoteItemType) {
+            const QString id = static_cast<NoteItem *>(item)->id();
+            menu.addAction(tr("Edit Note"), this, [this, id] { editNote(id); });
+        } else if (item->type() == LayoutSegmentItemType) {
+            const auto *segment = static_cast<LayoutSegmentItem *>(item);
+            const QString id = segment->id();
+            menu.addAction(tr("Edit Length"), this, [this, id] { editSegmentLength(id); });
+            QAction *straighten = menu.addAction(tr("Straighten Segment"), this, [this, id] { straightenSegment(id); });
+            straighten->setEnabled(segment->segment().bend.has_value());
+        } else {
+            continue;
+        }
+        menu.exec(event->globalPos());
+        return;
+    }
+    CanvasView::contextMenuEvent(event);
 }
 
 // ---- LayoutEditor ---------------------------------------------------------------
@@ -323,12 +521,14 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     hint->setEnabled(false);
     auto *place = new QPushButton(tr("Place"), side);
     auto *branch = new QPushButton(tr("Add Branch Point"), side);
+    auto *note = new QPushButton(tr("Add Note"), side);
     auto *sideLayout = new QVBoxLayout(side);
     sideLayout->setContentsMargins(6, 6, 6, 6);
     sideLayout->addWidget(title);
     sideLayout->addWidget(m_unplaced, 1);
     sideLayout->addWidget(place);
     sideLayout->addWidget(branch);
+    sideLayout->addWidget(note);
     sideLayout->addWidget(hint);
 
     auto *splitter = new QSplitter(this);
@@ -344,6 +544,7 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     connect(m_unplaced, &QListWidget::itemActivated, this, &LayoutEditor::placeCurrent);
     connect(place, &QPushButton::clicked, this, &LayoutEditor::placeCurrent);
     connect(branch, &QPushButton::clicked, m_view, &LayoutView::addBranchPoint);
+    connect(note, &QPushButton::clicked, m_view, &LayoutView::addNote);
 
     HarnessModel *model = document->model();
     auto schedule = [this] {

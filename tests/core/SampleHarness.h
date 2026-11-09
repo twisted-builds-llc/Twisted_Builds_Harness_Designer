@@ -38,7 +38,7 @@ inline LayoutNode node(const QString &id, LayoutNodeType type, const QString &re
 
 inline LayoutSegment segment(const QString &id, const QString &a, const QString &b, double mm)
 {
-    return LayoutSegment{id, a, b, mm, {}, {}, SleevingCoverage::Full, {}};
+    return LayoutSegment{id, a, b, mm, {}, {}, SleevingCoverage::Full, std::nullopt, {}};
 }
 
 /* Test layout (lengths in mm):

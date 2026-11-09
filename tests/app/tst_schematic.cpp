@@ -4,6 +4,7 @@
 #include "SelectionModel.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
+#include "io/HarnessJson.h"
 #include "io/TbhFile.h"
 #include "model/Fragment.h"
 #include "schematic/SchematicScene.h"
@@ -111,6 +112,95 @@ private slots:
         QCoreApplication::setApplicationName(u"tst_schematic"_s);
         QSettings().clear();
         QDir(Autosave::recoveryDirectory()).removeRecursively(); // no recovery prompt
+    }
+
+    void wireBendsAreRounded()
+    {
+        /* Route (0,0) -> (40,0) -> (40,100) -> (100,100), radius 12.
+           Corner (40,0): legs 40 and 100 -> r = min(12, 20, 50) = 12: line to (28,0),
+           curve via (40,0) to (40,12). Corner (40,100): legs 100 and 60 -> r = 12: line to
+           (40,88), curve via (40,100) to (52,100). Then line to (100,100). */
+        const QPainterPath path = WireItem::roundedPath(
+            {QPointF(0, 0), QPointF(40, 0), QPointF(40, 100), QPointF(100, 100)}, 12);
+        // Qt stores each quadratic curve as a cubic: 3 elements (2 controls, then the end).
+        // move, line, curve (3), line, curve (3), line = 10 elements.
+        QCOMPARE(path.elementCount(), 10);
+        QCOMPARE(QPointF(path.elementAt(1)), QPointF(28, 0));
+        QCOMPARE(QPointF(path.elementAt(4)), QPointF(40, 12));
+        QCOMPARE(QPointF(path.elementAt(5)), QPointF(40, 88));
+        QCOMPARE(QPointF(path.elementAt(8)), QPointF(52, 100));
+        QCOMPARE(QPointF(path.elementAt(9)), QPointF(100, 100));
+
+        /* A short leg limits the radius: (0,0) -> (10,0) -> (10,6) -> (30,6).
+           Corner (10,0): legs 10 and 6 -> r = min(12, 5, 3) = 3: line to (7,0), to (10,3).
+           Corner (10,6): legs 6 and 20 -> r = min(12, 3, 10) = 3: already at (10,3), so no
+           line, curve to (13,6). Elements: move, line, curve (3), curve (3), line = 9. */
+        const QPainterPath tight =
+            WireItem::roundedPath({QPointF(0, 0), QPointF(10, 0), QPointF(10, 6), QPointF(30, 6)}, 12);
+        QCOMPARE(tight.elementCount(), 9);
+        QCOMPARE(QPointF(tight.elementAt(1)), QPointF(7, 0));
+        QCOMPARE(QPointF(tight.elementAt(4)), QPointF(10, 3));
+        QCOMPARE(QPointF(tight.elementAt(7)), QPointF(13, 6));
+        QCOMPARE(QPointF(tight.elementAt(8)), QPointF(30, 6));
+
+        // Repeated and collinear points add no corner: a straight wire stays a line.
+        const QPainterPath straight =
+            WireItem::roundedPath({QPointF(0, 0), QPointF(0, 0), QPointF(50, 0), QPointF(100, 0)}, 12);
+        QCOMPARE(straight.elementCount(), 3); // move, line to (50,0), line to (100,0)
+        QCOMPARE(QPointF(straight.elementAt(2)), QPointF(100, 0));
+    }
+
+    void schematicNotes()
+    {
+        Fixture f;
+        f.reset(ecuHarness(4, 1, 4));
+        HarnessModel *model = f.model();
+        auto editor = [&f]() -> QLineEdit * {
+            for (auto *e : f.view.viewport()->findChildren<QLineEdit *>()) {
+                if (e->isVisible())
+                    return e;
+            }
+            return nullptr;
+        };
+
+        f.view.addNote();
+        QTest::keyClicks(editor(), u"Check pinout"_s);
+        QTest::keyClick(editor(), Qt::Key_Return);
+        QCOMPARE(model->harness().notes.size(), size_t(1));
+        const Note note = model->harness().notes.front();
+        QCOMPARE(note.canvas, NoteCanvas::Schematic);
+        QVERIFY(f.scene()->noteItem(note.id));
+        QVERIFY(f.selection.selection().notes.contains(note.id));
+
+        // Double-click edits it.
+        f.view.centerOn(note.position);
+        const QPoint at = f.toView(note.position + QPointF(10, 6));
+        QTest::mouseDClick(f.view.viewport(), Qt::LeftButton, {}, at);
+        QVERIFY(editor());
+        editor()->setText(u"Check pinout rev B"_s);
+        QTest::keyClick(editor(), Qt::Key_Return);
+        QCOMPARE(model->find<Note>(note.id)->text, u"Check pinout rev B"_s);
+
+        // Dragging moves it by whole grid steps, as one undo step.
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, at);
+        QTest::mouseMove(f.view.viewport(), at + QPoint(10, 0));
+        QTest::mouseMove(f.view.viewport(), at + QPoint(30, 20));
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, at + QPoint(30, 20));
+        QCOMPARE(model->find<Note>(note.id)->position, note.position + QPointF(30, 20));
+        f.document.undoStack()->undo();
+        QCOMPARE(model->find<Note>(note.id)->position, note.position);
+
+        // Delete removes it with the selection; undo restores it. The layout scene of the
+        // same document ignores schematic notes.
+        Selection s;
+        s.notes.insert(note.id);
+        f.selection.setSelection(s);
+        f.view.deleteSelection();
+        QVERIFY(model->harness().notes.empty());
+        f.document.undoStack()->undo();
+        QCOMPARE(model->harness().notes.size(), size_t(1));
+        QString error;
+        QVERIFY2(io::deserializeHarness(io::serializeHarness(model->harness()), &error), qPrintable(error));
     }
 
     void sceneMirrorsModel()
@@ -389,6 +479,77 @@ private slots:
         QCOMPARE(f.scene()->connectorItem(id)->pos(), QPointF(1000, 500));
         f.document.undoStack()->undo();
         QCOMPARE(f.scene()->connectorItem(id)->pos(), QPointF(600, 0));
+    }
+
+    void draggingWireMovesItsVerticalRun()
+    {
+        Fixture f;
+        Harness h;
+        h.connectors = {makeConnector(u"A"_s, 3), makeConnector(u"B"_s, 3)};
+        h.schematic.placements[h.connectors[0].id] = SchematicPlacement{QPointF(0, 0), false, 0, {}};
+        h.schematic.placements[h.connectors[1].id] = SchematicPlacement{QPointF(600, 0), false, 0, {}};
+        Wire w;
+        w.id = newId();
+        w.endA = PinRef{h.connectors[0].id, h.connectors[0].pins[0].id};
+        w.endB = PinRef{h.connectors[1].id, h.connectors[1].pins[2].id};
+        h.wires.push_back(w);
+        f.reset(h);
+        WireItem *item = f.scene()->wireItem(w.id);
+        QVERIFY(item);
+        /* A's right lead tip: x = 300 + 14 = 314, route stub to 330.
+           B's left lead tip: x = 600 - 14 = 586, route stub to 570.
+           Default run: (330 + 570) / 2 = 450. */
+        QCOMPARE(item->runX(), 450.0);
+
+        // Grab the vertical run halfway between the pin rows and drag it 80 px right.
+        const ConnectorItem *a = f.scene()->connectorItem(h.connectors[0].id);
+        const ConnectorItem *b = f.scene()->connectorItem(h.connectors[1].id);
+        const qreal midY = (a->mapToScene(a->rowRect(0).center()).y() + b->mapToScene(b->rowRect(2).center()).y()) / 2;
+        const QPoint grab = f.toView(QPointF(450, midY));
+        const QPoint drop = f.toView(QPointF(530, midY));
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, grab);
+        QTest::mouseMove(f.view.viewport(), grab + QPoint(10, 0));
+        QTest::mouseMove(f.view.viewport(), drop);
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, drop);
+
+        // 450 + 80 = 530; snapped to the 10 px grid it stays 530.
+        const SchematicPlacement *route = f.model()->placement(w.id);
+        QVERIFY(route);
+        QCOMPARE(route->position.x(), 530.0);
+        QCOMPARE(item->runX(), 530.0);
+        QVERIFY(f.selection.selection().wires.contains(w.id));
+
+        // The run stays where it was put when a connector moves.
+        SchematicPlacement moved = *f.model()->placement(h.connectors[1].id);
+        moved.position = QPointF(700, 0);
+        f.document.undoStack()->push(new SetPlacementsCommand(f.model(), {{h.connectors[1].id, moved}}, u"Move"_s));
+        QCOMPARE(item->runX(), 530.0);
+        f.document.undoStack()->undo();
+
+        // Undo goes back to the automatic run.
+        f.document.undoStack()->undo();
+        QVERIFY(!f.model()->placement(w.id));
+        QCOMPARE(item->runX(), 450.0);
+        f.document.undoStack()->redo();
+        QCOMPARE(item->runX(), 530.0);
+
+        // Deleting the wire drops its route; undo brings both back. The file still loads.
+        f.document.undoStack()->push(removeItems(f.model(), {}, {}, {w.id}).release());
+        QVERIFY(!f.model()->placement(w.id));
+        f.document.undoStack()->undo();
+        QCOMPARE(f.model()->placement(w.id)->position.x(), 530.0);
+        QCOMPARE(f.scene()->wireItem(w.id)->runX(), 530.0);
+        QString error;
+        const auto loaded = io::deserializeHarness(io::serializeHarness(f.model()->harness()), &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->schematic.placements.at(w.id).position.x(), 530.0);
+
+        // Copy/paste carries the route to the new wire id.
+        Harness fragment = extractFragment(f.model()->harness(), {h.connectors[0].id, h.connectors[1].id}, {});
+        QCOMPARE(fragment.schematic.placements.at(w.id).position.x(), 530.0);
+        assignNewIds(fragment);
+        QVERIFY(!fragment.schematic.placements.contains(w.id));
+        QCOMPARE(fragment.schematic.placements.at(fragment.wires[0].id).position.x(), 530.0);
     }
 
     // M2 acceptance: a 300-pin ECU wired to smaller connectors with striped wires

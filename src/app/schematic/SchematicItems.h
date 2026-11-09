@@ -10,6 +10,8 @@
 #include <QPainterPath>
 #include <QSet>
 
+#include <optional>
+
 namespace tbh::app {
 
 enum ItemType {
@@ -172,12 +174,15 @@ private:
     FreeEnd m_end;
 };
 
-// A wire drawn as an orthogonal route between two anchors. Striped wires get a dashed
-// stripe-color pen over the base-color pen.
+// A wire drawn as an orthogonal route between two anchors: out of each end, then along one
+// vertical run. The run sits halfway between the ends unless the user dragged it
+// (the wire's schematic placement). Striped wires get a dashed stripe-color pen over the
+// base-color pen.
 class WireItem : public QGraphicsItem
 {
 public:
     static constexpr qreal kPenWidth = 3;
+    static constexpr qreal kCornerRadius = 12; // wire bends are rounded, not sharp
 
     explicit WireItem(const Wire &wire);
 
@@ -185,10 +190,19 @@ public:
     const Wire &wire() const { return m_wire; }
     QString id() const { return m_wire.id; }
     void setWire(const Wire &wire);
-    void setRoute(const Anchor &a, const Anchor &b);
+    // `runX`: scene x of the vertical run; empty = halfway between the ends.
+    void setRoute(const Anchor &a, const Anchor &b, std::optional<qreal> runX = {});
+    // Moves the vertical run, keeping the anchors (live preview while dragging).
+    void setRunX(qreal x);
+    // Scene x of the vertical run as drawn.
+    qreal runX() const;
 
-    // Orthogonal route between anchors; also used for the rubber-band wire while drawing.
-    static QPainterPath routePath(const Anchor &a, const Anchor &b);
+    // Orthogonal route between anchors with rounded bends; also used for the rubber-band
+    // wire while drawing.
+    static QPainterPath routePath(const Anchor &a, const Anchor &b, std::optional<qreal> runX = {});
+    // Polyline through `points` with each bend rounded off by up to `radius` (less where a
+    // leg is shorter than twice the radius).
+    static QPainterPath roundedPath(const std::vector<QPointF> &points, qreal radius);
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
@@ -196,6 +210,9 @@ public:
 
 private:
     Wire m_wire;
+    Anchor m_a;
+    Anchor m_b;
+    std::optional<qreal> m_runX;
     QPainterPath m_path;
     QPainterPath m_shape;
 };

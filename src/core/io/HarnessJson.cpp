@@ -367,8 +367,24 @@ LayoutSegment readLayoutSegment(ObjectReader r)
     s.label = r.string("label");
     s.sleevingId = r.string("sleevingId");
     s.sleevingCoverage = r.enumValue("sleevingCoverage", kSleevingCoverages, SleevingCoverage::Full);
+    if (const QJsonObject bend = r.object("bend"); !bend.isEmpty()) {
+        ObjectReader b(bend, r.context() + QStringLiteral(".bend"));
+        s.bend = QPointF(b.number("x", 0.0, true), b.number("y", 0.0, true));
+    }
     s.extra = r.extra();
     return s;
+}
+
+Note readNote(ObjectReader r, NoteCanvas canvas)
+{
+    Note n;
+    n.id = r.id();
+    n.canvas = canvas;
+    n.text = r.string("text");
+    ObjectReader pos(r.object("position"), r.context() + QStringLiteral(".position"));
+    n.position = QPointF(pos.number("x", 0.0), pos.number("y", 0.0));
+    n.extra = r.extra();
+    return n;
 }
 
 Settings readSettings(ObjectReader r)
@@ -438,6 +454,7 @@ void checkIntegrity(const Harness &h)
     const QSet<QString> splices = uniqueIds(h.splices, Tr::tr("splice"));
     const QSet<QString> nodes = uniqueIds(h.layoutNodes, Tr::tr("layout node"));
     const QSet<QString> segments = uniqueIds(h.layoutSegments, Tr::tr("layout segment"));
+    uniqueIds(h.notes, Tr::tr("note"));
     uniqueIds(h.wires, Tr::tr("wire"));
     uniqueIds(h.bomExtras, Tr::tr("BOM row"));
 
@@ -608,6 +625,17 @@ QJsonObject writeLayoutSegment(const LayoutSegment &s)
     o[u"label"] = s.label;
     o[u"sleevingId"] = s.sleevingId;
     o[u"sleevingCoverage"] = enumToString(kSleevingCoverages, s.sleevingCoverage);
+    if (s.bend)
+        o[u"bend"] = QJsonObject{{u"x"_s, s.bend->x()}, {u"y"_s, s.bend->y()}};
+    return o;
+}
+
+QJsonObject writeNote(const Note &n)
+{
+    QJsonObject o = n.extra;
+    o[u"id"] = n.id;
+    o[u"text"] = n.text;
+    o[u"position"] = QJsonObject{{u"x"_s, n.position.x()}, {u"y"_s, n.position.y()}};
     return o;
 }
 
@@ -627,7 +655,7 @@ QJsonObject writeSettings(const Settings &s)
     return o;
 }
 
-QJsonObject writeSchematic(const Schematic &schematic)
+QJsonObject writeSchematic(const Schematic &schematic, const QJsonArray &notes)
 {
     QJsonObject o = schematic.extra;
     QJsonObject placements;
@@ -640,6 +668,7 @@ QJsonObject writeSchematic(const Schematic &schematic)
         placements[key] = po;
     }
     o[u"placements"] = placements;
+    o[u"notes"] = notes;
     return o;
 }
 
@@ -765,6 +794,7 @@ void dropOrphanPlacements(Harness &h)
     for (const Splice &s : h.splices)
         keys.insert(s.id);
     for (const Wire &w : h.wires) {
+        keys.insert(w.id); // the wire's route (x of its vertical run)
         if (std::holds_alternative<FreeEnd>(w.endA))
             keys.insert(freeEndPlacementKey(w.id, false));
         if (std::holds_alternative<FreeEnd>(w.endB))
@@ -818,11 +848,16 @@ ZipEntries serializeHarness(const Harness &h)
     QJsonArray segments;
     for (const LayoutSegment &s : h.layoutSegments)
         segments.append(writeLayoutSegment(s));
+    // Each canvas file holds its own notes.
+    QJsonArray layoutNotes;
+    QJsonArray schematicNotes;
+    for (const Note &n : h.notes)
+        (n.canvas == NoteCanvas::Layout ? layoutNotes : schematicNotes).append(writeNote(n));
     entries[QString(kLayoutEntry)] =
-        QJsonDocument(QJsonObject{{u"nodes"_s, nodes}, {u"segments"_s, segments}})
+        QJsonDocument(QJsonObject{{u"nodes"_s, nodes}, {u"segments"_s, segments}, {u"notes"_s, layoutNotes}})
             .toJson(QJsonDocument::Indented);
     entries[QString(kSchematicEntry)] =
-        QJsonDocument(writeSchematic(h.schematic)).toJson(QJsonDocument::Indented);
+        QJsonDocument(writeSchematic(h.schematic, schematicNotes)).toJson(QJsonDocument::Indented);
     entries[QString(kLibraryEntry)] = serializeLibrary(h.library);
     QJsonArray extras;
     for (const BomExtra &e : h.bomExtras) {
@@ -879,6 +914,8 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
             h.layoutSegments = readArray<LayoutSegment>(layout.array("segments"),
                                                         QStringLiteral("layout.segments"),
                                                         readLayoutSegment);
+            h.notes = readArray<Note>(layout.array("notes"), QStringLiteral("layout.notes"),
+                                      [](ObjectReader r) { return readNote(std::move(r), NoteCanvas::Layout); });
             // Unknown top-level keys in layout.json are not preserved in v1.
         }
 
@@ -886,7 +923,12 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         if (!schematicDoc.isNull()) {
             if (!schematicDoc.isObject())
                 fail(Tr::tr("\"%1\" must contain a JSON object.").arg(kSchematicEntry));
-            h.schematic = readSchematic(ObjectReader(schematicDoc.object(), QStringLiteral("schematic")));
+            ObjectReader schematic(schematicDoc.object(), QStringLiteral("schematic"));
+            const std::vector<Note> notes =
+                readArray<Note>(schematic.array("notes"), QStringLiteral("schematic.notes"),
+                                [](ObjectReader r) { return readNote(std::move(r), NoteCanvas::Schematic); });
+            h.notes.insert(h.notes.end(), notes.begin(), notes.end());
+            h.schematic = readSchematic(std::move(schematic));
         }
 
         const QJsonDocument libraryDoc = parseEntry(entries, kLibraryEntry, false);

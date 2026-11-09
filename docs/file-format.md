@@ -17,7 +17,7 @@ Saving is atomic: the file is written to a temporary file next to the target, th
 | `connectors.json` | Array of connectors (with pins). Optional, default `[]`.    |
 | `wires.json`      | Array of wires. Optional, default `[]`.                     |
 | `splices.json`    | Array of splices. Optional, default `[]`.                   |
-| `layout.json`     | Layout graph: `{ "nodes": [...], "segments": [...] }`.      |
+| `layout.json`     | Layout: `{ "nodes": [...], "segments": [...], "notes": [...] }`. |
 | `schematic.json`  | Schematic placements (positions, collapse, visible rows).   |
 | `library.json`    | Parts library entries this harness uses (embedded on save). |
 | `bom.json`        | BOM rows added by hand (the rest of the BOM is generated).  |
@@ -162,8 +162,11 @@ Loading fails with a message if:
   "segments": [
     {
       "id": "seg1", "label": "", "lengthMm": 250, "nodeA": "n1", "nodeB": "n2",
-      "sleevingCoverage": "full", "sleevingId": ""
+      "sleevingCoverage": "full", "sleevingId": "", "bend": { "x": 0.5, "y": 0.25 }
     }
+  ],
+  "notes": [
+    { "id": "note1", "position": { "x": -40, "y": 120 }, "text": "Signal is blue, not yellow" }
   ]
 }
 ```
@@ -176,6 +179,16 @@ Loading fails with a message if:
 - `position` is for drawing only. `lengthMm` is the entered branch length and is
   authoritative.
 - `sleevingCoverage`: only `full` in schema 1.
+- `bend` (optional, drawing only): the segment is drawn as a quadratic Bezier curve whose
+  control point is `A + x * (B - A) + y * n`, where A and B are the positions of `nodeA`
+  and `nodeB` and `n = (-(B - A).y, (B - A).x)` (B - A turned 90 degrees). Being relative
+  to the ends, the curve follows when the nodes move. Absent = straight. `{ "x": 0.5,
+  "y": 0 }` is also straight. It does not affect `lengthMm`.
+- `notes` (optional): free text on the layout canvas: `{ "id", "text", "position" }`.
+  `position` is the top left of the text; drawing only. Note ids are unique across
+  `layout.json` and `schematic.json`.
+- `bend` and `notes` (here and in `schematic.json`) were added without a `schemaVersion`
+  change: files without them load as before.
 
 ## `schematic.json`
 
@@ -186,13 +199,20 @@ Presentation only: where items sit on the schematic canvas.
   "placements": {
     "c-ecu":   { "collapsed": false, "maxVisibleRows": 40, "x": 0, "y": 0 },
     "sp1":     { "collapsed": false, "maxVisibleRows": 0, "x": 420, "y": 160 },
-    "w3/b":    { "collapsed": false, "maxVisibleRows": 0, "x": 700, "y": 80 }
+    "w3/b":    { "collapsed": false, "maxVisibleRows": 0, "x": 700, "y": 80 },
+    "w4":      { "collapsed": false, "maxVisibleRows": 0, "x": 520, "y": 0 }
   }
 }
 ```
 
 - Keys are connector or splice ids, or `<wireId>/a` / `<wireId>/b` for a wire's free end.
+- A key that is a wire id holds a dragged wire route: `x` is the scene x of the wire's
+  vertical run (`y`, `collapsed` and `maxVisibleRows` are unused). Wires without one route
+  their vertical run halfway between the ends. Older versions drop these entries on load,
+  so the file stays readable; no `schemaVersion` change.
 - `maxVisibleRows`: connector rows shown before the box scrolls; `0` shows all rows.
+- `notes` (optional): free text on the schematic canvas, same shape as the layout notes:
+  `[ { "id": "note2", "position": { "x": 500, "y": -80 }, "text": "Check ECU pinout" } ]`.
 - Items without a placement are laid out automatically when the file is opened.
 - Placements whose item no longer exists are dropped on load.
 

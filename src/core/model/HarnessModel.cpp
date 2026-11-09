@@ -19,6 +19,10 @@ std::vector<LayoutNode> &HarnessModel::items<LayoutNode>() { return m_harness.la
 template<>
 std::vector<LayoutSegment> &HarnessModel::items<LayoutSegment>() { return m_harness.layoutSegments; }
 template<>
+std::vector<Note> &HarnessModel::items<Note>() { return m_harness.notes; }
+template<>
+const std::vector<Note> &HarnessModel::items<Note>() const { return m_harness.notes; }
+template<>
 std::vector<BomExtra> &HarnessModel::items<BomExtra>() { return m_harness.bomExtras; }
 template<>
 const std::vector<BomExtra> &HarnessModel::items<BomExtra>() const { return m_harness.bomExtras; }
@@ -127,12 +131,13 @@ std::vector<QString> HarnessModel::placementKeys(EntityKind kind, const QString 
 {
     switch (kind) {
     case EntityKind::Wire:
-        return {freeEndPlacementKey(id, false), freeEndPlacementKey(id, true)};
+        return {id, freeEndPlacementKey(id, false), freeEndPlacementKey(id, true)};
     case EntityKind::Connector:
     case EntityKind::Splice:
         return {id};
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
+    case EntityKind::Note:
     case EntityKind::BomExtra:
         return {};
     }
@@ -173,6 +178,7 @@ TBH_INSTANTIATE(Wire)
 TBH_INSTANTIATE(Splice)
 TBH_INSTANTIATE(LayoutNode)
 TBH_INSTANTIATE(LayoutSegment)
+TBH_INSTANTIATE(Note)
 TBH_INSTANTIATE(BomExtra)
 #undef TBH_INSTANTIATE
 

@@ -564,28 +564,75 @@ void WireItem::setWire(const Wire &wire)
     update();
 }
 
-QPainterPath WireItem::routePath(const Anchor &a, const Anchor &b)
+namespace {
+
+constexpr qreal kRouteStub = 16; // straight run out of each anchor before the route turns
+
+QPointF stubEnd(const Anchor &anchor)
 {
-    constexpr qreal stub = 16;
-    const QPointF pa = a.point + QPointF(a.direction * stub, 0);
-    const QPointF pb = b.point + QPointF(b.direction * stub, 0);
-    const qreal midX = (pa.x() + pb.x()) / 2;
-    QPainterPath path(a.point);
-    path.lineTo(pa);
-    path.lineTo(midX, pa.y());
-    path.lineTo(midX, pb.y());
-    path.lineTo(pb);
-    path.lineTo(b.point);
+    return anchor.point + QPointF(anchor.direction * kRouteStub, 0);
+}
+
+} // namespace
+
+QPainterPath WireItem::roundedPath(const std::vector<QPointF> &points, qreal radius)
+{
+    // Drop repeated points: a zero-length leg has no direction to round from.
+    std::vector<QPointF> p;
+    for (const QPointF &point : points) {
+        if (p.empty() || QLineF(p.back(), point).length() > 1e-6)
+            p.push_back(point);
+    }
+    QPainterPath path(p.empty() ? QPointF() : p.front());
+    for (size_t i = 1; i + 1 < p.size(); ++i) {
+        const QLineF in(p[i - 1], p[i]);
+        const QLineF out(p[i], p[i + 1]);
+        const QPointF dirIn = (p[i] - p[i - 1]) / in.length();
+        const QPointF dirOut = (p[i + 1] - p[i]) / out.length();
+        const qreal cross = dirIn.x() * dirOut.y() - dirIn.y() * dirOut.x();
+        if (std::abs(cross) < 1e-6) { // straight on: no corner
+            path.lineTo(p[i]);
+            continue;
+        }
+        // Never use more than half of either leg, so neighboring corners do not overlap.
+        const qreal r = std::min({radius, in.length() / 2, out.length() / 2});
+        if (QLineF(path.currentPosition(), p[i] - dirIn * r).length() > 1e-6)
+            path.lineTo(p[i] - dirIn * r);
+        path.quadTo(p[i], p[i] + dirOut * r);
+    }
+    if (p.size() > 1)
+        path.lineTo(p.back());
     return path;
 }
 
-void WireItem::setRoute(const Anchor &a, const Anchor &b)
+QPainterPath WireItem::routePath(const Anchor &a, const Anchor &b, std::optional<qreal> runX)
 {
+    const QPointF pa = stubEnd(a);
+    const QPointF pb = stubEnd(b);
+    const qreal midX = runX.value_or((pa.x() + pb.x()) / 2);
+    return roundedPath({a.point, pa, QPointF(midX, pa.y()), QPointF(midX, pb.y()), pb, b.point}, kCornerRadius);
+}
+
+void WireItem::setRoute(const Anchor &a, const Anchor &b, std::optional<qreal> runX)
+{
+    m_a = a;
+    m_b = b;
+    m_runX = runX;
     prepareGeometryChange();
-    m_path = routePath(a, b);
+    m_path = routePath(a, b, runX);
     QPainterPathStroker stroker;
     stroker.setWidth(10);
     m_shape = stroker.createStroke(m_path);
+}
+
+void WireItem::setRunX(qreal x)
+{
+    setRoute(m_a, m_b, x);
+}
+
+qreal WireItem::runX() const
+{
+    return m_runX.value_or((stubEnd(m_a).x() + stubEnd(m_b).x()) / 2);
 }
 
 QRectF WireItem::boundingRect() const

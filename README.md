@@ -52,7 +52,7 @@ Branch lengths are what you type, not what you draw: the drawing does not need t
 |---|---|
 | See everything connected to something | Select a connector, pin, wire, splice, branch point or segment: related items in both editors stay bright and the rest dims. **Esc** or clicking empty space clears it. Toggle with **View > Highlight Related Items** |
 | Highlight a single pin | Click its row in the connector box |
-| Bundle diameter | Shown on each layout segment and in its properties (`~` means some wire sizes are estimated) |
+| Bundle diameter | In each layout segment's tooltip and properties; **View > Show Bundle Diameters** also shows it on the segment (`~` means some wire sizes are estimated) |
 | Pick sleeving | Select a segment: choose a sleeving type and size, or use the recommended size |
 | Wire types and sleeving sizes | **Edit > Parts Library** |
 

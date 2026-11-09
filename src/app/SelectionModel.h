@@ -15,12 +15,13 @@ struct Selection {
     QSet<QString> wires; // selecting a wire's free end selects the wire
     QSet<QString> layoutNodes;
     QSet<QString> layoutSegments;
+    QSet<QString> notes;
     QSet<QString> bomExtras;
 
     bool isEmpty() const
     {
         return connectors.isEmpty() && splices.isEmpty() && wires.isEmpty() && layoutNodes.isEmpty()
-               && layoutSegments.isEmpty() && bomExtras.isEmpty();
+               && layoutSegments.isEmpty() && notes.isEmpty() && bomExtras.isEmpty();
     }
     QSet<QString> &ids(EntityKind kind)
     {
@@ -35,6 +36,8 @@ struct Selection {
             return layoutNodes;
         case EntityKind::LayoutSegment:
             return layoutSegments;
+        case EntityKind::Note:
+            return notes;
         case EntityKind::BomExtra:
             return bomExtras;
         }

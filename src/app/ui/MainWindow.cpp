@@ -297,9 +297,13 @@ void MainWindow::createMenus()
     QAction *addBranch = toolAction(layout, nullptr, tr("Add Branch Point"), QKeySequence(Qt::Key_B),
                                     tr("Add a branch point (B)"), [layout] { layout->addBranchPoint(); });
     place->addSection(tr("Schematic"));
-    place->addActions({addConnector, addSplice, selectTool, wireTool});
+    QAction *addSchematicNote = toolAction(view, nullptr, tr("Add Note"), QKeySequence(Qt::Key_N),
+                                           tr("Add a text note to the schematic (N)"), [view] { view->addNote(); });
+    place->addActions({addConnector, addSplice, addSchematicNote, selectTool, wireTool});
     place->addSection(tr("Layout"));
-    place->addActions({addBranch, layoutSelect, segmentTool});
+    QAction *addNote = toolAction(layout, nullptr, tr("Add Note"), QKeySequence(Qt::Key_N),
+                                  tr("Add a text note to the layout (N)"), [layout] { layout->addNote(); });
+    place->addActions({addBranch, addNote, layoutSelect, segmentTool});
 
     QMenu *arrange = menuBar()->addMenu(tr("&Arrange"));
     const std::pair<QString, Qt::Alignment> alignments[] = {
@@ -337,7 +341,7 @@ void MainWindow::createMenus()
     });
     QAction *diameters = m_viewMenu->addAction(tr("Show &Bundle Diameters"));
     diameters->setCheckable(true);
-    diameters->setChecked(QSettings().value(QStringLiteral("view/bundleDiameters"), true).toBool());
+    diameters->setChecked(QSettings().value(QStringLiteral("view/bundleDiameters"), false).toBool());
     m_layout->view()->layoutScene()->setShowBundleDiameters(diameters->isChecked());
     connect(diameters, &QAction::toggled, this, [this](bool on) {
         QSettings().setValue(QStringLiteral("view/bundleDiameters"), on);
@@ -464,7 +468,8 @@ void MainWindow::showSelectionStatus()
     } else if (!s.isEmpty()) {
         statusBar()->showMessage(tr("%n item(s) selected", nullptr,
                                     int(s.wires.size() + s.connectors.size() + s.splices.size()
-                                        + s.layoutNodes.size() + s.layoutSegments.size())));
+                                        + s.layoutNodes.size() + s.layoutSegments.size()
+                                        + s.notes.size())));
     } else {
         statusBar()->clearMessage();
     }
