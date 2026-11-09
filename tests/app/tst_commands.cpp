@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Document.h"
 #include "Preferences.h"
-#include "commands/SetHarnessInfoCommand.h"
+#include "commands/HarnessCommands.h"
 
 #include <QSettings>
 #include <QSignalSpy>

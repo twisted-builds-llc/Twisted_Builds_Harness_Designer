@@ -20,4 +20,17 @@ QString describeWireEnd(const Harness &harness, const WireEnd &end);
 // e.g. "5V REF (ECU-A : A1 - SENSOR : +)".
 QString describeWire(const Harness &harness, const Wire &wire);
 
+// Something a layout node can stand for: a connector, a splice or a wire's free end.
+struct LayoutRef
+{
+    QString refId; // LayoutNode::refId value
+    LayoutNodeType nodeType;
+    QString label;
+};
+
+// All connectors, splices and wire free ends, in model order.
+std::vector<LayoutRef> layoutRefs(const Harness &harness);
+// Label for whatever a layout node references ("" for none or branch points).
+QString layoutRefLabel(const Harness &harness, const QString &refId);
+
 } // namespace tbh

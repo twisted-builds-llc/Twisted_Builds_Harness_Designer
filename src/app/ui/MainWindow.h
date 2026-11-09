@@ -6,12 +6,15 @@
 #include <QMainWindow>
 
 class QLineEdit;
+class QTabWidget;
 class QMenu;
 class QTreeWidget;
 
 namespace tbh::app {
 
+class CanvasView;
 class Document;
+class LayoutEditor;
 class SchematicView;
 class SelectionModel;
 
@@ -46,11 +49,15 @@ private:
     void updateTitle();
     void showAbout();
     void showSelectionStatus();
+    bool layoutTabActive() const;
+    CanvasView *currentCanvas() const;
 
     Theme *m_theme;
     Document *m_document;
     SelectionModel *m_selection;
     SchematicView *m_schematic = nullptr;
+    LayoutEditor *m_layout = nullptr;
+    QTabWidget *m_tabs = nullptr;
     QLineEdit *m_find = nullptr;
     QMenu *m_recentMenu = nullptr;
     QMenu *m_viewMenu = nullptr;

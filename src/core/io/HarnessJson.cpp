@@ -453,13 +453,37 @@ void checkIntegrity(const Harness &h)
                 fail(tr("Wire \"%1\" routes through missing segment \"%2\".").arg(w.id, segmentId));
         }
     }
+    QSet<QString> freeEnds;
+    for (const Wire &w : h.wires) {
+        if (std::holds_alternative<FreeEnd>(w.endA))
+            freeEnds.insert(freeEndPlacementKey(w.id, false));
+        if (std::holds_alternative<FreeEnd>(w.endB))
+            freeEnds.insert(freeEndPlacementKey(w.id, true));
+    }
+    QSet<QString> referenced;
     for (const LayoutNode &n : h.layoutNodes) {
         if (n.refId.isEmpty())
             continue;
-        const bool ok = (n.type == LayoutNodeType::Connector && pinsByConnector.count(n.refId))
-                        || (n.type == LayoutNodeType::Splice && splices.contains(n.refId));
+        bool ok = false;
+        switch (n.type) {
+        case LayoutNodeType::Connector:
+            ok = pinsByConnector.count(n.refId) > 0;
+            break;
+        case LayoutNodeType::Splice:
+            ok = splices.contains(n.refId);
+            break;
+        case LayoutNodeType::FlyingLead:
+        case LayoutNodeType::Eyelet:
+            ok = freeEnds.contains(n.refId);
+            break;
+        case LayoutNodeType::Branch:
+            break;
+        }
         if (!ok)
             fail(tr("Layout node \"%1\" references missing item \"%2\".").arg(n.id, n.refId));
+        if (referenced.contains(n.refId))
+            fail(tr("More than one layout node references \"%1\".").arg(n.refId));
+        referenced.insert(n.refId);
     }
     for (const LayoutSegment &s : h.layoutSegments) {
         if (!nodes.contains(s.nodeA) || !nodes.contains(s.nodeB))
