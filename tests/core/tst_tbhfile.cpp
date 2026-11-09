@@ -90,7 +90,10 @@ Harness sampleHarness()
         LayoutSegment{u"seg3"_s, u"n2"_s, u"n4"_s, 75.0, {}, {}, SleevingCoverage::Full, {}},
     };
 
-    h.otherEntries[u"schematic.json"_s] = QByteArrayLiteral("{\"future\": true}\n");
+    h.otherEntries[u"bom.json"_s] = QByteArrayLiteral("{\"future\": true}\n");
+    h.schematic.placements[u"c-ecu"_s] = SchematicPlacement{QPointF(10, 20), false, 40, {}};
+    h.schematic.placements[u"sp1"_s] = SchematicPlacement{QPointF(-5.5, 7), true, 0, {}};
+    h.schematic.placements[freeEndPlacementKey(u"w3"_s, true)] = SchematicPlacement{QPointF(400, 0), false, 0, {}};
     return h;
 }
 
@@ -164,6 +167,7 @@ private slots:
         QVERIFY(loaded->layoutNodes == original.layoutNodes);
         QVERIFY(loaded->layoutSegments == original.layoutSegments);
         QVERIFY(loaded->otherEntries == original.otherEntries);
+        QVERIFY(loaded->schematic == original.schematic);
         QVERIFY(*loaded == original);
     }
 
@@ -240,7 +244,7 @@ private slots:
         QVERIFY(resaved.at(u"connectors.json"_s).contains("futureConnectorKey"));
         QVERIFY(resaved.at(u"connectors.json"_s).contains("futurePinKey"));
         QCOMPARE(resaved.at(u"future/thing.bin"_s), QByteArrayLiteral("\x00\x01\x02"));
-        QCOMPARE(resaved.at(u"schematic.json"_s), QByteArrayLiteral("{\"future\": true}\n"));
+        QCOMPARE(resaved.at(u"bom.json"_s), QByteArrayLiteral("{\"future\": true}\n"));
     }
 
     void newerSchemaIsRejected()
@@ -385,6 +389,18 @@ private slots:
                     harness[u"units"] = u"ft"_s;
                     e[u"harness.json"_s] = toBytes(harness);
                 }).contains(u"ft"));
+    }
+
+    void orphanPlacementsAreDropped()
+    {
+        Harness h = sampleHarness();
+        h.schematic.placements[u"gone"_s] = SchematicPlacement{};
+        h.schematic.placements[freeEndPlacementKey(u"w1"_s, false)] = SchematicPlacement{}; // pin end
+        const QString file = path(u"orphans.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        const auto loaded = io::readTbhFile(file, nullptr);
+        QVERIFY(loaded);
+        QVERIFY(loaded->schematic == sampleHarness().schematic);
     }
 
     void saveOverwritesExistingFile()

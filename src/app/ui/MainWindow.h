@@ -5,12 +5,15 @@
 
 #include <QMainWindow>
 
+class QLineEdit;
 class QMenu;
 class QTreeWidget;
 
 namespace tbh::app {
 
 class Document;
+class SchematicView;
+class SelectionModel;
 
 class MainWindow : public QMainWindow
 {
@@ -42,9 +45,13 @@ private:
     void refreshProjectTree();
     void updateTitle();
     void showAbout();
+    void showSelectionStatus();
 
     Theme *m_theme;
     Document *m_document;
+    SelectionModel *m_selection;
+    SchematicView *m_schematic = nullptr;
+    QLineEdit *m_find = nullptr;
     QMenu *m_recentMenu = nullptr;
     QMenu *m_viewMenu = nullptr;
     QTreeWidget *m_projectTree = nullptr;

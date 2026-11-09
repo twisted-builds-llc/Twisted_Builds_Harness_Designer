@@ -18,9 +18,10 @@ Saving is atomic: the file is written to a temporary file next to the target, th
 | `wires.json`      | Array of wires. Optional, default `[]`.                     |
 | `splices.json`    | Array of splices. Optional, default `[]`.                   |
 | `layout.json`     | Layout graph: `{ "nodes": [...], "segments": [...] }`.      |
+| `schematic.json`  | Schematic placements (positions, collapse, visible rows).   |
 
-Any other entry (for example `schematic.json`, `bom.json`, `library.json`, which later
-milestones define) is kept byte-for-byte when the file is re-saved.
+Any other entry (for example `bom.json`, `library.json`, which later milestones define) is
+kept byte-for-byte when the file is re-saved.
 
 ## Conventions
 
@@ -169,6 +170,25 @@ Loading fails with a message if:
 - `position` is for drawing only. `lengthMm` is the entered branch length and is
   authoritative.
 - `sleevingCoverage`: only `full` in schema 1.
+
+## `schematic.json`
+
+Presentation only: where items sit on the schematic canvas.
+
+```json
+{
+  "placements": {
+    "c-ecu":   { "collapsed": false, "maxVisibleRows": 40, "x": 0, "y": 0 },
+    "sp1":     { "collapsed": false, "maxVisibleRows": 0, "x": 420, "y": 160 },
+    "w3/b":    { "collapsed": false, "maxVisibleRows": 0, "x": 700, "y": 80 }
+  }
+}
+```
+
+- Keys are connector or splice ids, or `<wireId>/a` / `<wireId>/b` for a wire's free end.
+- `maxVisibleRows`: connector rows shown before the box scrolls; `0` shows all rows.
+- Items without a placement are laid out automatically when the file is opened.
+- Placements whose item no longer exists are dropped on load.
 
 ## Schema changes
 

@@ -270,7 +270,9 @@ wire, pin, or segment.
   grouping/totals, file round-trip, schema migration, pin label pattern parser (`A1-A8, B1-B8`).
 - Model/command tests: undo/redo round-trips for every command.
 - Performance sanity test: build a 999-pin connector with hundreds of wires and assert scene
-  construction time stays under a documented budget.
+  construction time stays under a documented budget. Budget (debug build, 999-pin connector,
+  500 striped wires): scene construction < 1500 ms, one full-view render < 1000 ms
+  (`tests/app/tst_schematic.cpp`, `largeConnectorPerformance`).
 - From M6: CI runs build + tests on Ubuntu, Windows and macOS on pull requests and on demand
   (not on every push).
 
@@ -356,7 +358,8 @@ multiple harness variants/options in one file, KiCad netlist import for connecto
 
 ## 14. Open questions (resolve during M1-M2, do not block on them)
 
-- Wire routing style on the schematic: orthogonal vs. curved.
+- ~~Wire routing style on the schematic~~ - resolved in M2: **orthogonal** (horizontal stubs
+  out of the pin row, one vertical run).
 - Default end allowances per end type (seed values, user-editable).
 - Sleeving coverage across multiple segments / partial segments (v1: full segment only).
 - Final file extension (`.tbh` is the default).

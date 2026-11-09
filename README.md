@@ -7,8 +7,28 @@ lengths, bundle diameters and a bill of materials.
 **Privacy:** this application makes no network connections. No cloud, no accounts, no telemetry,
 no update checks. Your designs never leave your computer.
 
-> Status: early development (milestone 1 of 6: project skeleton, data model, file I/O).
+> Status: early development (milestone 2 of 6: schematic editor). The layout editor, wire
+> lengths, bundle diameters and BOM come in later milestones.
 > See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for scope and roadmap.
+
+## Using the schematic editor
+
+| Action | How |
+|---|---|
+| Add a connector / splice | **C** / **S** (or the toolbar) |
+| Change pin count | `−` / `+` in the connector header, or click the number and type (1-999) |
+| Fill pin labels in bulk | Properties > **Pin labels...** (e.g. `A1-A8, B1-B8, C1-C12`) |
+| Edit a pin label or circuit | Double-click it; **Enter** moves down, **Tab** moves across |
+| Draw a wire | Drag from a pin row to another pin or a splice; drop on empty space for a flying lead |
+| Wire from a splice | Wire tool (**W**), then drag from the splice |
+| Move items | Drag a connector by its header |
+| Color, stripe, gauge | Properties panel; select several wires to change them together |
+| Large connectors | Collapse with the header arrow, or set **Visible rows** to make the box scroll |
+| Rename | **F2** or double-click a title |
+| Find a pin or circuit | **Ctrl+F**, type, **Enter** for the next match |
+| Pan / zoom | Middle-drag / mouse wheel (**Ctrl+wheel** over a scrolling connector), **Ctrl+0** fits |
+| Copy, paste, duplicate, delete | **Ctrl+C**, **Ctrl+V**, **Ctrl+D**, **Delete** |
+| Align / distribute | **Arrange** menu |
 
 ## Building from source
 

@@ -10,4 +10,7 @@ endfunction()
 
 tbh_add_test(tst_tbhfile SOURCES core/tst_tbhfile.cpp LIBS tbh_core)
 tbh_add_test(tst_harnessmodel SOURCES core/tst_harnessmodel.cpp LIBS tbh_core)
+tbh_add_test(tst_pinlabels SOURCES core/tst_pinlabels.cpp LIBS tbh_core)
+tbh_add_test(tst_modelops SOURCES core/tst_modelops.cpp LIBS tbh_core)
 tbh_add_test(tst_commands SOURCES app/tst_commands.cpp LIBS tbh_app_lib)
+tbh_add_test(tst_schematic SOURCES app/tst_schematic.cpp LIBS tbh_app_lib)

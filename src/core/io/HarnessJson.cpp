@@ -595,6 +595,59 @@ QJsonObject writeSettings(const Settings &s)
     return o;
 }
 
+QJsonObject writeSchematic(const Schematic &schematic)
+{
+    QJsonObject o = schematic.extra;
+    QJsonObject placements;
+    for (const auto &[key, p] : schematic.placements) {
+        QJsonObject po = p.extra;
+        po[u"x"] = p.position.x();
+        po[u"y"] = p.position.y();
+        po[u"collapsed"] = p.collapsed;
+        po[u"maxVisibleRows"] = p.maxVisibleRows;
+        placements[key] = po;
+    }
+    o[u"placements"] = placements;
+    return o;
+}
+
+Schematic readSchematic(ObjectReader r)
+{
+    Schematic schematic;
+    const QJsonObject placements = r.object("placements");
+    for (auto it = placements.begin(); it != placements.end(); ++it) {
+        const QString context = QStringLiteral("schematic.placements.%1").arg(it.key());
+        ObjectReader pr(requireObject(it.value(), context), context);
+        SchematicPlacement p;
+        p.position = QPointF(pr.number("x", 0.0), pr.number("y", 0.0));
+        p.collapsed = pr.boolean("collapsed", false);
+        p.maxVisibleRows = int(pr.number("maxVisibleRows", 0));
+        if (p.maxVisibleRows < 0)
+            fail(tr("%1: \"maxVisibleRows\" must not be negative.").arg(context));
+        p.extra = pr.extra();
+        schematic.placements[it.key()] = p;
+    }
+    schematic.extra = r.extra();
+    return schematic;
+}
+
+// Placements whose item no longer exists carry no information; drop them.
+void dropOrphanPlacements(Harness &h)
+{
+    QSet<QString> keys;
+    for (const Connector &c : h.connectors)
+        keys.insert(c.id);
+    for (const Splice &s : h.splices)
+        keys.insert(s.id);
+    for (const Wire &w : h.wires) {
+        if (std::holds_alternative<FreeEnd>(w.endA))
+            keys.insert(freeEndPlacementKey(w.id, false));
+        if (std::holds_alternative<FreeEnd>(w.endB))
+            keys.insert(freeEndPlacementKey(w.id, true));
+    }
+    std::erase_if(h.schematic.placements, [&](const auto &entry) { return !keys.contains(entry.first); });
+}
+
 template<typename T, typename WriteFn>
 QByteArray toJsonArrayBytes(const std::vector<T> &items, WriteFn write)
 {
@@ -607,7 +660,8 @@ QByteArray toJsonArrayBytes(const std::vector<T> &items, WriteFn write)
 bool isKnownEntry(const QString &name)
 {
     return name == kManifestEntry || name == kHarnessEntry || name == kConnectorsEntry
-           || name == kWiresEntry || name == kSplicesEntry || name == kLayoutEntry;
+           || name == kWiresEntry || name == kSplicesEntry || name == kLayoutEntry
+           || name == kSchematicEntry;
 }
 
 } // namespace
@@ -642,6 +696,8 @@ ZipEntries serializeHarness(const Harness &h)
     entries[QString(kLayoutEntry)] =
         QJsonDocument(QJsonObject{{u"nodes"_s, nodes}, {u"segments"_s, segments}})
             .toJson(QJsonDocument::Indented);
+    entries[QString(kSchematicEntry)] =
+        QJsonDocument(writeSchematic(h.schematic)).toJson(QJsonDocument::Indented);
     return entries;
 }
 
@@ -687,12 +743,20 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
             // Unknown top-level keys in layout.json are not preserved in v1.
         }
 
+        const QJsonDocument schematicDoc = parseEntry(entries, kSchematicEntry, false);
+        if (!schematicDoc.isNull()) {
+            if (!schematicDoc.isObject())
+                fail(tr("\"%1\" must contain a JSON object.").arg(kSchematicEntry));
+            h.schematic = readSchematic(ObjectReader(schematicDoc.object(), QStringLiteral("schematic")));
+        }
+
         for (const auto &[name, data] : entries) {
             if (!isKnownEntry(name))
                 h.otherEntries[name] = data;
         }
 
         checkIntegrity(h);
+        dropOrphanPlacements(h);
         return h;
     } catch (const FormatError &e) {
         if (error)
