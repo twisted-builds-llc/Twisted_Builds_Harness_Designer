@@ -29,7 +29,8 @@ be **no network code at all** in the application (no update checks, no analytics
   `// SPDX-License-Identifier: GPL-3.0-or-later` header in every source file.
 - Toolkit: **Qt 6, C++20, CMake, Qt Widgets** (QGraphicsView/QGraphicsScene for the editors).
   Modern look comes from a custom theme (dark + light), not from QML.
-- Version control: GitHub. GitHub Actions for CI on Linux, Windows, macOS.
+- Version control: GitHub. GitHub Actions CI on Linux, Windows, macOS is deferred to M6
+  (added together with the installer/release workflows); until then, test locally.
 - File extension: **`.tbh`** (default; easy to change in one constant - see section 6).
 - Develop in Qt Creator (CMake project). Qt Designer `.ui` files are allowed for dialogs and
   panels; the canvas editors are code.
@@ -270,7 +271,8 @@ wire, pin, or segment.
 - Model/command tests: undo/redo round-trips for every command.
 - Performance sanity test: build a 999-pin connector with hundreds of wires and assert scene
   construction time stays under a documented budget.
-- CI runs build + tests on Ubuntu, Windows and macOS for every push and PR.
+- From M6: CI runs build + tests on Ubuntu, Windows and macOS on pull requests and on demand
+  (not on every push).
 
 ## 11. Build, packaging, release
 
@@ -287,15 +289,15 @@ wire, pin, or segment.
 
 ## 12. Milestones (build in this order)
 
-Each milestone ends with: tests passing in CI, docs updated, a short demo description in the PR.
+Each milestone ends with: tests passing (locally until CI exists in M6), docs updated, a short
+demo description.
 
-**M1 - Skeleton, model, file I/O, CI**
+**M1 - Skeleton, model, file I/O**
 - CMake project, `tbh_core` + `app` split, GPLv3 files, Qt Test wired into CTest, themes stub.
 - Core model (sections 5.1-5.5), JSON (de)serialization, `.tbh` zip save/load with schema version.
 - Main window shell with docks, New/Open/Save/Save As, undo stack plumbing, recent files.
-- GitHub Actions builds on 3 OSes.
 - *Done when:* a model built in code round-trips through a saved `.tbh` file, opens in the app, and
-  CI is green on all platforms.
+  tests pass locally.
 
 **M2 - Connector and schematic editor**
 - Connector box with `[-] N [+]` control (1-999), pin labels, circuit text, pin pattern dialog.
@@ -326,6 +328,7 @@ Each milestone ends with: tests passing in CI, docs updated, a short demo descri
 
 **M6 - Polish and packaging**
 - Themes finalized, shortcuts, autosave/recovery, help, accessibility pass, translations scaffolding.
+- GitHub Actions CI (build + tests on Ubuntu, Windows, macOS; PRs and manual runs only).
 - Release workflow producing AppImage, Windows installer + zip, macOS dmg. v0.1.0 tag.
 
 **Backlog (v2 ideas, not in scope now):** 1:1 scale formboard PDF/SVG export, PDF BOM, connector
