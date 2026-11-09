@@ -333,6 +333,9 @@ demo description.
 
 **M6 - Polish and packaging**
 - Themes finalized, shortcuts, autosave/recovery, help, accessibility pass, translations scaffolding.
+  (Done before packaging: autosave/recovery with per-session lock files, Help dialog with a
+  generated shortcut list, accessible names checked by tests, ] / [ and arrow-key keyboard
+  editing, Qt translation pipeline with English plural forms.)
 - GitHub Actions CI (build + tests on Ubuntu, Windows, macOS; PRs and manual runs only).
 - Release workflow producing AppImage, Windows installer + zip, macOS dmg. v0.1.0 tag.
 

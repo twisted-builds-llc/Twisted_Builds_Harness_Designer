@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "ui/HelpDialog.h"
 #include "ui/theme/Theme.h"
 
 #include <QMainWindow>
@@ -12,6 +13,7 @@ class QTreeWidget;
 
 namespace tbh::app {
 
+class Autosave;
 class BomView;
 class CanvasView;
 class Document;
@@ -52,6 +54,10 @@ private:
     void showAbout();
     void showSelectionStatus();
     void editLibrary();
+    void showHelp(HelpDialog::Page page);
+    // Offers unsaved work from sessions that ended unexpectedly. `quietIfNone` skips the
+    // "nothing to recover" message (used at startup).
+    void offerRecovery(bool quietIfNone);
     bool layoutTabActive() const;
     CanvasView *currentCanvas() const;
 
@@ -62,6 +68,7 @@ private:
     LayoutEditor *m_layout = nullptr;
     BomView *m_bom = nullptr;
     Highlighter *m_highlighter = nullptr;
+    Autosave *m_autosave = nullptr;
     QTabWidget *m_tabs = nullptr;
     QLineEdit *m_find = nullptr;
     QMenu *m_recentMenu = nullptr;

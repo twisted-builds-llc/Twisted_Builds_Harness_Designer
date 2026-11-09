@@ -4,6 +4,7 @@
 #include <QDialog>
 
 class QComboBox;
+class QSpinBox;
 
 namespace tbh::app {
 
@@ -19,6 +20,7 @@ public:
 
 private:
     QComboBox *m_defaultUnits;
+    QSpinBox *m_autosave;
 };
 
 } // namespace tbh::app

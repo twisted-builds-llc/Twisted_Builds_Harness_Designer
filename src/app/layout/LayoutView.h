@@ -48,6 +48,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
+    bool nudgeSelection(const QPointF &delta) override;
 
 private:
     LayoutNodeItem *nodeAt(const QPoint &viewPos) const;

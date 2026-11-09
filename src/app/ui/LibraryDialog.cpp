@@ -100,6 +100,10 @@ LibraryDialog::LibraryDialog(const Library &library, QWidget *parent)
     typeButtons->addWidget(removeType);
     leftLayout->addLayout(typeButtons);
 
+    m_types->setAccessibleName(tr("Wire types"));
+    m_typeName->setAccessibleName(tr("Wire type name"));
+    m_ods->setAccessibleName(tr("Outer diameters by gauge"));
+    m_sleevings->setAccessibleName(tr("Sleeving catalog"));
     m_ods->setHorizontalHeaderLabels({tr("Gauge"), tr("System"), tr("Outer Ø (mm)")});
     m_ods->horizontalHeader()->setStretchLastSection(true);
     m_ods->verticalHeader()->hide();

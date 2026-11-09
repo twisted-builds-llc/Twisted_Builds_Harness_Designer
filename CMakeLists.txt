@@ -11,8 +11,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Qt 6.8 LTS is the minimum supported version (CI pins 6.8.x).
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Test)
-qt_standard_project_setup(REQUIRES 6.8)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Widgets Test LinguistTools)
+# Source strings are English. To add a language, list it in I18N_TRANSLATED_LANGUAGES
+# (e.g. "de fr") and run: cmake --build <build dir> --target update_translations
+# (see translations/README.md).
+qt_standard_project_setup(REQUIRES 6.8 I18N_SOURCE_LANGUAGE en)
 
 # miniz (zip container for .tbh files). Downloaded at configure time only;
 # the application itself never touches the network.

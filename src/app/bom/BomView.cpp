@@ -88,6 +88,11 @@ BomView::BomView(Document *document, QWidget *parent)
     , m_parts(makeTable({tr("Category"), tr("Part number"), tr("Description"), tr("Qty"), tr("Used at")}, this))
     , m_extras(makeTable({tr("Part number"), tr("Description"), tr("Qty"), tr("Unit"), tr("Notes")}, this))
 {
+    m_wires->setAccessibleName(tr("Wire totals"));
+    m_cutList->setAccessibleName(tr("Cut list"));
+    m_sleeving->setAccessibleName(tr("Sleeving totals"));
+    m_parts->setAccessibleName(tr("Parts"));
+    m_extras->setAccessibleName(tr("Other items"));
     m_wires->setObjectName(QStringLiteral("wireTable"));
     m_cutList->setObjectName(QStringLiteral("cutListTable"));
     m_sleeving->setObjectName(QStringLiteral("sleevingTable"));

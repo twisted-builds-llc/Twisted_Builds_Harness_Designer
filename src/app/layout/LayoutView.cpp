@@ -26,6 +26,9 @@ LayoutView::LayoutView(Document *document, SelectionModel *selection, QWidget *p
     , m_scene(new LayoutScene(document->model(), selection, this))
 {
     setScene(m_scene);
+    setAccessibleName(tr("Layout editor"));
+    setAccessibleDescription(tr("Branch points and segments of the physical harness. Press ] or [ to move "
+                                "between items, arrow keys to move points, Delete to delete."));
     centerOn(0, 0);
     connect(document->model(), &HarnessModel::harnessReset, this, [this] {
         closeEditor();
@@ -237,6 +240,21 @@ void LayoutView::commitMoves()
         m_document->undoStack()->push(macro.release());
 }
 
+bool LayoutView::nudgeSelection(const QPointF &delta)
+{
+    m_pressPositions.clear();
+    for (QGraphicsItem *item : m_scene->selectedItems()) {
+        if (item->type() == LayoutNodeItemType)
+            m_pressPositions[static_cast<LayoutNodeItem *>(item)->id()] = item->pos();
+    }
+    if (m_pressPositions.empty())
+        return false;
+    for (const auto &[id, pos] : m_pressPositions)
+        m_scene->nodeItem(id)->setPos(pos + delta);
+    commitMoves();
+    return true;
+}
+
 void LayoutView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
@@ -299,6 +317,7 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(splitter);
 
+    m_unplaced->setAccessibleName(tr("Items not in the layout yet"));
     connect(m_unplaced, &QListWidget::itemActivated, this, &LayoutEditor::placeCurrent);
     connect(place, &QPushButton::clicked, this, &LayoutEditor::placeCurrent);
     connect(branch, &QPushButton::clicked, m_view, &LayoutView::addBranchPoint);

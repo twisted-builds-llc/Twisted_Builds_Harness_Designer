@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/CanvasView.h"
 
+#include <QGraphicsItem>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QVarLengthArray>
@@ -233,6 +234,70 @@ void CanvasView::wheelEvent(QWheelEvent *event)
         return;
     this->scale(factor, factor);
     event->accept();
+}
+
+void CanvasView::selectAdjacentItem(bool next)
+{
+    if (!scene())
+        return;
+    std::vector<QGraphicsItem *> items;
+    for (QGraphicsItem *item : scene()->items()) {
+        if ((item->flags() & QGraphicsItem::ItemIsSelectable) && item->isVisible())
+            items.push_back(item);
+    }
+    if (items.empty())
+        return;
+    // Reading order: top to bottom, then left to right (rows of half a grid square).
+    std::sort(items.begin(), items.end(), [](QGraphicsItem *a, QGraphicsItem *b) {
+        const QPointF pa = a->sceneBoundingRect().topLeft();
+        const QPointF pb = b->sceneBoundingRect().topLeft();
+        const int rowA = int(std::floor(pa.y() / 20));
+        const int rowB = int(std::floor(pb.y() / 20));
+        return rowA != rowB ? rowA < rowB : pa.x() < pb.x();
+    });
+    const QList<QGraphicsItem *> selected = scene()->selectedItems();
+    int index = next ? 0 : int(items.size()) - 1;
+    if (!selected.isEmpty()) {
+        const auto it = std::find(items.begin(), items.end(), selected.first());
+        if (it != items.end()) {
+            const int current = int(it - items.begin());
+            index = (current + (next ? 1 : -1) + int(items.size())) % int(items.size());
+        }
+    }
+    scene()->clearSelection();
+    items[size_t(index)]->setSelected(true);
+    ensureVisible(items[size_t(index)], 60, 60);
+}
+
+void CanvasView::keyPressEvent(QKeyEvent *event)
+{
+    switch (event->key()) {
+    case Qt::Key_BracketRight:
+    case Qt::Key_BracketLeft:
+        selectAdjacentItem(event->key() == Qt::Key_BracketRight);
+        return;
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+    case Qt::Key_Up:
+    case Qt::Key_Down: {
+        const qreal step = kCanvasGrid * ((event->modifiers() & Qt::ShiftModifier) ? 10 : 1);
+        QPointF delta;
+        if (event->key() == Qt::Key_Left)
+            delta.setX(-step);
+        else if (event->key() == Qt::Key_Right)
+            delta.setX(step);
+        else if (event->key() == Qt::Key_Up)
+            delta.setY(-step);
+        else
+            delta.setY(step);
+        if (nudgeSelection(delta))
+            return;
+        break;
+    }
+    default:
+        break;
+    }
+    QGraphicsView::keyPressEvent(event);
 }
 
 void CanvasView::changeEvent(QEvent *event)

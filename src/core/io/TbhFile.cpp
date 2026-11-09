@@ -14,14 +14,17 @@
 
 namespace tbh::io {
 
+namespace {
+// Translation context for this file (picked up by lupdate).
+class Tr
+{
+    Q_DECLARE_TR_FUNCTIONS(tbh::io::TbhFile)
+};
+} // namespace
+
 using namespace Qt::StringLiterals;
 
 namespace {
-
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("tbh::io::TbhFile", text);
-}
 
 void setError(QString *error, const QString &message)
 {
@@ -35,7 +38,7 @@ std::optional<Harness> readTbhFile(const QString &path, QString *error)
 {
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
-        setError(error, tr("Could not open \"%1\": %2").arg(path, file.errorString()));
+        setError(error, Tr::tr("Could not open \"%1\": %2").arg(path, file.errorString()));
         return std::nullopt;
     }
     auto entries = readZip(file.readAll(), error);
@@ -44,13 +47,13 @@ std::optional<Harness> readTbhFile(const QString &path, QString *error)
 
     const auto manifestIt = entries->find(QString(kManifestEntry));
     if (manifestIt == entries->end()) {
-        setError(error, tr("The file has no manifest; it is not a harness file."));
+        setError(error, Tr::tr("The file has no manifest; it is not a harness file."));
         return std::nullopt;
     }
     const QJsonDocument manifestDoc = QJsonDocument::fromJson(manifestIt->second);
     const QJsonValue version = manifestDoc.object().value(u"schemaVersion");
     if (!manifestDoc.isObject() || !version.isDouble()) {
-        setError(error, tr("The file manifest is damaged (no schema version)."));
+        setError(error, Tr::tr("The file manifest is damaged (no schema version)."));
         return std::nullopt;
     }
     if (!migrateToCurrent(version.toInt(), *entries, error))
@@ -84,11 +87,11 @@ bool writeTbhFile(const QString &path, const Harness &harness, QString *error)
 
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly)) {
-        setError(error, tr("Could not write \"%1\": %2").arg(path, file.errorString()));
+        setError(error, Tr::tr("Could not write \"%1\": %2").arg(path, file.errorString()));
         return false;
     }
     if (file.write(*archive) != archive->size() || !file.commit()) {
-        setError(error, tr("Could not write \"%1\": %2").arg(path, file.errorString()));
+        setError(error, Tr::tr("Could not write \"%1\": %2").arg(path, file.errorString()));
         return false;
     }
     return true;

@@ -12,11 +12,14 @@
 namespace tbh::app::libraryStore {
 
 namespace {
-
-QString tr(const char *text)
+// Translation context for this file (picked up by lupdate).
+class Tr
 {
-    return QCoreApplication::translate("tbh::app::LibraryStore", text);
-}
+    Q_DECLARE_TR_FUNCTIONS(tbh::app::LibraryStore)
+};
+} // namespace
+
+namespace {
 
 } // namespace
 
@@ -45,7 +48,7 @@ Library loadUserLibrary(QString *warning)
         return *library;
     }
     if (warning)
-        *warning = tr("Your parts library (%1) could not be read: %2. Using the default library for now; "
+        *warning = Tr::tr("Your parts library (%1) could not be read: %2. Using the default library for now; "
                       "the file was not changed.")
                        .arg(QDir::toNativeSeparators(userLibraryPath()), error);
     return defaultLibrary();
@@ -59,7 +62,7 @@ bool saveUserLibrary(const Library &library, QString *error)
     const QByteArray data = io::serializeLibrary(library);
     if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
         if (error)
-            *error = tr("Could not save the parts library to %1: %2")
+            *error = Tr::tr("Could not save the parts library to %1: %2")
                          .arg(QDir::toNativeSeparators(path), file.errorString());
         return false;
     }

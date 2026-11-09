@@ -13,14 +13,17 @@
 
 namespace tbh::io {
 
+namespace {
+// Translation context for this file (picked up by lupdate).
+class Tr
+{
+    Q_DECLARE_TR_FUNCTIONS(tbh::io::HarnessJson)
+};
+} // namespace
+
 using namespace Qt::StringLiterals;
 
 namespace {
-
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("tbh::io::HarnessJson", text);
-}
 
 // Thrown inside this file only; converted to an error string at the API boundary.
 struct FormatError
@@ -117,7 +120,7 @@ public:
     {
         const QString value = string(key, true);
         if (value.isEmpty())
-            fail(tr("%1: \"%2\" must not be empty.").arg(m_context, QLatin1StringView(key)));
+            fail(Tr::tr("%1: \"%2\" must not be empty.").arg(m_context, QLatin1StringView(key)));
         return value;
     }
 
@@ -181,7 +184,7 @@ public:
             failType(key, "string");
         const auto parsed = enumFromString(table, value.toString());
         if (!parsed)
-            fail(tr("%1: unknown value \"%2\" for \"%3\".")
+            fail(Tr::tr("%1: unknown value \"%2\" for \"%3\".")
                      .arg(m_context, value.toString(), QLatin1StringView(key)));
         return *parsed;
     }
@@ -201,13 +204,13 @@ private:
         m_used.insert(name);
         const QJsonValue value = m_object.value(name);
         if (required && value.isUndefined())
-            fail(tr("%1: missing required field \"%2\".").arg(m_context, name));
+            fail(Tr::tr("%1: missing required field \"%2\".").arg(m_context, name));
         return value;
     }
 
     [[noreturn]] void failType(const char *key, const char *type) const
     {
-        fail(tr("%1: field \"%2\" must be a %3.")
+        fail(Tr::tr("%1: field \"%2\" must be a %3.")
                  .arg(m_context, QLatin1StringView(key), QLatin1StringView(type)));
     }
 
@@ -219,7 +222,7 @@ private:
 QJsonObject requireObject(const QJsonValue &value, const QString &context)
 {
     if (!value.isObject())
-        fail(tr("%1 must be an object.").arg(context));
+        fail(Tr::tr("%1 must be an object.").arg(context));
     return value.toObject();
 }
 
@@ -233,13 +236,13 @@ QJsonDocument parseEntry(const ZipEntries &entries, QLatin1StringView name, bool
     const auto it = entries.find(QString(name));
     if (it == entries.end()) {
         if (required)
-            fail(tr("The container is missing \"%1\".").arg(name));
+            fail(Tr::tr("The container is missing \"%1\".").arg(name));
         return {};
     }
     QJsonParseError parseError;
     QJsonDocument doc = QJsonDocument::fromJson(it->second, &parseError);
     if (parseError.error != QJsonParseError::NoError)
-        fail(tr("\"%1\" is not valid JSON: %2 (offset %3).")
+        fail(Tr::tr("\"%1\" is not valid JSON: %2 (offset %3).")
                  .arg(name, parseError.errorString())
                  .arg(parseError.offset));
     return doc;
@@ -251,7 +254,7 @@ QJsonArray entryArray(const ZipEntries &entries, QLatin1StringView name)
     if (doc.isNull())
         return {};
     if (!doc.isArray())
-        fail(tr("\"%1\" must contain a JSON array.").arg(name));
+        fail(Tr::tr("\"%1\" must contain a JSON array.").arg(name));
     return doc.array();
 }
 
@@ -303,7 +306,7 @@ WireEnd readWireEnd(ObjectReader r)
         end.label = r.string("label");
         return end;
     }
-    fail(tr("%1: unknown wire end type \"%2\".").arg(r.context(), type));
+    fail(Tr::tr("%1: unknown wire end type \"%2\".").arg(r.context(), type));
 }
 
 Wire readWire(ObjectReader r)
@@ -325,7 +328,7 @@ Wire readWire(ObjectReader r)
     const QJsonArray route = r.array("routeSegmentIds");
     for (qsizetype i = 0; i < route.size(); ++i) {
         if (!route[i].isString())
-            fail(tr("%1 must be a string.").arg(indexed(base + QStringLiteral(".routeSegmentIds"), i)));
+            fail(Tr::tr("%1 must be a string.").arg(indexed(base + QStringLiteral(".routeSegmentIds"), i)));
         w.routeSegmentIds.push_back(route[i].toString());
     }
     w.extra = r.extra();
@@ -377,9 +380,9 @@ Settings readSettings(ObjectReader r)
     for (auto it = strip.begin(); it != strip.end(); ++it) {
         const auto type = enumFromString(kEndTypes, it.key());
         if (!type)
-            fail(tr("settings.stripAllowanceMm: unknown end type \"%1\".").arg(it.key()));
+            fail(Tr::tr("settings.stripAllowanceMm: unknown end type \"%1\".").arg(it.key()));
         if (!it.value().isDouble())
-            fail(tr("settings.stripAllowanceMm.%1 must be a number.").arg(it.key()));
+            fail(Tr::tr("settings.stripAllowanceMm.%1 must be a number.").arg(it.key()));
         s.stripAllowanceMm[*type] = it.value().toDouble();
     }
     s.wasteFactorWirePercent = r.number("wasteFactorWirePercent", s.wasteFactorWirePercent);
@@ -411,7 +414,7 @@ QSet<QString> uniqueIds(const std::vector<T> &items, const QString &what)
     QSet<QString> ids;
     for (const T &item : items) {
         if (ids.contains(item.id))
-            fail(tr("Duplicate %1 id \"%2\".").arg(what, item.id));
+            fail(Tr::tr("Duplicate %1 id \"%2\".").arg(what, item.id));
         ids.insert(item.id);
     }
     return ids;
@@ -423,31 +426,31 @@ void checkIntegrity(const Harness &h)
     for (const Connector &c : h.connectors) {
         const qsizetype count = qsizetype(c.pins.size());
         if (count < kMinPins || count > kMaxPins)
-            fail(tr("Connector \"%1\" has %2 pins; allowed range is %3-%4.")
+            fail(Tr::tr("Connector \"%1\" has %2 pins; allowed range is %3-%4.")
                      .arg(c.label)
                      .arg(count)
                      .arg(kMinPins)
                      .arg(kMaxPins));
         if (pinsByConnector.count(c.id))
-            fail(tr("Duplicate connector id \"%1\".").arg(c.id));
-        pinsByConnector[c.id] = uniqueIds(c.pins, tr("pin"));
+            fail(Tr::tr("Duplicate connector id \"%1\".").arg(c.id));
+        pinsByConnector[c.id] = uniqueIds(c.pins, Tr::tr("pin"));
     }
-    const QSet<QString> splices = uniqueIds(h.splices, tr("splice"));
-    const QSet<QString> nodes = uniqueIds(h.layoutNodes, tr("layout node"));
-    const QSet<QString> segments = uniqueIds(h.layoutSegments, tr("layout segment"));
-    uniqueIds(h.wires, tr("wire"));
-    uniqueIds(h.bomExtras, tr("BOM row"));
+    const QSet<QString> splices = uniqueIds(h.splices, Tr::tr("splice"));
+    const QSet<QString> nodes = uniqueIds(h.layoutNodes, Tr::tr("layout node"));
+    const QSet<QString> segments = uniqueIds(h.layoutSegments, Tr::tr("layout segment"));
+    uniqueIds(h.wires, Tr::tr("wire"));
+    uniqueIds(h.bomExtras, Tr::tr("BOM row"));
 
     auto checkEnd = [&](const Wire &w, const WireEnd &end) {
         if (const auto *pin = std::get_if<PinRef>(&end)) {
             const auto it = pinsByConnector.find(pin->connectorId);
             if (it == pinsByConnector.end())
-                fail(tr("Wire \"%1\" references missing connector \"%2\".").arg(w.id, pin->connectorId));
+                fail(Tr::tr("Wire \"%1\" references missing connector \"%2\".").arg(w.id, pin->connectorId));
             if (!it->second.contains(pin->pinId))
-                fail(tr("Wire \"%1\" references missing pin \"%2\".").arg(w.id, pin->pinId));
+                fail(Tr::tr("Wire \"%1\" references missing pin \"%2\".").arg(w.id, pin->pinId));
         } else if (const auto *splice = std::get_if<SpliceRef>(&end)) {
             if (!splices.contains(splice->spliceId))
-                fail(tr("Wire \"%1\" references missing splice \"%2\".").arg(w.id, splice->spliceId));
+                fail(Tr::tr("Wire \"%1\" references missing splice \"%2\".").arg(w.id, splice->spliceId));
         }
     };
     for (const Wire &w : h.wires) {
@@ -455,7 +458,7 @@ void checkIntegrity(const Harness &h)
         checkEnd(w, w.endB);
         for (const QString &segmentId : w.routeSegmentIds) {
             if (!segments.contains(segmentId))
-                fail(tr("Wire \"%1\" routes through missing segment \"%2\".").arg(w.id, segmentId));
+                fail(Tr::tr("Wire \"%1\" routes through missing segment \"%2\".").arg(w.id, segmentId));
         }
     }
     QSet<QString> freeEnds;
@@ -485,18 +488,18 @@ void checkIntegrity(const Harness &h)
             break;
         }
         if (!ok)
-            fail(tr("Layout node \"%1\" references missing item \"%2\".").arg(n.id, n.refId));
+            fail(Tr::tr("Layout node \"%1\" references missing item \"%2\".").arg(n.id, n.refId));
         if (referenced.contains(n.refId))
-            fail(tr("More than one layout node references \"%1\".").arg(n.refId));
+            fail(Tr::tr("More than one layout node references \"%1\".").arg(n.refId));
         referenced.insert(n.refId);
     }
     for (const LayoutSegment &s : h.layoutSegments) {
         if (!nodes.contains(s.nodeA) || !nodes.contains(s.nodeB))
-            fail(tr("Layout segment \"%1\" references a missing node.").arg(s.id));
+            fail(Tr::tr("Layout segment \"%1\" references a missing node.").arg(s.id));
         if (s.nodeA == s.nodeB)
-            fail(tr("Layout segment \"%1\" starts and ends at the same node.").arg(s.id));
+            fail(Tr::tr("Layout segment \"%1\" starts and ends at the same node.").arg(s.id));
         if (s.lengthMm < 0)
-            fail(tr("Layout segment \"%1\" has a negative length.").arg(s.id));
+            fail(Tr::tr("Layout segment \"%1\" has a negative length.").arg(s.id));
     }
 }
 
@@ -652,7 +655,7 @@ Schematic readSchematic(ObjectReader r)
         p.collapsed = pr.boolean("collapsed", false);
         p.maxVisibleRows = int(pr.number("maxVisibleRows", 0));
         if (p.maxVisibleRows < 0)
-            fail(tr("%1: \"maxVisibleRows\" must not be negative.").arg(context));
+            fail(Tr::tr("%1: \"maxVisibleRows\" must not be negative.").arg(context));
         p.extra = pr.extra();
         schematic.placements[it.key()] = p;
     }
@@ -692,13 +695,13 @@ Library readLibrary(ObjectReader r)
             od.gauge = readGauge(ObjectReader(odr.object("gauge", true), odContext + QStringLiteral(".gauge")));
             od.odMm = odr.number("odMm", 0.0, true);
             if (od.odMm <= 0)
-                fail(tr("%1: \"odMm\" must be positive.")
+                fail(Tr::tr("%1: \"odMm\" must be positive.")
                          .arg(odContext));
             t.outerDiameters.push_back(od);
         }
         t.extra = typeReader.extra();
         if (library.wireType(t.id))
-            fail(tr("Duplicate wire type id \"%1\".").arg(t.id));
+            fail(Tr::tr("Duplicate wire type id \"%1\".").arg(t.id));
         library.wireTypes.push_back(t);
     }
     const QJsonArray sleevings = r.array("sleevings");
@@ -715,7 +718,7 @@ Library readLibrary(ObjectReader r)
         s.approximate = sr.boolean("approximate", false);
         s.extra = sr.extra();
         if (library.sleeving(s.id))
-            fail(tr("Duplicate sleeving id \"%1\".").arg(s.id));
+            fail(Tr::tr("Duplicate sleeving id \"%1\".").arg(s.id));
         library.sleevings.push_back(s);
     }
     return library;
@@ -844,7 +847,7 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
 
         const QJsonDocument harnessDoc = parseEntry(entries, kHarnessEntry, true);
         if (!harnessDoc.isObject())
-            fail(tr("\"%1\" must contain a JSON object.").arg(kHarnessEntry));
+            fail(Tr::tr("\"%1\" must contain a JSON object.").arg(kHarnessEntry));
         ObjectReader r(harnessDoc.object(), QStringLiteral("harness"));
         h.info.name = r.string("name");
         h.info.description = r.string("description");
@@ -854,7 +857,7 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         if (!units.isEmpty()) {
             const auto parsed = unitsFromSymbol(units);
             if (!parsed)
-                fail(tr("harness: unknown value \"%1\" for \"units\".").arg(units));
+                fail(Tr::tr("harness: unknown value \"%1\" for \"units\".").arg(units));
             h.info.units = *parsed;
         }
         h.settings = readSettings(ObjectReader(r.object("settings"), QStringLiteral("settings")));
@@ -869,7 +872,7 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         const QJsonDocument layoutDoc = parseEntry(entries, kLayoutEntry, false);
         if (!layoutDoc.isNull()) {
             if (!layoutDoc.isObject())
-                fail(tr("\"%1\" must contain a JSON object.").arg(kLayoutEntry));
+                fail(Tr::tr("\"%1\" must contain a JSON object.").arg(kLayoutEntry));
             ObjectReader layout(layoutDoc.object(), QStringLiteral("layout"));
             h.layoutNodes = readArray<LayoutNode>(layout.array("nodes"), QStringLiteral("layout.nodes"),
                                                   readLayoutNode);
@@ -882,21 +885,21 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         const QJsonDocument schematicDoc = parseEntry(entries, kSchematicEntry, false);
         if (!schematicDoc.isNull()) {
             if (!schematicDoc.isObject())
-                fail(tr("\"%1\" must contain a JSON object.").arg(kSchematicEntry));
+                fail(Tr::tr("\"%1\" must contain a JSON object.").arg(kSchematicEntry));
             h.schematic = readSchematic(ObjectReader(schematicDoc.object(), QStringLiteral("schematic")));
         }
 
         const QJsonDocument libraryDoc = parseEntry(entries, kLibraryEntry, false);
         if (!libraryDoc.isNull()) {
             if (!libraryDoc.isObject())
-                fail(tr("\"%1\" must contain a JSON object.").arg(kLibraryEntry));
+                fail(Tr::tr("\"%1\" must contain a JSON object.").arg(kLibraryEntry));
             h.library = readLibrary(ObjectReader(libraryDoc.object(), QStringLiteral("library")));
         }
 
         const QJsonDocument bomDoc = parseEntry(entries, kBomEntry, false);
         if (!bomDoc.isNull()) {
             if (!bomDoc.isObject())
-                fail(tr("\"%1\" must contain a JSON object.").arg(kBomEntry));
+                fail(Tr::tr("\"%1\" must contain a JSON object.").arg(kBomEntry));
             ObjectReader bom(bomDoc.object(), QStringLiteral("bom"));
             h.bomExtras = readArray<BomExtra>(bom.array("extras"), QStringLiteral("bom.extras"), [](ObjectReader r) {
                 BomExtra e;
@@ -937,7 +940,7 @@ std::optional<Library> deserializeLibrary(const QByteArray &json, QString *error
         QJsonParseError parseError;
         const QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-            fail(tr("The library is not valid JSON: %1").arg(parseError.errorString()));
+            fail(Tr::tr("The library is not valid JSON: %1").arg(parseError.errorString()));
         return readLibrary(ObjectReader(doc.object(), QStringLiteral("library")));
     } catch (const FormatError &e) {
         if (error)

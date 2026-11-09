@@ -11,11 +11,14 @@
 namespace tbh {
 
 namespace {
-
-QString tr(const char *text)
+// Translation context for this file (picked up by lupdate).
+class Tr
 {
-    return QCoreApplication::translate("tbh::PinLabels", text);
-}
+    Q_DECLARE_TR_FUNCTIONS(tbh::PinLabels)
+};
+} // namespace
+
+namespace {
 
 QString formatNumber(qint64 value, qsizetype width)
 {
@@ -46,7 +49,7 @@ std::optional<QStringList> expandPinPattern(const QString &pattern, int step, bo
         return std::nullopt;
     };
     if (step < 1)
-        return failWith(tr("Step must be 1 or more."));
+        return failWith(Tr::tr("Step must be 1 or more."));
 
     static const QRegularExpression range(
         QStringLiteral("^(.*?)(\\d{1,6})\\s*-\\s*(.*?)(\\d{1,6})$"));
@@ -62,7 +65,7 @@ std::optional<QStringList> expandPinPattern(const QString &pattern, int step, bo
             const QString prefix = match.captured(1);
             const QString endPrefix = match.captured(3).trimmed();
             if (!endPrefix.isEmpty() && endPrefix != prefix)
-                return failWith(tr("\"%1\": both ends of a range need the same prefix.").arg(token));
+                return failWith(Tr::tr("\"%1\": both ends of a range need the same prefix.").arg(token));
             const QString startDigits = match.captured(2);
             const qsizetype width = startDigits.startsWith(QLatin1Char('0')) ? startDigits.size() : 0;
             const int start = startDigits.toInt();
@@ -70,15 +73,15 @@ std::optional<QStringList> expandPinPattern(const QString &pattern, int step, bo
             const int direction = end >= start ? 1 : -1;
             const int count = (std::abs(end - start)) / step + 1;
             if (labels.size() + count > kMaxPins)
-                return failWith(tr("The pattern gives more than %1 labels.").arg(kMaxPins));
+                return failWith(Tr::tr("The pattern gives more than %1 labels.").arg(kMaxPins));
             for (int i = 0; i < count; ++i)
                 labels.append(prefix + formatNumber(start + direction * i * step, width));
         }
         if (labels.size() > kMaxPins)
-            return failWith(tr("The pattern gives more than %1 labels.").arg(kMaxPins));
+            return failWith(Tr::tr("The pattern gives more than %1 labels.").arg(kMaxPins));
     }
     if (labels.isEmpty())
-        return failWith(tr("The pattern gives no labels."));
+        return failWith(Tr::tr("The pattern gives no labels."));
     if (reverse)
         std::reverse(labels.begin(), labels.end());
     return labels;

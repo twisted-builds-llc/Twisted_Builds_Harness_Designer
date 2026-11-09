@@ -14,11 +14,14 @@
 namespace tbh::calc {
 
 namespace {
-
-QString tr(const char *text)
+// Translation context for this file (picked up by lupdate).
+class Tr
 {
-    return QCoreApplication::translate("tbh::calc::WireLength", text);
-}
+    Q_DECLARE_TR_FUNCTIONS(tbh::calc::WireLength)
+};
+} // namespace
+
+namespace {
 
 } // namespace
 
@@ -196,13 +199,13 @@ QString routeStatusReason(const Harness &harness, const Wire &wire, RouteStatus 
     case RouteStatus::Ok:
         return {};
     case RouteStatus::EndANotInLayout:
-        return tr("%1 is not placed in the layout").arg(describeWireEnd(harness, wire.endA));
+        return Tr::tr("%1 is not placed in the layout").arg(describeWireEnd(harness, wire.endA));
     case RouteStatus::EndBNotInLayout:
-        return tr("%1 is not placed in the layout").arg(describeWireEnd(harness, wire.endB));
+        return Tr::tr("%1 is not placed in the layout").arg(describeWireEnd(harness, wire.endB));
     case RouteStatus::NoPath:
-        return tr("no layout path connects its ends");
+        return Tr::tr("no layout path connects its ends");
     case RouteStatus::InvalidOverride:
-        return tr("its manual route is not a connected path between its ends");
+        return Tr::tr("its manual route is not a connected path between its ends");
     }
     return {};
 }
@@ -217,13 +220,13 @@ std::vector<Problem> findProblems(const Harness &harness, const Library &library
             continue;
         const QString reason = routeStatusReason(harness, w, route.status);
         problems.push_back({Problem::Kind::UnroutedWire, w.id,
-                            tr("Wire %1 is not routed: %2.").arg(describeWire(harness, w), reason)});
+                            Tr::tr("Wire %1 is not routed: %2.").arg(describeWire(harness, w), reason)});
     }
     for (const LayoutSegment &s : harness.layoutSegments) {
         if (s.lengthMm <= 0) {
-            const QString name = s.label.isEmpty() ? tr("(unlabeled)") : s.label;
+            const QString name = s.label.isEmpty() ? Tr::tr("(unlabeled)") : s.label;
             problems.push_back({Problem::Kind::SegmentWithoutLength, s.id,
-                                tr("Layout segment %1 has no length.").arg(name)});
+                                Tr::tr("Layout segment %1 has no length.").arg(name)});
         }
     }
     const auto usage = wiresBySegment(harness, graph);
@@ -234,9 +237,9 @@ std::vector<Problem> findProblems(const Harness &harness, const Library &library
         const BundleDiameter bundle = bundleDiameter(harness, library, usage.value(s.id));
         if (checkSleeving(*sleeving, bundle.diameterMm, harness.settings.sleevingDiameterMarginPercent)
             == SleevingFit::TooSmall) {
-            const QString name = s.label.isEmpty() ? tr("(unlabeled)") : s.label;
+            const QString name = s.label.isEmpty() ? Tr::tr("(unlabeled)") : s.label;
             problems.push_back({Problem::Kind::SleevingTooSmall, s.id,
-                                tr("Sleeving %1 %2 on segment %3 is too small for its bundle.")
+                                Tr::tr("Sleeving %1 %2 on segment %3 is too small for its bundle.")
                                     .arg(sleeving->family, sleeving->sizeLabel, name)});
         }
     }

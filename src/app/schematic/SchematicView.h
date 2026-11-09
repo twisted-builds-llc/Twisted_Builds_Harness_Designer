@@ -62,6 +62,7 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     bool wheelOverItem(QWheelEvent *event) override;
+    bool nudgeSelection(const QPointF &delta) override;
 
 private:
     struct DropTarget

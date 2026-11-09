@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "../core/SampleHarness.h"
+#include "Autosave.h"
 #include "Document.h"
 #include "Highlighter.h"
 #include "LibraryStore.h"
@@ -87,6 +88,7 @@ private slots:
         QCoreApplication::setOrganizationName(u"tbh-tests"_s);
         QCoreApplication::setApplicationName(u"tst_highlight"_s);
         QSettings().clear();
+        QDir(Autosave::recoveryDirectory()).removeRecursively(); // no recovery prompt
         QFile::remove(libraryStore::userLibraryPath());
     }
 

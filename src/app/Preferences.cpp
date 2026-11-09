@@ -7,6 +7,7 @@ namespace tbh::app::preferences {
 
 namespace {
 constexpr auto kDefaultUnitsKey = "preferences/defaultUnits";
+constexpr auto kAutosaveKey = "preferences/autosaveMinutes";
 }
 
 Units defaultUnits()
@@ -18,6 +19,18 @@ Units defaultUnits()
 void setDefaultUnits(Units units)
 {
     QSettings().setValue(kDefaultUnitsKey, unitsSymbol(units));
+}
+
+int autosaveMinutes()
+{
+    bool ok = false;
+    const int minutes = QSettings().value(kAutosaveKey, 2).toInt(&ok);
+    return ok && minutes >= 0 && minutes <= 60 ? minutes : 2;
+}
+
+void setAutosaveMinutes(int minutes)
+{
+    QSettings().setValue(kAutosaveKey, minutes);
 }
 
 } // namespace tbh::app::preferences

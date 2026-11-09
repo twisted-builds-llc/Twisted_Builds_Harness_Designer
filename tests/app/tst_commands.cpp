@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Document.h"
 #include "Preferences.h"
+#include "Translations.h"
 #include "commands/HarnessCommands.h"
 
 #include <QSettings>
@@ -42,6 +43,17 @@ private slots:
         preferences::setDefaultUnits(Units::Millimeters);
         doc.newHarness();
         QCOMPARE(doc.model()->harness().info.units, Units::Millimeters);
+    }
+
+    void englishPluralsLoad()
+    {
+        QLocale::setDefault(QLocale(QLocale::English, QLocale::UnitedStates));
+        installTranslators(*QCoreApplication::instance());
+        QCOMPARE(QCoreApplication::translate("tbh::app::LayoutScene", "%n wire(s)", nullptr, 1), u"1 wire"_s);
+        QCOMPARE(QCoreApplication::translate("tbh::app::LayoutScene", "%n wire(s)", nullptr, 3), u"3 wires"_s);
+        QCOMPARE(QCoreApplication::translate("tbh::app::SegmentPanel", "%n wire(s) pass through this segment:",
+                                             nullptr, 1),
+                 u"1 wire passes through this segment:"_s);
     }
 
     void setHarnessInfoUndoRedo()

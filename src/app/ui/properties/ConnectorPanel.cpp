@@ -228,6 +228,11 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     form->addRow(tr("Display:"), displayRow);
 
     m_table->setModel(m_pins);
+    m_table->setAccessibleName(tr("Pins"));
+    m_pinCount->setAccessibleName(tr("Pin count"));
+    pattern->setAccessibleDescription(tr("Fill pin labels from a pattern such as A1-A8, B1-B8"));
+    m_collapsed->setAccessibleName(tr("Collapse connector box"));
+    m_visibleRows->setAccessibleName(tr("Visible rows before the connector box scrolls"));
     m_table->verticalHeader()->setDefaultSectionSize(22);
     m_table->horizontalHeader()->setStretchLastSection(true);
     m_table->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed

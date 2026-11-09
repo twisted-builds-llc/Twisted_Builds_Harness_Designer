@@ -12,11 +12,14 @@
 namespace tbh::app {
 
 namespace {
-
-QString tr(const char *text, const char *disambiguation = nullptr, int n = -1)
+// Translation context for this file (picked up by lupdate).
+class Tr
 {
-    return QCoreApplication::translate("tbh::app::ConnectorEdits", text, disambiguation, n);
-}
+    Q_DECLARE_TR_FUNCTIONS(tbh::app::ConnectorEdits)
+};
+} // namespace
+
+namespace {
 
 } // namespace
 
@@ -34,14 +37,14 @@ bool confirmWireRemoval(QWidget *parent, const Harness &harness, const std::vect
         }
     }
     if (wireIds.size() > kShown)
-        lines << tr("...and %n more", nullptr, int(wireIds.size() - kShown));
+        lines << Tr::tr("...and %n more", nullptr, int(wireIds.size() - kShown));
 
-    QMessageBox box(QMessageBox::Warning, tr("Delete wires?"),
-                    tr("%1 also deletes %n wire(s):", nullptr, int(wireIds.size())).arg(action),
+    QMessageBox box(QMessageBox::Warning, Tr::tr("Delete wires?"),
+                    Tr::tr("%1 also deletes %n wire(s):", nullptr, int(wireIds.size())).arg(action),
                     QMessageBox::Ok | QMessageBox::Cancel, parent);
     box.setInformativeText(lines.join(QLatin1Char('\n')));
     box.setDefaultButton(QMessageBox::Cancel);
-    box.button(QMessageBox::Ok)->setText(tr("Delete"));
+    box.button(QMessageBox::Ok)->setText(Tr::tr("Delete"));
     return box.exec() == QMessageBox::Ok;
 }
 
@@ -53,7 +56,7 @@ bool setPins(QWidget *parent, Document *document, const QString &connectorId, st
     if (!connector || connector->pins == pins)
         return false;
     const auto lost = wiresLostByPinChange(model->harness(), *connector, pins);
-    if (!confirmWireRemoval(parent, model->harness(), lost, tr("Removing these pins")))
+    if (!confirmWireRemoval(parent, model->harness(), lost, Tr::tr("Removing these pins")))
         return false;
     document->undoStack()->push(setConnectorPins(model, connectorId, std::move(pins), undoText).release());
     return true;
@@ -65,7 +68,7 @@ bool changePinCount(QWidget *parent, Document *document, const QString &connecto
     if (!connector)
         return false;
     return setPins(parent, document, connectorId, resizedPins(connector->pins, count),
-                   tr("Change pin count"));
+                   Tr::tr("Change pin count"));
 }
 
 bool deleteItems(QWidget *parent, Document *document, const Selection &selection)
@@ -79,7 +82,7 @@ bool deleteItems(QWidget *parent, Document *document, const Selection &selection
         if (!selection.wires.contains(id))
             implicit.push_back(id);
     }
-    if (!confirmWireRemoval(parent, model->harness(), implicit, tr("Deleting the selection")))
+    if (!confirmWireRemoval(parent, model->harness(), implicit, Tr::tr("Deleting the selection")))
         return false;
     document->undoStack()->push(
         removeItems(model, selection.connectors, selection.splices, selection.wires).release());

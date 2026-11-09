@@ -108,6 +108,8 @@ GaugeEditor::GaugeEditor(QWidget *parent)
     m_value->setInsertPolicy(QComboBox::NoInsert);
     m_system->addItem(QStringLiteral("AWG"), int(GaugeSystem::Awg));
     m_system->addItem(QStringLiteral("mm²"), int(GaugeSystem::Mm2));
+    m_value->setAccessibleName(tr("Gauge size"));
+    m_system->setAccessibleName(tr("Gauge system"));
     auto *layout = new QHBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_value, 1);

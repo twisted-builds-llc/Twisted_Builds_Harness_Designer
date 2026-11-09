@@ -46,6 +46,10 @@ SegmentPanel::SegmentPanel(Document *document, QWidget *parent)
     m_length->setToolTip(tr("Measured branch length. The drawing is not to scale; this value is used "
                             "for wire lengths."));
     m_label->setPlaceholderText(tr("optional, e.g. Trunk"));
+    m_length->setAccessibleName(tr("Segment length"));
+    m_wires->setAccessibleName(tr("Wires through this segment"));
+    m_family->setAccessibleName(tr("Sleeving type"));
+    m_size->setAccessibleName(tr("Sleeving size"));
     auto *lengthRow = new QHBoxLayout;
     lengthRow->addWidget(m_length, 1);
     lengthRow->addWidget(m_units);

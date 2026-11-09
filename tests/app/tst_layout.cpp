@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "Autosave.h"
 #include "Document.h"
 #include "SelectionModel.h"
 #include "calc/WireLength.h"
@@ -22,6 +23,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QDir>
 #include <QTest>
 
 using namespace tbh;
@@ -113,6 +115,7 @@ private slots:
         QCoreApplication::setOrganizationName(u"tbh-tests"_s);
         QCoreApplication::setApplicationName(u"tst_layout"_s);
         QSettings().clear();
+        QDir(Autosave::recoveryDirectory()).removeRecursively(); // no recovery prompt
     }
 
     void explainedLength()

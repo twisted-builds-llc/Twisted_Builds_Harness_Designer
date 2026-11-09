@@ -44,10 +44,18 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     QFont titleFont = m_title->font();
     titleFont.setBold(true);
     m_title->setFont(titleFont);
-    for (QPushButton *button : {m_baseCustom, m_stripeCustom}) {
-        button->setToolTip(tr("Pick a custom color"));
+    for (QPushButton *button : {m_baseCustom, m_stripeCustom})
         button->setFixedWidth(32);
-    }
+    m_baseCustom->setToolTip(tr("Pick a custom wire color"));
+    m_baseCustom->setAccessibleName(tr("Pick a custom wire color"));
+    m_stripeCustom->setToolTip(tr("Pick a custom stripe color"));
+    m_stripeCustom->setAccessibleName(tr("Pick a custom stripe color"));
+    m_base->setAccessibleName(tr("Wire color"));
+    m_stripe->setAccessibleName(tr("Stripe color"));
+    m_gauge->setAccessibleName(tr("Gauge"));
+    m_lengthOverride->setAccessibleName(tr("Length override"));
+    m_length->setAccessibleName(tr("Cut length"));
+    m_lengthDetail->setAccessibleName(tr("How the cut length was calculated"));
     m_wireType->setToolTip(tr("Wire types and their outer diameters come from the parts library "
                               "(Edit > Parts Library)."));
     m_outerDiameter->setWordWrap(true);

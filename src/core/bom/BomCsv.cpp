@@ -7,11 +7,14 @@
 namespace tbh::bom {
 
 namespace {
-
-QString tr(const char *text)
+// Translation context for this file (picked up by lupdate).
+class Tr
 {
-    return QCoreApplication::translate("tbh::bom::BomCsv", text);
-}
+    Q_DECLARE_TR_FUNCTIONS(tbh::bom::BomCsv)
+};
+} // namespace
+
+namespace {
 
 QString field(const QString &value)
 {
@@ -56,22 +59,22 @@ QString gauge(const Gauge &g)
 
 QString partNumberOrNone(const QString &pn)
 {
-    return pn.isEmpty() ? tr("(no part number)") : pn;
+    return pn.isEmpty() ? Tr::tr("(no part number)") : pn;
 }
 
 QString categoryName(PartCategory c)
 {
     switch (c) {
     case PartCategory::Connector:
-        return tr("Connector");
+        return Tr::tr("Connector");
     case PartCategory::Terminal:
-        return tr("Terminal");
+        return Tr::tr("Terminal");
     case PartCategory::Seal:
-        return tr("Seal");
+        return Tr::tr("Seal");
     case PartCategory::CavityPlug:
-        return tr("Cavity plug");
+        return Tr::tr("Cavity plug");
     case PartCategory::Splice:
-        return tr("Splice");
+        return Tr::tr("Splice");
     }
     return {};
 }
@@ -80,15 +83,15 @@ QString sectionTitle(CsvSection section)
 {
     switch (section) {
     case CsvSection::Wires:
-        return tr("Wire");
+        return Tr::tr("Wire");
     case CsvSection::CutList:
-        return tr("Cut list");
+        return Tr::tr("Cut list");
     case CsvSection::Sleeving:
-        return tr("Sleeving");
+        return Tr::tr("Sleeving");
     case CsvSection::Parts:
-        return tr("Parts");
+        return Tr::tr("Parts");
     case CsvSection::Extras:
-        return tr("Other items");
+        return Tr::tr("Other items");
     }
     return {};
 }
@@ -118,36 +121,36 @@ QString sectionToCsv(const Bom &bom, CsvSection section, Units units)
     QString csv;
     switch (section) {
     case CsvSection::Wires:
-        csv += row({tr("Color"), tr("Stripe"), tr("Gauge"), tr("Wire type"), tr("Pieces"),
-                    tr("Length (%1)").arg(u), tr("Length with waste (%1)").arg(u), tr("Pieces without length")});
+        csv += row({Tr::tr("Color"), Tr::tr("Stripe"), Tr::tr("Gauge"), Tr::tr("Wire type"), Tr::tr("Pieces"),
+                    Tr::tr("Length (%1)").arg(u), Tr::tr("Length with waste (%1)").arg(u), Tr::tr("Pieces without length")});
         for (const WireLine &w : bom.wires)
             csv += row({w.baseColor, w.stripeColor, gauge(w.gauge), w.wireTypeName.isEmpty() ? w.wireTypeId : w.wireTypeName,
                         QString::number(w.pieces), length(w.lengthMm, units), length(w.lengthWithWasteMm, units),
                         QString::number(w.piecesWithoutLength)});
         break;
     case CsvSection::CutList:
-        csv += row({tr("Wire"), tr("End A"), tr("End B"), tr("Color"), tr("Stripe"), tr("Gauge"), tr("Wire type"),
-                    tr("Cut length (%1)").arg(u), tr("Note")});
+        csv += row({Tr::tr("Wire"), Tr::tr("End A"), Tr::tr("End B"), Tr::tr("Color"), Tr::tr("Stripe"), Tr::tr("Gauge"), Tr::tr("Wire type"),
+                    Tr::tr("Cut length (%1)").arg(u), Tr::tr("Note")});
         for (const CutLine &c : bom.cutList)
             csv += row({c.name, c.endA, c.endB, c.baseColor, c.stripeColor, gauge(c.gauge), c.wireTypeName,
                         c.cutMm ? length(*c.cutMm, units) : QString(),
-                        !c.cutMm ? tr("not routed") : (c.overridden ? tr("manual length") : QString())});
+                        !c.cutMm ? Tr::tr("not routed") : (c.overridden ? Tr::tr("manual length") : QString())});
         break;
     case CsvSection::Sleeving:
-        csv += row({tr("Type"), tr("Size"), tr("Segments"), tr("Length (%1)").arg(u),
-                    tr("Length with waste (%1)").arg(u)});
+        csv += row({Tr::tr("Type"), Tr::tr("Size"), Tr::tr("Segments"), Tr::tr("Length (%1)").arg(u),
+                    Tr::tr("Length with waste (%1)").arg(u)});
         for (const SleevingLine &s : bom.sleeving)
-            csv += row({s.family, s.known ? s.sizeLabel : tr("(not in library)"), QString::number(s.segments),
+            csv += row({s.family, s.known ? s.sizeLabel : Tr::tr("(not in library)"), QString::number(s.segments),
                         length(s.lengthMm, units), length(s.lengthWithWasteMm, units)});
         break;
     case CsvSection::Parts:
-        csv += row({tr("Category"), tr("Part number"), tr("Description"), tr("Quantity"), tr("Used at")});
+        csv += row({Tr::tr("Category"), Tr::tr("Part number"), Tr::tr("Description"), Tr::tr("Quantity"), Tr::tr("Used at")});
         for (const PartLine &p : bom.parts)
             csv += row({categoryName(p.category), partNumberOrNone(p.partNumber), p.description,
                         QString::number(p.quantity), p.references.join(QStringLiteral("; "))});
         break;
     case CsvSection::Extras:
-        csv += row({tr("Part number"), tr("Description"), tr("Quantity"), tr("Unit"), tr("Notes")});
+        csv += row({Tr::tr("Part number"), Tr::tr("Description"), Tr::tr("Quantity"), Tr::tr("Unit"), Tr::tr("Notes")});
         for (const BomExtra &e : bom.extras)
             csv += row({e.partNumber, e.description, number(e.quantity, 3), e.unit, e.notes});
         break;
