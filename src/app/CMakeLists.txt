@@ -2,6 +2,7 @@
 # Everything except main() lives in tbh_app_lib so tests can link it.
 add_library(tbh_app_lib STATIC
     Document.h Document.cpp
+    bom/BomView.h bom/BomView.cpp
     Highlighter.h Highlighter.cpp
     LibraryStore.h LibraryStore.cpp
     Preferences.h Preferences.cpp

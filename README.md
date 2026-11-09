@@ -7,8 +7,8 @@ lengths, bundle diameters and a bill of materials.
 **Privacy:** this application makes no network connections. No cloud, no accounts, no telemetry,
 no update checks. Your designs never leave your computer.
 
-> Status: early development (milestone 4 of 6: schematic, layout, wire lengths, highlighting,
-> bundle diameters and sleeving). The BOM and installers come in later milestones.
+> Status: early development (milestone 5 of 6: schematic, layout, wire lengths, highlighting,
+> bundle diameters, sleeving and BOM). Polish and installers come in milestone 6.
 > See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for scope and roadmap.
 
 ## Using the schematic editor
@@ -54,6 +54,23 @@ Branch lengths are what you type, not what you draw: the drawing does not need t
 | Bundle diameter | Shown on each layout segment and in its properties (`~` means some wire sizes are estimated) |
 | Pick sleeving | Select a segment: choose a sleeving type and size, or use the recommended size |
 | Wire types and sleeving sizes | **Edit > Parts Library** |
+
+## Bill of materials
+
+The **BOM** tab is generated live from the design:
+
+- **Wire**: grouped by color, stripe, gauge and wire type, with total length and the waste
+  factor from the harness settings. **Cut List**: one row per wire with its cut length
+  (double-click to find the wire).
+- **Sleeving**: total length per type and size, with waste.
+- **Parts**: connectors, terminals (one per wired pin, plus eyelets and ring terminals),
+  seals, cavity plugs and splices, counted from the part numbers you enter. For a cavity
+  plug, enter the plug part number in the pin's Seal P/N column.
+- **Other Items**: anything else (tape, ties, labels), added by hand and saved in the file.
+
+Lines missing a part number, unrouted wires and sleeving not in the library are marked with
+a warning. **Export CSV** (or **File > Export BOM**) writes one combined file or one file per
+section, in the harness units.
 
 **The parts library shipped with the app is approximate.** Wire outer diameters and sleeving
 sizes are typical values, marked "approx." in the app until you edit them. Check them

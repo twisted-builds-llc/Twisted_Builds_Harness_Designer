@@ -20,9 +20,10 @@ Saving is atomic: the file is written to a temporary file next to the target, th
 | `layout.json`     | Layout graph: `{ "nodes": [...], "segments": [...] }`.      |
 | `schematic.json`  | Schematic placements (positions, collapse, visible rows).   |
 | `library.json`    | Parts library entries this harness uses (embedded on save). |
+| `bom.json`        | BOM rows added by hand (the rest of the BOM is generated).  |
 
-Any other entry (for example `bom.json`, which a later milestone defines) is kept
-byte-for-byte when the file is re-saved.
+Any other entry (for example from a newer version of the app) is kept byte-for-byte when
+the file is re-saved.
 
 ## Conventions
 
@@ -229,6 +230,20 @@ the per-user library file (`library.json` in the app data folder).
   them as approximate.
 - When opening, the user's own library wins for ids present in both; embedded entries fill
   in ids the user's library lacks.
+
+## `bom.json`
+
+Only the rows the user adds by hand are stored; wire, sleeving and part lines are generated
+from the model every time.
+
+```json
+{
+  "extras": [
+    { "description": "Cloth tape, 19 mm", "id": "x1", "notes": "", "partNumber": "TAPE-19",
+      "quantity": 2.5, "unit": "roll" }
+  ]
+}
+```
 
 ## Schema changes
 

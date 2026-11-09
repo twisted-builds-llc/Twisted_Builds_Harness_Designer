@@ -90,7 +90,8 @@ Harness sampleHarness()
         LayoutSegment{u"seg3"_s, u"n2"_s, u"n4"_s, 75.0, {}, {}, SleevingCoverage::Full, {}},
     };
 
-    h.otherEntries[u"bom.json"_s] = QByteArrayLiteral("{\"future\": true}\n");
+    h.otherEntries[u"future.json"_s] = QByteArrayLiteral("{\"future\": true}\n");
+    h.bomExtras = {BomExtra{u"x1"_s, u"TAPE-19"_s, u"Cloth tape"_s, 2.5, u"roll"_s, {}, {}}};
     h.schematic.placements[u"c-ecu"_s] = SchematicPlacement{QPointF(10, 20), false, 40, {}};
     h.schematic.placements[u"sp1"_s] = SchematicPlacement{QPointF(-5.5, 7), true, 0, {}};
     h.schematic.placements[freeEndPlacementKey(u"w3"_s, true)] = SchematicPlacement{QPointF(400, 0), false, 0, {}};
@@ -168,6 +169,7 @@ private slots:
         QVERIFY(loaded->layoutSegments == original.layoutSegments);
         QVERIFY(loaded->otherEntries == original.otherEntries);
         QVERIFY(loaded->schematic == original.schematic);
+        QVERIFY(loaded->bomExtras == original.bomExtras);
         QVERIFY(*loaded == original);
     }
 
@@ -244,7 +246,7 @@ private slots:
         QVERIFY(resaved.at(u"connectors.json"_s).contains("futureConnectorKey"));
         QVERIFY(resaved.at(u"connectors.json"_s).contains("futurePinKey"));
         QCOMPARE(resaved.at(u"future/thing.bin"_s), QByteArrayLiteral("\x00\x01\x02"));
-        QCOMPARE(resaved.at(u"bom.json"_s), QByteArrayLiteral("{\"future\": true}\n"));
+        QCOMPARE(resaved.at(u"future.json"_s), QByteArrayLiteral("{\"future\": true}\n"));
     }
 
     void newerSchemaIsRejected()

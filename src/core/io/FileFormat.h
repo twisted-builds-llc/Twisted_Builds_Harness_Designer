@@ -19,5 +19,6 @@ inline constexpr QLatin1StringView kSplicesEntry{"splices.json"};
 inline constexpr QLatin1StringView kLayoutEntry{"layout.json"};
 inline constexpr QLatin1StringView kSchematicEntry{"schematic.json"};
 inline constexpr QLatin1StringView kLibraryEntry{"library.json"};
+inline constexpr QLatin1StringView kBomEntry{"bom.json"};
 
 } // namespace tbh::io

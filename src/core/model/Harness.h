@@ -191,6 +191,19 @@ struct Schematic {
 // Placement key of a wire's free end: "<wireId>/a" or "<wireId>/b".
 QString freeEndPlacementKey(const QString &wireId, bool endB);
 
+// A BOM line the user adds by hand (tape, zip ties...), saved in bom.json.
+struct BomExtra {
+    QString id;
+    QString partNumber;
+    QString description;
+    double quantity = 1.0;
+    QString unit; // free text, e.g. "ea", "roll", "ft"
+    QString notes;
+    QJsonObject extra;
+
+    bool operator==(const BomExtra &) const = default;
+};
+
 // ---- Parts libraries (5.7) ----------------------------------------------------------
 // Wire types with outer diameters, and sleeving. Each user keeps a library; a harness file
 // embeds the entries it uses so it opens the same way on another machine. Shipped seed
@@ -253,9 +266,10 @@ struct Harness {
     std::vector<LayoutSegment> layoutSegments;
     Schematic schematic;
     Library library; // embedded library entries (library.json)
+    std::vector<BomExtra> bomExtras; // bom.json
     QJsonObject extra; // unknown keys of harness.json
-    // Container entries this version does not parse (e.g. bom.json until its
-    // milestone), kept byte-for-byte.
+    // Container entries this version does not parse (from newer versions), kept
+    // byte-for-byte.
     std::map<QString, QByteArray> otherEntries;
 
     bool operator==(const Harness &) const = default;

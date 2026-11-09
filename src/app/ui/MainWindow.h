@@ -12,6 +12,7 @@ class QTreeWidget;
 
 namespace tbh::app {
 
+class BomView;
 class CanvasView;
 class Document;
 class Highlighter;
@@ -59,6 +60,7 @@ private:
     SelectionModel *m_selection;
     SchematicView *m_schematic = nullptr;
     LayoutEditor *m_layout = nullptr;
+    BomView *m_bom = nullptr;
     Highlighter *m_highlighter = nullptr;
     QTabWidget *m_tabs = nullptr;
     QLineEdit *m_find = nullptr;

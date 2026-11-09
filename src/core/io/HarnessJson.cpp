@@ -436,6 +436,7 @@ void checkIntegrity(const Harness &h)
     const QSet<QString> nodes = uniqueIds(h.layoutNodes, tr("layout node"));
     const QSet<QString> segments = uniqueIds(h.layoutSegments, tr("layout segment"));
     uniqueIds(h.wires, tr("wire"));
+    uniqueIds(h.bomExtras, tr("BOM row"));
 
     auto checkEnd = [&](const Wire &w, const WireEnd &end) {
         if (const auto *pin = std::get_if<PinRef>(&end)) {
@@ -782,7 +783,7 @@ bool isKnownEntry(const QString &name)
 {
     return name == kManifestEntry || name == kHarnessEntry || name == kConnectorsEntry
            || name == kWiresEntry || name == kSplicesEntry || name == kLayoutEntry
-           || name == kSchematicEntry || name == kLibraryEntry;
+           || name == kSchematicEntry || name == kLibraryEntry || name == kBomEntry;
 }
 
 } // namespace
@@ -820,6 +821,19 @@ ZipEntries serializeHarness(const Harness &h)
     entries[QString(kSchematicEntry)] =
         QJsonDocument(writeSchematic(h.schematic)).toJson(QJsonDocument::Indented);
     entries[QString(kLibraryEntry)] = serializeLibrary(h.library);
+    QJsonArray extras;
+    for (const BomExtra &e : h.bomExtras) {
+        QJsonObject o = e.extra;
+        o[u"id"] = e.id;
+        o[u"partNumber"] = e.partNumber;
+        o[u"description"] = e.description;
+        o[u"quantity"] = e.quantity;
+        o[u"unit"] = e.unit;
+        o[u"notes"] = e.notes;
+        extras.append(o);
+    }
+    entries[QString(kBomEntry)] =
+        QJsonDocument(QJsonObject{{u"extras"_s, extras}}).toJson(QJsonDocument::Indented);
     return entries;
 }
 
@@ -877,6 +891,24 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
             if (!libraryDoc.isObject())
                 fail(tr("\"%1\" must contain a JSON object.").arg(kLibraryEntry));
             h.library = readLibrary(ObjectReader(libraryDoc.object(), QStringLiteral("library")));
+        }
+
+        const QJsonDocument bomDoc = parseEntry(entries, kBomEntry, false);
+        if (!bomDoc.isNull()) {
+            if (!bomDoc.isObject())
+                fail(tr("\"%1\" must contain a JSON object.").arg(kBomEntry));
+            ObjectReader bom(bomDoc.object(), QStringLiteral("bom"));
+            h.bomExtras = readArray<BomExtra>(bom.array("extras"), QStringLiteral("bom.extras"), [](ObjectReader r) {
+                BomExtra e;
+                e.id = r.id();
+                e.partNumber = r.string("partNumber");
+                e.description = r.string("description");
+                e.quantity = r.number("quantity", 1.0);
+                e.unit = r.string("unit");
+                e.notes = r.string("notes");
+                e.extra = r.extra();
+                return e;
+            });
         }
 
         for (const auto &[name, data] : entries) {

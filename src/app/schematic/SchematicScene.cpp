@@ -253,6 +253,7 @@ void SchematicScene::onAdded(EntityKind kind, const QString &id)
     switch (kind) {
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
+    case EntityKind::BomExtra:
         break;
     case EntityKind::Connector:
         addConnector(*m_model->find<Connector>(id));
@@ -273,6 +274,7 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
     switch (kind) {
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
+    case EntityKind::BomExtra:
         break;
     case EntityKind::Connector:
         if (auto *item = m_connectors.value(id)) {
@@ -302,6 +304,7 @@ void SchematicScene::onRemoved(EntityKind kind, const QString &id)
     switch (kind) {
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
+    case EntityKind::BomExtra:
         break;
     case EntityKind::Connector:
         delete m_connectors.take(id);

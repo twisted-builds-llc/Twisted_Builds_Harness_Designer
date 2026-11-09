@@ -4,6 +4,7 @@
 #include "Document.h"
 #include "io/FileFormat.h"
 #include "Highlighter.h"
+#include "bom/BomView.h"
 #include "LibraryStore.h"
 #include "SelectionModel.h"
 #include "layout/LayoutScene.h"
@@ -51,13 +52,6 @@ QString fileFilter()
         .arg(io::kFileExtension);
 }
 
-QWidget *placeholder(const QString &text)
-{
-    auto *label = new QLabel(text);
-    label->setAlignment(Qt::AlignCenter);
-    label->setEnabled(false);
-    return label;
-}
 
 } // namespace
 
@@ -85,7 +79,14 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     m_tabs->setDocumentMode(true);
     m_tabs->addTab(m_schematic, tr("Schematic"));
     m_tabs->addTab(m_layout, tr("Layout"));
-    m_tabs->addTab(placeholder(tr("Bill of materials (coming in a later version)")), tr("BOM"));
+    m_bom = new BomView(m_document, this);
+    m_tabs->addTab(m_bom, tr("BOM"));
+    connect(m_bom, &BomView::wireActivated, this, [this](const QString &wireId) {
+        Selection selection;
+        selection.wires.insert(wireId);
+        m_selection->setSelection(selection);
+        m_tabs->setCurrentWidget(m_schematic);
+    });
     setCentralWidget(m_tabs);
 
     createDocks();
@@ -183,6 +184,8 @@ void MainWindow::createMenus()
     file->addSeparator();
     file->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::save);
     file->addAction(tr("Save &As..."), QKeySequence::SaveAs, this, &MainWindow::saveAs);
+    file->addSeparator();
+    file->addAction(tr("&Export BOM (CSV)..."), this, [this] { m_bom->exportCsv(); });
     file->addSeparator();
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
