@@ -29,6 +29,19 @@ QPointF bendControlPoint(const QPointF &a, const QPointF &b, const std::optional
 // `midpoint` is within a few pixels of the chord midpoint or the ends coincide.
 std::optional<QPointF> bendThroughMidpoint(const QPointF &a, const QPointF &b, const QPointF &midpoint);
 
+// A segment cut in two at a point along it (see splitSegmentAt()).
+struct SegmentSplit
+{
+    QPointF point;          // on the curve
+    double fraction = 0.5;  // drawn length from `a` to `point` over the whole drawn length
+    std::optional<QPointF> bendA; // a to point; nullopt for a straight segment
+    std::optional<QPointF> bendB; // point to b
+};
+// Cuts the segment from `a` to `b` at the point of the curve nearest `scenePos`, kept at
+// least 5 % from either end. The halves trace the same curve.
+SegmentSplit splitNear(const QPointF &a, const QPointF &b, const std::optional<QPointF> &bend,
+                       const QPointF &scenePos);
+
 class LayoutNodeItem : public QGraphicsItem
 {
 public:
@@ -65,6 +78,8 @@ public:
     int facing() const { return m_facing; }
     // Name label, in item coordinates.
     QRectF labelRect() const;
+    // Name of what the node stands for; empty for branch points.
+    QString label() const { return displayLabel(); }
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;

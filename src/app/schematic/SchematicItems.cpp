@@ -665,9 +665,8 @@ void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
     painter->drawPath(m_path);
     const QColor stripe = wireColor(m_wire.stripeColor);
     if (stripe.isValid()) {
-        QPen pen(stripe, kPenWidth, Qt::CustomDashLine, Qt::FlatCap, Qt::MiterJoin);
-        pen.setDashPattern({2.0, 2.0});
-        painter->setPen(pen);
+        // A tracer: one thin continuous stripe along the middle of the wire, as on real wire.
+        painter->setPen(QPen(stripe, kPenWidth * 0.4, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
         painter->drawPath(m_path);
     }
 }

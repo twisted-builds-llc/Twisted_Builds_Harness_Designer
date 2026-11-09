@@ -12,6 +12,7 @@
 #include <QUndoCommand>
 
 #include <memory>
+#include <optional>
 
 namespace tbh::app {
 
@@ -40,14 +41,14 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
                                             QSet<QString> *newItemIds);
 
 // Adds a wire. Empty circuit text is filled across it (fillEmptyCircuitText): a pin
-// without text takes the text of the pin at the other end, and an unnamed wire takes it
-// as its name. One undo step.
+// without text takes the text of the pin at the other end (through splices), and an
+// unnamed wire takes it as its name. One undo step.
 std::unique_ptr<QUndoCommand> addWire(HarnessModel *model, Wire wire, Placements placements,
                                       const QString &text);
 
 // Replaces a connector with `updated`. For pins whose circuit text was changed to a
-// non-empty value, empty circuit text at the other end of their wires is filled
-// (fillEmptyCircuitText). Returns null if nothing changes.
+// non-empty value, empty circuit text at the other end of their wires, and through
+// splices, is filled (fillEmptyCircuitText). Returns null if nothing changes.
 std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connector &updated,
                                               const QString &text);
 
@@ -71,6 +72,26 @@ std::unique_ptr<QUndoCommand> setNoteText(HarnessModel *model, const QString &no
 // point and `intoId` another existing node.
 std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString &branchId,
                                               const QString &intoId);
+
+// Puts node `nodeId`, which has no segments yet, inside segment `segmentId` (e.g. a splice
+// in the middle of a sleeved run): the segment keeps its id and now runs nodeA-node, and a
+// new segment runs node-nodeB. Both keep the label and sleeving. The entered length is
+// split at `fraction` (0..1 from nodeA), and each half gets its drawing bend. Manual routes
+// through the segment fall back to automatic. Returns null unless the segment exists and
+// the node exists with no segments; the new segment's id goes to `newSegmentId`.
+std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString &segmentId,
+                                             const QString &nodeId, double fraction,
+                                             std::optional<QPointF> bendA,
+                                             std::optional<QPointF> bendB,
+                                             QString *newSegmentId = nullptr);
+
+// Moves node `nodeId` along the run through it without changing the run's total length:
+// the node must have exactly two segments; `fromSegmentId` (one of them) is set to
+// `distanceMm` and the other to the rest. When the run has no length yet only
+// `fromSegmentId` is set. Returns null if nothing changes, the node is not on exactly two
+// segments, or `distanceMm` is not inside the run.
+std::unique_ptr<QUndoCommand> setDistanceAlongRun(HarnessModel *model, const QString &nodeId,
+                                                  const QString &fromSegmentId, double distanceMm);
 
 // Moves one end of a wire to `newEnd` (re-attach). A new free end is placed at
 // `freeEndPosition`. Layout references to an old free end are cleared and any manual

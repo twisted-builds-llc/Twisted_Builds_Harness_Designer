@@ -524,6 +524,104 @@ private slots:
         QCOMPARE(model->find<LayoutSegment>(u"s6"_s)->nodeB, u"n6"_s);
     }
 
+    void splitSegmentAtAndDistanceAlongRun()
+    {
+        HarnessModel model;
+        Harness h = sample();
+        // A second splice S2 placed as a lone node n6; w1 has a manual route through s2.
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(450, 300), {}});
+        h.wires[0].routeSegmentIds = {u"s1"_s, u"s2"_s};
+        model.reset(h);
+        QUndoStack stack;
+        QVERIFY(!splitSegmentAt(&model, u"s2"_s, u"n4"_s, 0.5, {}, {})); // n4 already has segments
+        QVERIFY(!splitSegmentAt(&model, u"nope"_s, u"n6"_s, 0.5, {}, {}));
+        // s2 (n2-n3, 450 mm) split at 0.2: s2 = n2-n6 450 * 0.2 = 90, new n6-n3 = 360.
+        QString newId;
+        stack.push(splitSegmentAt(&model, u"s2"_s, u"n6"_s, 0.2, {}, {}, &newId).release());
+        const LayoutSegment *first = model.find<LayoutSegment>(u"s2"_s);
+        const LayoutSegment *second = model.find<LayoutSegment>(newId);
+        QVERIFY(second);
+        QCOMPARE(first->nodeB, u"n6"_s);
+        QCOMPARE(first->lengthMm, 90.0);
+        QCOMPARE(second->nodeA, u"n6"_s);
+        QCOMPARE(second->nodeB, u"n3"_s);
+        QCOMPARE(second->lengthMm, 360.0);
+        QVERIFY(model.find<Wire>(u"w1"_s)->routeSegmentIds.empty());
+        verifyLoadable(model.harness());
+        // w1 ecu -> sensor still 300 + 90 + 360 = 750 along the bundle: (750 + 20) * 1.05
+        // = 808.5 -> 810 mm, as before the split.
+        const Harness &split = model.harness();
+        QCOMPARE(calc::wireLength(split, calc::LayoutGraph(split), split.wires[0]).cutMm, 810.0);
+
+        // Splice 150 mm from n2: s2 = 150, the other half 450 - 150 = 300.
+        QVERIFY(!setDistanceAlongRun(&model, u"n6"_s, u"s2"_s, 450)); // not inside the run
+        QVERIFY(!setDistanceAlongRun(&model, u"n6"_s, u"s2"_s, 0));
+        QVERIFY(!setDistanceAlongRun(&model, u"n2"_s, u"s2"_s, 100)); // n2 has three segments
+        QVERIFY(!setDistanceAlongRun(&model, u"n6"_s, u"s2"_s, 90)); // unchanged
+        stack.push(setDistanceAlongRun(&model, u"n6"_s, u"s2"_s, 150).release());
+        QCOMPARE(model.find<LayoutSegment>(u"s2"_s)->lengthMm, 150.0);
+        QCOMPARE(model.find<LayoutSegment>(newId)->lengthMm, 300.0);
+        stack.undo();
+        stack.undo();
+        QVERIFY(model.harness() == h);
+    }
+
+    void splitNearCurveKeepsShape()
+    {
+        // a (0,0), b (200,0), control (100,100): bend x = 100/200 = 0.5, y = 100/200 = 0.5.
+        // Curve midpoint (a + 2c + b)/4 = (100, 50); a drop at (100, 60) is nearest there.
+        // Halves by de Casteljau at 0.5: controls (50, 50) and (150, 50).
+        // First half (0,0)-(100,50): d (100,50), n (-50,100), |d|^2 12500, v (50,50):
+        //   x = (5000 + 2500)/12500 = 0.6, y = (-2500 + 5000)/12500 = 0.2.
+        // Second half (100,50)-(200,0): d (100,-50), n (50,100), v (50,0):
+        //   x = 5000/12500 = 0.4, y = 2500/12500 = 0.2. Symmetric curve: fraction 0.5.
+        const SegmentSplit split = splitNear(QPointF(0, 0), QPointF(200, 0), QPointF(0.5, 0.5), QPointF(100, 60));
+        QCOMPARE(split.point, QPointF(100, 50));
+        QVERIFY(std::abs(split.fraction - 0.5) < 1e-9);
+        QVERIFY(split.bendA && split.bendB);
+        QVERIFY(QLineF(*split.bendA, QPointF(0.6, 0.2)).length() < 1e-9);
+        QVERIFY(QLineF(*split.bendB, QPointF(0.4, 0.2)).length() < 1e-9);
+        // Straight segment: no bends; a drop past an end stays 5 % inside.
+        const SegmentSplit end = splitNear(QPointF(0, 0), QPointF(200, 0), std::nullopt, QPointF(-50, 0));
+        QVERIFY(!end.bendA && !end.bendB);
+        QCOMPARE(end.point, QPointF(10, 0));
+        QVERIFY(std::abs(end.fraction - 0.05) < 1e-9);
+    }
+
+    void droppingLoneSpliceOnSegmentPutsItInside()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        Harness h = sample();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(450, 300), {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(450, 150);
+        HarnessModel *model = document.model();
+        // Drag n6 onto the middle of s2 (n2 (300,0) - n3 (600,0), 450 mm): halves 225 + 225.
+        const QPoint from = view.mapFromScene(QPointF(450, 300));
+        const QPoint to = view.mapFromScene(QPointF(450, 0));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), from + QPoint(0, -10));
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        QCOMPARE(model->find<LayoutNode>(u"n6"_s)->position, QPointF(450, 0));
+        QCOMPARE(model->find<LayoutSegment>(u"s2"_s)->nodeB, u"n6"_s);
+        QCOMPARE(model->find<LayoutSegment>(u"s2"_s)->lengthMm, 225.0);
+        QCOMPARE(model->harness().layoutSegments.size(), size_t(5));
+        QCOMPARE(model->harness().layoutSegments.back().lengthMm, 225.0);
+        verifyLoadable(model->harness());
+        // One undo step puts the splice back where it was, outside the bundle.
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
+    }
+
     void segmentDroppedNextToPointJoinsIt()
     {
         Document document;

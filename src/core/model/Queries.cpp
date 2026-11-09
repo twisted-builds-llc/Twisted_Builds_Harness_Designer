@@ -78,30 +78,77 @@ Pin *findPin(Harness &harness, const WireEnd &end)
 CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString> &wireIds)
 {
     CircuitTextFill changed;
+    QSet<QString> done; // wires already handled as part of an earlier net
     for (const QString &id : wireIds) {
-        const auto it = std::find_if(harness.wires.begin(), harness.wires.end(),
-                                     [&](const Wire &w) { return w.id == id; });
-        if (it == harness.wires.end())
+        if (done.contains(id))
             continue;
-        Wire &wire = *it;
-        Pin *a = findPin(harness, wire.endA);
-        Pin *b = findPin(harness, wire.endB);
-        if (a && b && a != b) {
-            if (a->circuitText.isEmpty() && !b->circuitText.isEmpty()) {
-                a->circuitText = b->circuitText;
-                changed.connectorIds.insert(std::get<PinRef>(wire.endA).connectorId);
-            } else if (b->circuitText.isEmpty() && !a->circuitText.isEmpty()) {
-                b->circuitText = a->circuitText;
-                changed.connectorIds.insert(std::get<PinRef>(wire.endB).connectorId);
+        // Collect the net: the seed wire plus every wire reachable through splices.
+        // Connector pins are leaves; text only flows through a splice.
+        std::vector<Wire *> net;
+        std::vector<QString> pendingSplices;
+        QSet<QString> seenSplices;
+        auto addWire = [&](Wire &w) {
+            if (done.contains(w.id))
+                return;
+            done.insert(w.id);
+            net.push_back(&w);
+            for (const WireEnd *end : {&w.endA, &w.endB}) {
+                if (const auto *s = std::get_if<SpliceRef>(end)) {
+                    if (!seenSplices.contains(s->spliceId)) {
+                        seenSplices.insert(s->spliceId);
+                        pendingSplices.push_back(s->spliceId);
+                    }
+                }
+            }
+        };
+        const auto seed = std::find_if(harness.wires.begin(), harness.wires.end(),
+                                       [&](const Wire &w) { return w.id == id; });
+        if (seed == harness.wires.end())
+            continue;
+        addWire(*seed);
+        while (!pendingSplices.empty()) {
+            const QString spliceId = pendingSplices.back();
+            pendingSplices.pop_back();
+            for (Wire &w : harness.wires) {
+                const auto *a = std::get_if<SpliceRef>(&w.endA);
+                const auto *b = std::get_if<SpliceRef>(&w.endB);
+                if ((a && a->spliceId == spliceId) || (b && b->spliceId == spliceId))
+                    addWire(w);
             }
         }
-        if (wire.name.isEmpty()) {
-            for (const Pin *p : {a, b}) {
-                if (p && !p->circuitText.isEmpty()) {
-                    wire.name = p->circuitText;
-                    changed.wireIds.insert(wire.id);
-                    break;
+
+        // The net's text: the first non-empty pin text, seed wire's own pins first.
+        QString text;
+        for (const Wire *w : net) {
+            for (const WireEnd *end : {&w->endA, &w->endB}) {
+                const Pin *p = findPin(harness, *end);
+                if (p && !p->circuitText.isEmpty() && text.isEmpty())
+                    text = p->circuitText;
+            }
+        }
+        if (text.isEmpty())
+            continue;
+
+        for (Wire *w : net) {
+            for (const WireEnd *end : {&w->endA, &w->endB}) {
+                Pin *p = findPin(harness, *end);
+                if (p && p->circuitText.isEmpty()) {
+                    p->circuitText = text;
+                    changed.connectorIds.insert(std::get<PinRef>(*end).connectorId);
                 }
+            }
+            if (w->name.isEmpty()) {
+                // Prefer the wire's own pin text (may differ from the net's text when a
+                // pin was renamed); fall back to the net's text.
+                QString name = text;
+                for (const WireEnd *end : {&w->endA, &w->endB}) {
+                    if (const Pin *p = findPin(harness, *end)) {
+                        name = p->circuitText;
+                        break;
+                    }
+                }
+                w->name = name;
+                changed.wireIds.insert(w->id);
             }
         }
     }
