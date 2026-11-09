@@ -4,6 +4,7 @@
 // Builders for compound edits that must keep the model consistent. Each returns one
 // undo command (a macro with children where needed), ready to push.
 
+#include "commands/EntityCommands.h"
 #include "model/HarnessModel.h"
 
 #include <QPointF>
@@ -36,6 +37,18 @@ std::unique_ptr<QUndoCommand> setConnectorPins(HarnessModel *model, const QStrin
 std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragment, QPointF offset,
                                             QSet<QString> *newItemIds);
 
+// Adds a wire. Empty circuit text is filled across it (fillEmptyCircuitText): a pin
+// without text takes the text of the pin at the other end, and an unnamed wire takes it
+// as its name. One undo step.
+std::unique_ptr<QUndoCommand> addWire(HarnessModel *model, Wire wire, Placements placements,
+                                      const QString &text);
+
+// Replaces a connector with `updated`. For pins whose circuit text was changed to a
+// non-empty value, empty circuit text at the other end of their wires is filled
+// (fillEmptyCircuitText). Returns null if nothing changes.
+std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connector &updated,
+                                              const QString &text);
+
 // Applies several wire updates as one undo step.
 std::unique_ptr<QUndoCommand> updateWires(HarnessModel *model, const std::vector<Wire> &wires,
                                           const QString &text);
@@ -47,7 +60,8 @@ std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<
 
 // Moves one end of a wire to `newEnd` (re-attach). A new free end is placed at
 // `freeEndPosition`. Layout references to an old free end are cleared and any manual
-// route is dropped. Returns null if nothing changes or both ends would be the same pin.
+// route is dropped. Empty circuit text is filled across the wire as in addWire().
+// Returns null if nothing changes or both ends would be the same pin.
 std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wireId, bool endB,
                                          const WireEnd &newEnd, QPointF freeEndPosition);
 

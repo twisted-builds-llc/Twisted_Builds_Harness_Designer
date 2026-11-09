@@ -26,6 +26,10 @@ public:
     const LayoutNode &node() const { return m_node; }
     // `label` is the name of what the node stands for (empty for branch points).
     void setNode(const LayoutNode &node, const QString &label);
+    // True if `itemPos` is on one of the short leads left and right of the node. Dragging
+    // a lead draws a segment; dragging the node itself moves it.
+    bool isStubAt(const QPointF &itemPos) const;
+    void setStubHovered(bool on);
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
@@ -36,9 +40,11 @@ protected:
 
 private:
     QRectF boxRect() const;
+    QRectF stubRect(bool right) const;
 
     LayoutNode m_node;
     QString m_label;
+    bool m_stubHovered = false;
 };
 
 class LayoutSegmentItem : public QGraphicsItem

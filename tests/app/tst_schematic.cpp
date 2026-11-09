@@ -198,6 +198,113 @@ private slots:
         QCOMPARE(f.model()->harness().wires.size(), size_t(2));
     }
 
+    void dragFromLeadCreatesWireAndCopiesCircuit()
+    {
+        Fixture f;
+        Harness h;
+        h.connectors = {makeConnector(u"A"_s, 3), makeConnector(u"B"_s, 3)};
+        for (Pin &p : h.connectors[1].pins)
+            p.circuitText.clear();
+        Splice splice{newId(), u"S1"_s, {}, {}};
+        h.splices.push_back(splice);
+        h.schematic.placements[h.connectors[0].id] = SchematicPlacement{QPointF(0, 0), false, 0, {}};
+        h.schematic.placements[h.connectors[1].id] = SchematicPlacement{QPointF(500, 0), false, 0, {}};
+        h.schematic.placements[splice.id] = SchematicPlacement{QPointF(400, 300), false, 0, {}};
+        f.reset(h);
+        ConnectorItem *a = f.scene()->connectorItem(h.connectors[0].id);
+        ConnectorItem *b = f.scene()->connectorItem(h.connectors[1].id);
+        // Middle of A's right lead on row 1, middle of B's left lead on row 2.
+        const qreal half = ConnectorItem::kStubLength / 2;
+        const QPoint from = f.toView(a->mapToScene(QPointF(ConnectorItem::kWidth + half, a->rowRect(1).center().y())));
+        const QPoint to = f.toView(b->mapToScene(QPointF(-half, b->rowRect(2).center().y())));
+        QCOMPARE(a->hitTest(a->mapFromScene(f.view.mapToScene(from))).part, ConnectorItem::Part::PinStub);
+
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(f.view.viewport(), from + QPoint(20, 0));
+        QTest::mouseMove(f.view.viewport(), to);
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, to);
+
+        const auto &wires = f.model()->harness().wires;
+        QCOMPARE(wires.size(), size_t(1));
+        QCOMPARE(std::get<PinRef>(wires[0].endA).pinId, h.connectors[0].pins[1].id);
+        QCOMPARE(std::get<PinRef>(wires[0].endB).pinId, h.connectors[1].pins[2].id);
+        // "A circuit 2" copied to the empty pin B:3, and the wire is named after it.
+        const QString circuit = h.connectors[0].pins[1].circuitText;
+        QCOMPARE(f.model()->find<Connector>(h.connectors[1].id)->pins[2].circuitText, circuit);
+        QCOMPARE(wires[0].name, circuit);
+        // The wire attaches at the tips of the leads.
+        const Anchor tip = f.scene()->endAnchor(wires[0], false);
+        QCOMPARE(tip.point, a->mapToScene(QPointF(ConnectorItem::kWidth + ConnectorItem::kStubLength,
+                                                  a->rowRect(1).center().y())));
+
+        // One undo step removes the wire and the copied text.
+        f.document.undoStack()->undo();
+        QVERIFY(f.model()->harness().wires.empty());
+        QVERIFY(f.model()->find<Connector>(h.connectors[1].id)->pins[2].circuitText.isEmpty());
+
+        // A splice's lead starts a wire in the Select tool; its dot still moves it.
+        SpliceItem *s = f.scene()->spliceItem(splice.id);
+        const QPoint lead = f.toView(s->mapToScene(QPointF(SpliceItem::kRadius + 1 + half, 0)));
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, lead);
+        QTest::mouseMove(f.view.viewport(), lead + QPoint(20, 0));
+        QTest::mouseMove(f.view.viewport(), to);
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, to);
+        QCOMPARE(f.model()->harness().wires.size(), size_t(1));
+        QCOMPARE(std::get<SpliceRef>(f.model()->harness().wires[0].endA).spliceId, splice.id);
+
+        f.selection.setSelection({}); // else the dot grabs the selected wire's end
+        const QPoint dot = f.toView(s->scenePos());
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, dot);
+        QTest::mouseMove(f.view.viewport(), dot + QPoint(20, 0));
+        QTest::mouseMove(f.view.viewport(), dot + QPoint(100, 0));
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, dot + QPoint(100, 0));
+        QCOMPARE(f.model()->harness().wires.size(), size_t(1));
+        QVERIFY(f.model()->placement(splice.id)->position.x() > 400);
+    }
+
+    void circuitTextCopiesOnceAndStaysEditable()
+    {
+        Fixture f;
+        Harness h;
+        h.connectors = {makeConnector(u"A"_s, 1), makeConnector(u"B"_s, 1)};
+        h.connectors[0].pins[0].circuitText.clear();
+        h.connectors[1].pins[0].circuitText.clear();
+        Wire w;
+        w.id = newId();
+        w.endA = PinRef{h.connectors[0].id, h.connectors[0].pins[0].id};
+        w.endB = PinRef{h.connectors[1].id, h.connectors[1].pins[0].id};
+        h.wires.push_back(w);
+        f.reset(h);
+        QUndoStack *stack = f.document.undoStack();
+        auto circuitOf = [&](int c) { return f.model()->harness().connectors[size_t(c)].pins[0].circuitText; };
+
+        // First text on A:1 -> the empty B:1 and the unnamed wire take it.
+        Connector a = h.connectors[0];
+        a.pins[0].circuitText = u"IGN"_s;
+        stack->push(updateConnector(f.model(), a, u"Edit"_s).release());
+        QCOMPARE(circuitOf(1), u"IGN"_s);
+        QCOMPARE(f.model()->harness().wires[0].name, u"IGN"_s);
+
+        // Renaming either side afterwards is not mirrored.
+        a.pins[0].circuitText = u"IGN SW"_s;
+        stack->push(updateConnector(f.model(), a, u"Edit"_s).release());
+        QCOMPARE(circuitOf(0), u"IGN SW"_s);
+        QCOMPARE(circuitOf(1), u"IGN"_s);
+        Connector b = *f.model()->find<Connector>(h.connectors[1].id);
+        b.pins[0].circuitText = u"IGN B"_s;
+        stack->push(updateConnector(f.model(), b, u"Edit"_s).release());
+        QCOMPARE(circuitOf(0), u"IGN SW"_s);
+        QCOMPARE(f.model()->harness().wires[0].name, u"IGN"_s);
+
+        // No change -> no command.
+        QVERIFY(!updateConnector(f.model(), b, u"Edit"_s));
+
+        stack->undo();
+        stack->undo();
+        stack->undo();
+        QVERIFY(f.model()->harness() == h);
+    }
+
     void inlineEditingMovesDown()
     {
         Fixture f;

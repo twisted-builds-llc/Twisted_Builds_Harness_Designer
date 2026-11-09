@@ -17,8 +17,9 @@ class LayoutScene;
 class SelectionModel;
 
 // Interactive layout editor. Select tool: move nodes, select, double-click a segment to
-// type its length. Segment tool: drag from a node to another node (or to empty space,
-// which adds a branch point) to create a segment; its length editor opens at once.
+// type its length, drag a node's lead (the short dash on either side) to draw a segment.
+// Segment tool: drag from anywhere on a node. A segment goes to another node, or to empty
+// space, which adds a branch point; its length editor opens at once.
 class LayoutView : public CanvasView
 {
     Q_OBJECT
@@ -52,6 +53,9 @@ protected:
 
 private:
     LayoutNodeItem *nodeAt(const QPoint &viewPos) const;
+    // The node whose lead is under `viewPos`, or null.
+    LayoutNodeItem *nodeLeadAt(const QPoint &viewPos) const;
+    void setHoveredLead(LayoutNodeItem *node);
     QPointF nextPlacePosition();
     void finishSegment(const QPoint &viewPos);
     void cancelSegment();
@@ -63,6 +67,7 @@ private:
     Tool m_tool = Tool::Select;
     QString m_segmentStart; // node id while drawing a segment
     QGraphicsLineItem *m_preview = nullptr;
+    QString m_hoveredLead; // node id whose lead is under the pointer
     std::map<QString, QPointF> m_pressPositions;
     int m_placeCount = 0;
 };

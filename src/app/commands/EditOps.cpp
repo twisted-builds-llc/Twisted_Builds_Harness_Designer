@@ -22,6 +22,28 @@ class Tr
 
 namespace {
 
+// Child commands that update the connectors and wires changed by a fill in `after`.
+// `skipConnectorId` / `skipWireId` are updated by the caller already.
+void addFillUpdates(HarnessModel *model, const Harness &after, const CircuitTextFill &fill,
+                    QUndoCommand *parent, const QString &skipConnectorId = {},
+                    const QString &skipWireId = {})
+{
+    for (const Connector &c : after.connectors) {
+        if (fill.connectorIds.contains(c.id) && c.id != skipConnectorId)
+            new UpdateEntityCommand<Connector>(model, c, {}, parent);
+    }
+    for (const Wire &w : after.wires) {
+        if (fill.wireIds.contains(w.id) && w.id != skipWireId)
+            new UpdateEntityCommand<Wire>(model, w, {}, parent);
+    }
+}
+
+template<typename T>
+const T &byId(const std::vector<T> &items, const QString &id)
+{
+    return *std::find_if(items.begin(), items.end(), [&](const T &item) { return item.id == id; });
+}
+
 // Free-end keys of the given wires (layout nodes may reference them).
 QSet<QString> freeEndKeys(const HarnessModel *model, const std::vector<QString> &wireIds)
 {
@@ -166,6 +188,45 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
     return macro;
 }
 
+std::unique_ptr<QUndoCommand> addWire(HarnessModel *model, Wire wire, Placements placements,
+                                      const QString &text)
+{
+    Harness after = model->harness();
+    after.wires.push_back(std::move(wire));
+    const CircuitTextFill fill = fillEmptyCircuitText(after, {after.wires.back().id});
+    auto macro = std::make_unique<QUndoCommand>(text);
+    new AddEntityCommand<Wire>(model, after.wires.back(), std::move(placements), {}, macro.get());
+    addFillUpdates(model, after, fill, macro.get(), {}, after.wires.back().id);
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connector &updated,
+                                              const QString &text)
+{
+    const Connector *current = model->find<Connector>(updated.id);
+    if (!current || *current == updated)
+        return nullptr;
+    QSet<QString> retexted;
+    for (const Pin &pin : updated.pins) {
+        if (pin.circuitText.isEmpty())
+            continue;
+        const auto old = std::find_if(current->pins.begin(), current->pins.end(),
+                                      [&](const Pin &p) { return p.id == pin.id; });
+        if (old == current->pins.end() || old->circuitText != pin.circuitText)
+            retexted.insert(pin.id);
+    }
+    Harness after = model->harness();
+    auto it = std::find_if(after.connectors.begin(), after.connectors.end(),
+                           [&](const Connector &c) { return c.id == updated.id; });
+    *it = updated;
+    const CircuitTextFill fill =
+        fillEmptyCircuitText(after, wiresOnPins(after, updated.id, retexted));
+    auto macro = std::make_unique<QUndoCommand>(text);
+    new UpdateEntityCommand<Connector>(model, byId(after.connectors, updated.id), {}, macro.get());
+    addFillUpdates(model, after, fill, macro.get(), updated.id);
+    return macro;
+}
+
 std::unique_ptr<QUndoCommand> updateWires(HarnessModel *model, const std::vector<Wire> &wires,
                                           const QString &text)
 {
@@ -227,10 +288,14 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
         clearLayoutRefs(model, {key}, macro.get());
         new SetPlacementsCommand(model, {{key, std::nullopt}}, {}, macro.get());
     }
-    Wire updated = *current;
+    Harness after = model->harness();
+    Wire &updated = *std::find_if(after.wires.begin(), after.wires.end(),
+                                  [&](const Wire &w) { return w.id == wireId; });
     (endB ? updated.endB : updated.endA) = newEnd;
     updated.routeSegmentIds.clear();
+    const CircuitTextFill fill = fillEmptyCircuitText(after, {wireId});
     new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
+    addFillUpdates(model, after, fill, macro.get(), {}, wireId);
     if (newIsFree) {
         SchematicPlacement placement;
         if (const SchematicPlacement *old = model->placement(key))

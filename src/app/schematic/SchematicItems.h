@@ -51,8 +51,11 @@ public:
     static constexpr qreal kHeaderHeight = 46;
     static constexpr qreal kRowHeight = 20;
     static constexpr qreal kLabelColumn = 64;
+    // Length of the lead drawn on both sides of each pin row. Dragging it draws a wire;
+    // wires attach at its outer tip.
+    static constexpr qreal kStubLength = 14;
 
-    enum class Part { None, Title, Collapse, Minus, Count, Plus, PinLabel, PinCircuit };
+    enum class Part { None, Title, Collapse, Minus, Count, Plus, PinLabel, PinCircuit, PinStub };
     struct Hit
     {
         Part part = Part::None;
@@ -81,6 +84,7 @@ public:
     int rowOfPin(const QString &pinId) const;
 
     // Item coordinates.
+    QRectF bodyRect() const; // the box, without pin leads
     QRectF rowRect(int row) const; // null if hidden
     QRectF labelCellRect(int row) const;
     QRectF circuitCellRect(int row) const;
@@ -99,6 +103,7 @@ public:
     std::vector<int> searchMatches() const;
 
     QRectF boundingRect() const override;
+    QPainterPath shape() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
 
 private:
@@ -121,6 +126,7 @@ class SpliceItem : public PlacedItem
 {
 public:
     static constexpr qreal kRadius = 6;
+    static constexpr qreal kStubLength = 14; // drag handle on each side, see isStubAt()
 
     explicit SpliceItem(const Splice &splice);
 
@@ -129,12 +135,17 @@ public:
     void setSplice(const Splice &splice);
     void setHighlighted(bool on);
     Anchor anchor() const { return {scenePos(), 0}; }
+    // True if `itemPos` is on one of the short leads left and right of the dot, which
+    // start a wire when dragged (the dot itself moves the splice).
+    bool isStubAt(const QPointF &itemPos) const;
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
 
 private:
+    static QRectF stubRect(bool right);
+
     Splice m_splice;
     bool m_highlighted = false;
 };

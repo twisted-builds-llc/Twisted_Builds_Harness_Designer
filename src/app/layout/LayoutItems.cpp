@@ -9,6 +9,8 @@
 #include <QFontMetricsF>
 #include <QPainterPathStroker>
 
+#include <cmath>
+
 namespace tbh::app {
 
 namespace {
@@ -27,6 +29,7 @@ QColor mix(const QColor &a, const QColor &b, qreal t)
 constexpr qreal kBoxWidth = 110;
 constexpr qreal kBoxHeight = 28;
 constexpr qreal kRadius = 7;
+constexpr qreal kStubLength = 14;
 
 } // namespace
 
@@ -56,10 +59,33 @@ QRectF LayoutNodeItem::boxRect() const
     return QRectF(-kBoxWidth / 2, -kBoxHeight / 2, kBoxWidth, kBoxHeight);
 }
 
+QRectF LayoutNodeItem::stubRect(bool right) const
+{
+    // Starts at the box or dot edge; 10 px tall so it is easy to grab.
+    const qreal inner = m_node.type == LayoutNodeType::Connector ? kBoxWidth / 2 + 1 : kRadius + 1;
+    return right ? QRectF(inner, -5, kStubLength, 10) : QRectF(-inner - kStubLength, -5, kStubLength, 10);
+}
+
+bool LayoutNodeItem::isStubAt(const QPointF &itemPos) const
+{
+    if (!stubRect(false).contains(itemPos) && !stubRect(true).contains(itemPos))
+        return false;
+    // Not on the dot of a round node (its selection ring overlaps the lead).
+    return m_node.type == LayoutNodeType::Connector || std::hypot(itemPos.x(), itemPos.y()) > kRadius + 1;
+}
+
+void LayoutNodeItem::setStubHovered(bool on)
+{
+    if (on == m_stubHovered)
+        return;
+    m_stubHovered = on;
+    update();
+}
+
 QRectF LayoutNodeItem::boundingRect() const
 {
     if (m_node.type == LayoutNodeType::Connector)
-        return boxRect().adjusted(-4, -4, 4, 4);
+        return boxRect().adjusted(-4 - kStubLength, -6, 4 + kStubLength, 6);
     return QRectF(-70, -kRadius - 4, 140, kRadius * 2 + 26);
 }
 
@@ -70,6 +96,8 @@ QPainterPath LayoutNodeItem::shape() const
         path.addRect(boxRect());
     else
         path.addEllipse(QPointF(0, 0), kRadius + 4, kRadius + 4);
+    path.addRect(stubRect(false));
+    path.addRect(stubRect(true));
     return path;
 }
 
@@ -82,6 +110,13 @@ void LayoutNodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, 
     const bool unassigned = m_node.refId.isEmpty() && m_node.type != LayoutNodeType::Branch;
     QFont font = painter->font();
     font.setPixelSize(11);
+
+    // Leads on both sides: drag handles for drawing a segment.
+    painter->setPen(QPen(m_stubHovered ? highlight : mix(base, text, 0.5), 2, Qt::SolidLine, Qt::FlatCap));
+    for (bool right : {false, true}) {
+        const QRectF r = stubRect(right);
+        painter->drawLine(QPointF(r.left(), 0), QPointF(r.right(), 0));
+    }
 
     if (m_node.type == LayoutNodeType::Connector) {
         QPen pen(isSelected() ? highlight : mix(base, text, 0.5), isSelected() ? 2.5 : 1.2);

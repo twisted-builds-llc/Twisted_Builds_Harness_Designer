@@ -15,6 +15,18 @@ std::vector<QString> wiresOnPins(const Harness &harness, const QString &connecto
 // Ids of wires with at least one end on the splice.
 std::vector<QString> wiresOnSplice(const Harness &harness, const QString &spliceId);
 
+// Circuit text copied across wires, only into empty fields. For each listed wire:
+// - pin to pin, with circuit text on one pin only: the other pin gets that text;
+// - no wire name: the wire takes the circuit text of its first pin that has some.
+// Existing text is never overwritten, so the copy happens once and later edits on either
+// end stay independent. Unknown wire ids are skipped.
+struct CircuitTextFill
+{
+    QSet<QString> connectorIds; // connectors whose pins changed
+    QSet<QString> wireIds;      // wires whose name changed
+};
+CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString> &wireIds);
+
 // Human-readable end description, e.g. "ECU-A : A1", "S1", "Ring terminal".
 QString describeWireEnd(const Harness &harness, const WireEnd &end);
 // e.g. "5V REF (ECU-A : A1 - SENSOR : +)".

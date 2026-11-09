@@ -88,6 +88,19 @@ SchematicView::DropTarget SchematicView::targetAt(const QPointF &scenePos) const
     return target;
 }
 
+bool SchematicView::isLeadAt(const QPointF &scenePos) const
+{
+    for (QGraphicsItem *item : m_scene->items(scenePos)) {
+        if (item->type() == ConnectorItemType) {
+            auto *connector = static_cast<ConnectorItem *>(item);
+            return connector->hitTest(connector->mapFromScene(scenePos)).part == ConnectorItem::Part::PinStub;
+        }
+        if (item->type() == SpliceItemType)
+            return static_cast<SpliceItem *>(item)->isStubAt(item->mapFromScene(scenePos));
+    }
+    return false;
+}
+
 void SchematicView::setHover(const DropTarget &target)
 {
     if (m_hoverConnector && m_hoverConnector != target.connector)
@@ -140,6 +153,7 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
             return;
         case ConnectorItem::Part::PinLabel:
         case ConnectorItem::Part::PinCircuit:
+        case ConnectorItem::Part::PinStub:
             if (!(event->modifiers() & Qt::ControlModifier) && !connector->isSelected()) {
                 m_scene->clearSelection();
                 connector->setSelected(true);
@@ -149,7 +163,8 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
         default:
             break;
         }
-    } else if (item && item->type() == SpliceItemType && m_tool == Tool::Wire) {
+    } else if (item && item->type() == SpliceItemType
+               && (m_tool == Tool::Wire || static_cast<SpliceItem *>(item)->isStubAt(item->mapFromScene(scenePos)))) {
         beginWire(SpliceRef{static_cast<SpliceItem *>(item)->id()}, event->pos());
         return;
     }
@@ -193,6 +208,8 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
             m_preview->setPath(WireItem::routePath(m_scene->endAnchor(*wire, !m_reattachEndB), end));
         return;
     }
+    if (event->buttons() == Qt::NoButton && m_tool == Tool::Select)
+        viewport()->setCursor(isLeadAt(mapToScene(event->pos())) ? Qt::CrossCursor : Qt::ArrowCursor);
     CanvasView::mouseMoveEvent(event);
     if ((event->buttons() & Qt::LeftButton) && !draggedFreeEnd().isEmpty())
         setHover(targetAt(mapToScene(event->pos())));
@@ -363,20 +380,9 @@ void SchematicView::finishWire(const QPointF &scenePos)
         placement.position = SchematicScene::snapped(scenePos);
         placements[freeEndPlacementKey(wire.id, true)] = placement;
     }
-    // Name the wire after the circuit text of the pins it connects.
-    for (const WireEnd *end : {&wire.endA, &wire.endB}) {
-        if (const auto *pin = std::get_if<PinRef>(end); pin && wire.name.isEmpty()) {
-            if (const Connector *c = model->find<Connector>(pin->connectorId)) {
-                for (const Pin &p : c->pins) {
-                    if (p.id == pin->pinId)
-                        wire.name = p.circuitText;
-                }
-            }
-        }
-    }
+    // addWire() also names the wire and copies circuit text to an empty pin at the other end.
     const QString id = wire.id;
-    m_document->undoStack()->push(
-        new AddEntityCommand<Wire>(model, std::move(wire), std::move(placements), tr("Add wire")));
+    m_document->undoStack()->push(addWire(model, std::move(wire), std::move(placements), tr("Add wire")).release());
     Selection selection;
     selection.wires.insert(id);
     m_selection->setSelection(selection);
@@ -558,8 +564,10 @@ void SchematicView::editPinCell(const QString &connectorId, int row, int column)
                      QString &field = column == 0 ? p.label : p.circuitText;
                      if (field != value) {
                          field = value;
-                         m_document->undoStack()->push(new UpdateEntityCommand<Connector>(
-                             model, updated, column == 0 ? tr("Edit pin label") : tr("Edit circuit text")));
+                         m_document->undoStack()->push(
+                             updateConnector(model, updated,
+                                             column == 0 ? tr("Edit pin label") : tr("Edit circuit text"))
+                                 .release());
                      }
                      break;
                  }
@@ -827,7 +835,7 @@ void SchematicView::align(Qt::Alignment alignment)
     // Connectors align by their box; point-like items (splices, free ends) by their position.
     auto rectOf = [](PlacedItem *item) {
         if (item->type() == ConnectorItemType)
-            return QRectF(item->pos(), item->boundingRect().adjusted(3, 3, -3, -3).size());
+            return QRectF(item->pos(), static_cast<ConnectorItem *>(item)->bodyRect().size());
         return QRectF(item->pos(), QSizeF(0, 0));
     };
     QRectF bounds;

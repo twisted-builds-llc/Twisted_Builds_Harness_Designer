@@ -143,8 +143,7 @@ bool PinTableModel::setData(const QModelIndex &index, const QVariant &value, int
     }
     if (updated == *current)
         return false;
-    m_document->undoStack()->push(
-        new UpdateEntityCommand<Connector>(m_document->model(), updated, tr("Edit pin")));
+    m_document->undoStack()->push(updateConnector(m_document->model(), updated, tr("Edit pin")).release());
     return true;
 }
 

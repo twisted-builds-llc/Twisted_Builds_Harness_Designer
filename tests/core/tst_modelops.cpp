@@ -145,6 +145,60 @@ private slots:
         QVERIFY(f.schematic.placements.count(freeEndPlacementKey(f.wires[2].id, true)));
         QCOMPARE(f.schematic.placements.size(), size_t(3));
     }
+
+    void fillEmptyCircuitTextCopiesIntoEmptyPin()
+    {
+        // w1 joins J1.1 and J2.1. Text only on J1.1 -> J2.1 gets "IGN"; J1 is untouched.
+        // w1 already has the name "5V", so the name stays.
+        Harness h = sample();
+        h.connectors[0].pins[0].circuitText = u"IGN"_s;
+        const CircuitTextFill fill = fillEmptyCircuitText(h, {u"w1"_s});
+        QCOMPARE(h.connectors[1].pins[0].circuitText, u"IGN"_s);
+        QCOMPARE(h.connectors[0].pins[0].circuitText, u"IGN"_s);
+        QCOMPARE(h.wires[0].name, u"5V"_s);
+        QCOMPARE(fill.connectorIds, QSet<QString>{u"j2"_s});
+        QVERIFY(fill.wireIds.isEmpty());
+
+        // Same from the other side: text only on J2.1 -> J1.1 gets it.
+        Harness h2 = sample();
+        h2.connectors[1].pins[0].circuitText = u"GND"_s;
+        QCOMPARE(fillEmptyCircuitText(h2, {u"w1"_s}).connectorIds, QSet<QString>{u"j1"_s});
+        QCOMPARE(h2.connectors[0].pins[0].circuitText, u"GND"_s);
+    }
+
+    void fillEmptyCircuitTextNeverOverwrites()
+    {
+        // Both pins have text (user renamed one side): nothing changes.
+        Harness h = sample();
+        h.connectors[0].pins[0].circuitText = u"IGN"_s;
+        h.connectors[1].pins[0].circuitText = u"IGN SW"_s;
+        const Harness before = h;
+        const CircuitTextFill fill = fillEmptyCircuitText(h, {u"w1"_s});
+        QVERIFY(fill.connectorIds.isEmpty());
+        QVERIFY(fill.wireIds.isEmpty());
+        QCOMPARE(h, before);
+
+        // Neither pin has text: nothing to copy, and the name "5V" is not pushed onto pins.
+        Harness empty = sample();
+        QVERIFY(fillEmptyCircuitText(empty, {u"w1"_s}).connectorIds.isEmpty());
+        QCOMPARE(empty, sample());
+    }
+
+    void fillEmptyCircuitTextNamesUnnamedWire()
+    {
+        // w2 joins J1.2 and splice S1 (not pin to pin) and has no name: it takes "SIG"
+        // from J1.2. Unknown wire ids are skipped.
+        Harness h = sample();
+        h.connectors[0].pins[1].circuitText = u"SIG"_s;
+        const CircuitTextFill fill = fillEmptyCircuitText(h, {u"w2"_s, u"nope"_s});
+        QCOMPARE(h.wires[1].name, u"SIG"_s);
+        QCOMPARE(fill.wireIds, QSet<QString>{u"w2"_s});
+        QVERIFY(fill.connectorIds.isEmpty());
+
+        // w3 (splice to flying lead) has no pins: nothing changes.
+        QVERIFY(fillEmptyCircuitText(h, {u"w3"_s}).wireIds.isEmpty());
+        QVERIFY(h.wires[2].name.isEmpty());
+    }
 };
 
 QTEST_GUILESS_MAIN(TestModelOps)

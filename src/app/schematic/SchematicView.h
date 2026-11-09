@@ -18,10 +18,11 @@ class SelectionModel;
 // Interactive schematic editor: pan/zoom, wire drawing, inline text editing, clipboard,
 // align/distribute. Every change goes through an undo command on the document.
 //
-// Mouse: drag a connector by its header; drag from a pin row to draw a wire (drop on a
-// pin, a splice, or empty space for a flying lead); double-click text to edit it;
+// Mouse: drag a connector by its header; drag from a pin row or its lead (the short dash
+// on either side) to draw a wire (drop on a pin, a splice, or empty space for a flying
+// lead); drag a splice's lead to start a wire from it; double-click text to edit it;
 // wheel zooms (over a scrolling connector it scrolls rows; Ctrl+wheel always zooms);
-// middle-drag pans. The Wire tool also starts wires from splices.
+// middle-drag pans. The Wire tool also starts wires from anywhere on a splice.
 class SchematicView : public CanvasView
 {
     Q_OBJECT
@@ -74,6 +75,8 @@ private:
     };
 
     DropTarget targetAt(const QPointF &scenePos) const;
+    // True over a pin lead or splice lead (drag handles for wires).
+    bool isLeadAt(const QPointF &scenePos) const;
     void setHover(const DropTarget &target);
     void beginWire(const WireEnd &start, const QPoint &pressPos);
     void updateWirePreview(const QPointF &scenePos);
