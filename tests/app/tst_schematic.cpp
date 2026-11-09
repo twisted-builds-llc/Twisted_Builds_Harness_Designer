@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "Autosave.h"
 #include "Document.h"
 #include "SelectionModel.h"
 #include "commands/EditOps.h"
@@ -18,6 +19,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QDir>
 #include <QTest>
 
 using namespace tbh;
@@ -108,6 +110,7 @@ private slots:
         QCoreApplication::setOrganizationName(u"tbh-tests"_s);
         QCoreApplication::setApplicationName(u"tst_schematic"_s);
         QSettings().clear();
+        QDir(Autosave::recoveryDirectory()).removeRecursively(); // no recovery prompt
     }
 
     void sceneMirrorsModel()

@@ -10,4 +10,8 @@ namespace tbh::app::preferences {
 Units defaultUnits();
 void setDefaultUnits(Units units);
 
+// Minutes between autosaves of unsaved changes; 0 turns autosave off. Default: 2.
+int autosaveMinutes();
+void setAutosaveMinutes(int minutes);
+
 } // namespace tbh::app::preferences

@@ -13,11 +13,14 @@
 namespace tbh::app {
 
 namespace {
-
-QString tr(const char *text)
+// Translation context for this file (picked up by lupdate).
+class Tr
 {
-    return QCoreApplication::translate("tbh::app::EditOps", text);
-}
+    Q_DECLARE_TR_FUNCTIONS(tbh::app::EditOps)
+};
+} // namespace
+
+namespace {
 
 // Free-end keys of the given wires (layout nodes may reference them).
 QSet<QString> freeEndKeys(const HarnessModel *model, const std::vector<QString> &wireIds)
@@ -76,7 +79,7 @@ std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QStrin
                                           const QSet<QString> &wireIds)
 {
     const Harness &h = model->harness();
-    auto macro = std::make_unique<QUndoCommand>(tr("Delete"));
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Delete"));
     // Children redo in order and undo in reverse: wires go first and come back last.
     // Within each list, remove from the back so the recorded indices restore the order.
     const std::vector<QString> wires = wiresRemovedWith(h, connectorIds, spliceIds, wireIds);
@@ -143,7 +146,7 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
         return result;
     };
 
-    auto macro = std::make_unique<QUndoCommand>(tr("Paste"));
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Paste"));
     for (Connector &c : fragment.connectors) {
         if (newItemIds)
             newItemIds->insert(c.id);
@@ -183,7 +186,7 @@ std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<
         if (nodeIds.contains(s.nodeA) || nodeIds.contains(s.nodeB))
             segments.insert(s.id);
     }
-    auto macro = std::make_unique<QUndoCommand>(tr("Delete"));
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Delete"));
     for (const Wire &w : h.wires) {
         const bool usesRemoved = std::any_of(w.routeSegmentIds.begin(), w.routeSegmentIds.end(),
                                              [&](const QString &id) { return segments.contains(id); });
@@ -217,7 +220,7 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
     if (!newIsFree && (newEnd == oldEnd || newEnd == otherEnd))
         return nullptr;
 
-    auto macro = std::make_unique<QUndoCommand>(tr("Re-attach wire"));
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Re-attach wire"));
     const QString key = freeEndPlacementKey(wireId, endB);
     const bool oldIsFree = std::holds_alternative<FreeEnd>(oldEnd);
     if (oldIsFree && !newIsFree) {

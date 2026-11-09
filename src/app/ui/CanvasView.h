@@ -40,6 +40,12 @@ protected:
     bool isPanning() const { return m_panning; }
     // Lets subclasses use the wheel over an item (e.g. scroll rows). Return true if handled.
     virtual bool wheelOverItem(QWheelEvent *) { return false; }
+    // Moves the selected items by `delta` as one undoable step. Return false if nothing
+    // movable is selected (the arrow key then scrolls the view).
+    virtual bool nudgeSelection(const QPointF &) { return false; }
+    // Keyboard navigation: selects the next/previous selectable item in reading order.
+    void selectAdjacentItem(bool next);
+    void keyPressEvent(QKeyEvent *event) override;
 
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;

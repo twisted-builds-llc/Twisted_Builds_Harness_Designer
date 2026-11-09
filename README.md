@@ -7,8 +7,9 @@ lengths, bundle diameters and a bill of materials.
 **Privacy:** this application makes no network connections. No cloud, no accounts, no telemetry,
 no update checks. Your designs never leave your computer.
 
-> Status: early development (milestone 5 of 6: schematic, layout, wire lengths, highlighting,
-> bundle diameters, sleeving and BOM). Polish and installers come in milestone 6.
+> Status: early development. All editing features of v0.1 are in place (schematic, layout,
+> wire lengths, highlighting, bundle diameters, sleeving, BOM, autosave, help). Installers
+> come next.
 > See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for scope and roadmap.
 
 ## Using the schematic editor
@@ -95,6 +96,19 @@ ctest --preset release
 - **macOS:** install Xcode command line tools and Ninja (`brew install ninja`).
 
 Qt Creator can open `CMakeLists.txt` directly and picks up the presets.
+
+## Help, autosave and keyboard use
+
+- **Help > Getting Started** (**F1**) walks through a first harness; **Help > Keyboard
+  Shortcuts** lists every shortcut, generated from the app itself.
+- **Autosave for recovery:** unsaved changes are written to a recovery file every 2 minutes
+  (change it, or turn it off, in **Edit > Preferences**). If the app closes unexpectedly, the
+  next start offers to recover the work; **File > Recover Unsaved Work** shows it again later.
+  Recovery files are removed when you save, and when the app closes normally.
+- **Keyboard:** in either editor, **]** / **[** move between items, arrow keys move the
+  selection (**Shift** for bigger steps), **F2** renames, **Delete** deletes, **Esc** clears.
+  Drawing wires and segments still needs a mouse.
+- **Languages:** the app is ready for translation; see [translations/README.md](translations/README.md).
 
 ## File format
 

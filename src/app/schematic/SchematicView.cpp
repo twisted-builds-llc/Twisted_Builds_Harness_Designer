@@ -38,6 +38,9 @@ SchematicView::SchematicView(Document *document, SelectionModel *selection, QWid
     , m_scene(new SchematicScene(document->model(), selection, this))
 {
     setScene(m_scene);
+    setAccessibleName(tr("Schematic editor"));
+    setAccessibleDescription(tr("Connectors, splices and wires. Press ] or [ to move between items, arrow "
+                                "keys to move the selection, F2 to rename, Delete to delete."));
     centerOn(QPointF(400, 300));
 
     connect(document->model(), &HarnessModel::harnessReset, this, [this] {
@@ -491,6 +494,18 @@ void SchematicView::commitMoves()
     m_pressPositions.clear();
     if (!changes.empty())
         m_document->undoStack()->push(new SetPlacementsCommand(m_document->model(), changes, tr("Move")));
+}
+
+bool SchematicView::nudgeSelection(const QPointF &delta)
+{
+    const std::vector<PlacedItem *> items = selectedPlacedItems();
+    if (items.empty())
+        return false;
+    rememberPressPositions();
+    for (PlacedItem *item : items)
+        item->setPos(item->pos() + delta);
+    commitMoves();
+    return true;
 }
 
 void SchematicView::toggleCollapsed(ConnectorItem *item)

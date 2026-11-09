@@ -6,6 +6,14 @@
 namespace tbh {
 
 namespace {
+// Translation context for this file (picked up by lupdate).
+class Tr
+{
+    Q_DECLARE_TR_FUNCTIONS(tbh::Queries)
+};
+} // namespace
+
+namespace {
 
 template<typename Pred>
 std::vector<QString> wiresWhere(const Harness &harness, Pred touches)
@@ -16,11 +24,6 @@ std::vector<QString> wiresWhere(const Harness &harness, Pred touches)
             ids.push_back(w.id);
     }
     return ids;
-}
-
-QString tr(const char *text)
-{
-    return QCoreApplication::translate("tbh::Queries", text);
 }
 
 } // namespace
@@ -62,29 +65,29 @@ QString describeWireEnd(const Harness &harness, const WireEnd &end)
             }
             return QStringLiteral("%1 : ?").arg(c.label);
         }
-        return tr("(missing connector)");
+        return Tr::tr("(missing connector)");
     }
     if (const auto *spliceRef = std::get_if<SpliceRef>(&end)) {
         for (const Splice &s : harness.splices) {
             if (s.id == spliceRef->spliceId)
                 return s.label;
         }
-        return tr("(missing splice)");
+        return Tr::tr("(missing splice)");
     }
     const auto &free = std::get<FreeEnd>(end);
     QString kind;
     switch (free.kind) {
     case FreeEndKind::FlyingLead:
-        kind = tr("Flying lead");
+        kind = Tr::tr("Flying lead");
         break;
     case FreeEndKind::Eyelet:
-        kind = tr("Eyelet");
+        kind = Tr::tr("Eyelet");
         break;
     case FreeEndKind::RingTerminal:
-        kind = tr("Ring terminal");
+        kind = Tr::tr("Ring terminal");
         break;
     case FreeEndKind::Bare:
-        kind = tr("Bare end");
+        kind = Tr::tr("Bare end");
         break;
     }
     return free.label.isEmpty() ? kind : QStringLiteral("%1 %2").arg(kind, free.label);

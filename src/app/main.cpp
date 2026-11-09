@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "Translations.h"
 #include "ui/MainWindow.h"
 #include "ui/theme/Theme.h"
 
@@ -12,6 +13,7 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("Harness Designer"));
     QApplication::setApplicationDisplayName(QStringLiteral("Twisted Builds Harness Designer"));
     QApplication::setApplicationVersion(QStringLiteral(TBH_APP_VERSION));
+    tbh::app::installTranslators(app);
 
     QCommandLineParser parser;
     parser.addHelpOption();

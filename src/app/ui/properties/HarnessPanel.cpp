@@ -66,6 +66,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     auto *lengthsForm = new QFormLayout(lengths);
     lengthsForm->addRow(tr("Service loop:"), m_serviceLoop);
     lengthsForm->addRow(tr("Round cut length up to:"), lengthRow(m_rounding));
+    m_rounding->setAccessibleName(tr("Round cut length up to"));
     m_rounding->setToolTip(tr("Cut lengths are rounded up to a multiple of this. 0 = no rounding."));
 
     auto *allowances = new QGroupBox(tr("End allowances (strip, terminal, slack)"), this);
@@ -76,6 +77,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
         {EndType::RingTerminal, tr("Ring terminal:")}, {EndType::Bare, tr("Bare end:")}};
     for (const auto &[type, label] : endTypes) {
         auto *edit = new QLineEdit(this);
+        edit->setAccessibleName(tr("End allowance, %1").arg(QString(label).remove(QLatin1Char(':'))));
         m_allowances[type] = edit;
         allowanceForm->addRow(label, lengthRow(edit));
         connect(edit, &QLineEdit::editingFinished, this, &HarnessPanel::commitSettings);

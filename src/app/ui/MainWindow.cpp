@@ -3,12 +3,16 @@
 
 #include "Document.h"
 #include "io/FileFormat.h"
+#include "Autosave.h"
 #include "Highlighter.h"
+#include "Preferences.h"
+#include "ui/RecoveryDialog.h"
 #include "bom/BomView.h"
 #include "LibraryStore.h"
 #include "SelectionModel.h"
 #include "layout/LayoutScene.h"
 #include "schematic/SchematicScene.h"
+#include "ui/HelpDialog.h"
 #include "ui/LibraryDialog.h"
 #include "model/Queries.h"
 #include "layout/LayoutView.h"
@@ -108,6 +112,10 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     connect(m_layout->view(), &LayoutView::statusMessage, this, showMessage);
     connect(m_selection, &SelectionModel::selectionChanged, this, &MainWindow::showSelectionStatus);
 
+    m_autosave = new Autosave(m_document, this);
+    m_autosave->setIntervalMinutes(preferences::autosaveMinutes());
+    QTimer::singleShot(0, this, [this] { offerRecovery(true); });
+
     refreshProjectTree();
     updateTitle();
     statusBar()->showMessage(tr("Ready"));
@@ -133,6 +141,7 @@ void MainWindow::createDocks()
 
     m_projectTree = new QTreeWidget(this);
     m_projectTree->setHeaderHidden(true);
+    m_projectTree->setAccessibleName(tr("Project contents"));
     auto *projectDock = new QDockWidget(tr("Project"), this);
     projectDock->setObjectName(QStringLiteral("projectDock"));
     projectDock->setWidget(m_projectTree);
@@ -152,6 +161,7 @@ void MainWindow::createDocks()
     addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
 
     auto *problems = new ProblemsPanel(m_document, this);
+    problems->setAccessibleName(tr("Problems"));
     auto *problemsDock = new QDockWidget(tr("Problems"), this);
     problemsDock->setObjectName(QStringLiteral("problemsDock"));
     problemsDock->setWidget(problems);
@@ -186,8 +196,9 @@ void MainWindow::createMenus()
     file->addAction(tr("Save &As..."), QKeySequence::SaveAs, this, &MainWindow::saveAs);
     file->addSeparator();
     file->addAction(tr("&Export BOM (CSV)..."), this, [this] { m_bom->exportCsv(); });
+    file->addAction(tr("Recover &Unsaved Work..."), this, [this] { offerRecovery(false); });
     file->addSeparator();
-    file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
+    file->addAction(tr("&Quit"), QKeySequence(Qt::CTRL | Qt::Key_Q), this, &QWidget::close);
 
     SchematicView *view = m_schematic;
     LayoutView *layout = m_layout->view();
@@ -236,8 +247,11 @@ void MainWindow::createMenus()
     });
     edit->addSeparator();
     edit->addAction(tr("Parts &Library..."), this, &MainWindow::editLibrary);
-    QAction *preferences = edit->addAction(tr("&Preferences..."), QKeySequence::Preferences, this,
-                                           [this] { PreferencesDialog(this).exec(); });
+    QAction *preferences = edit->addAction(tr("&Preferences..."), QKeySequence(Qt::CTRL | Qt::Key_Comma), this,
+                                           [this] {
+                                               if (PreferencesDialog(this).exec() == QDialog::Accepted)
+                                                   m_autosave->setIntervalMinutes(preferences::autosaveMinutes());
+                                           });
     preferences->setMenuRole(QAction::PreferencesRole);
 
     // Tools of one editor: shortcuts bound to that editor only, so both can use V/W.
@@ -347,6 +361,12 @@ void MainWindow::createMenus()
     }
 
     QMenu *help = menuBar()->addMenu(tr("&Help"));
+    help->addAction(tr("&Getting Started"), QKeySequence::HelpContents, this,
+                    [this] { showHelp(HelpDialog::Page::GettingStarted); });
+    help->addAction(tr("&Keyboard Shortcuts"), QKeySequence(Qt::CTRL | Qt::Key_Slash), this,
+                    [this] { showHelp(HelpDialog::Page::Shortcuts); });
+    help->addAction(tr("&Mouse"), this, [this] { showHelp(HelpDialog::Page::Mouse); });
+    help->addSeparator();
     help->addAction(tr("&About"), this, &MainWindow::showAbout);
 
     // One toolbar per editor; the current tab decides which is shown.
@@ -362,6 +382,7 @@ void MainWindow::createMenus()
     m_find = new QLineEdit(schematicBar);
     m_find->setPlaceholderText(tr("Find pin or circuit (Enter = next)"));
     m_find->setClearButtonEnabled(true);
+    m_find->setAccessibleName(tr("Find pin or circuit"));
     m_find->setMaximumWidth(280);
     schematicBar->addWidget(m_find);
     connect(m_find, &QLineEdit::returnPressed, view, [this] { m_schematic->find(m_find->text()); });
@@ -387,6 +408,35 @@ void MainWindow::createMenus()
     };
     connect(m_tabs, &QTabWidget::currentChanged, this, syncToolbars);
     syncToolbars();
+}
+
+void MainWindow::offerRecovery(bool quietIfNone)
+{
+    RecoveryDialog dialog(this);
+    if (dialog.isEmpty()) {
+        if (!quietIfNone)
+            QMessageBox::information(this, tr("Recover Unsaved Work"), tr("There is no unsaved work to recover."));
+        return;
+    }
+    if (dialog.exec() != QDialog::Accepted || !maybeSave())
+        return;
+    const RecoveryInfo info = dialog.chosen();
+    QString error;
+    if (!m_document->openRecovered(info.recoveryFile, info.originalPath, &error)) {
+        QMessageBox::critical(this, tr("Recover Unsaved Work"), error);
+        return;
+    }
+    // Keep the work safe under this session before dropping the old copy.
+    if (m_autosave->saveNow(&error))
+        Autosave::removeRecovery(info);
+    statusBar()->showMessage(tr("Recovered \u201c%1\u201d. Save it to keep the changes.").arg(info.harnessName), 8000);
+}
+
+void MainWindow::showHelp(HelpDialog::Page page)
+{
+    const auto shortcuts = HelpDialog::collectShortcuts(
+        this, {{m_schematic, tr("Schematic")}, {m_layout->view(), tr("Layout")}});
+    HelpDialog(shortcuts, page, this).exec();
 }
 
 void MainWindow::editLibrary()
