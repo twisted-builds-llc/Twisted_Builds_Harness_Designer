@@ -63,6 +63,10 @@ constexpr EnumName<LayoutNodeType> kLayoutNodeTypes[] = {{LayoutNodeType::Connec
                                                          {LayoutNodeType::FlyingLead, "flyingLead"},
                                                          {LayoutNodeType::Eyelet, "eyelet"}};
 constexpr EnumName<SleevingCoverage> kSleevingCoverages[] = {{SleevingCoverage::Full, "full"}};
+constexpr EnumName<SleevingKind> kSleevingKinds[] = {{SleevingKind::Braided, "braided"},
+                                                     {SleevingKind::SplitLoom, "splitLoom"},
+                                                     {SleevingKind::HeatShrink, "heatShrink"},
+                                                     {SleevingKind::Other, "other"}};
 
 template<typename E, size_t N>
 QString enumToString(const EnumName<E> (&table)[N], E value)
@@ -655,6 +659,99 @@ Schematic readSchematic(ObjectReader r)
     return schematic;
 }
 
+Gauge readGauge(ObjectReader r)
+{
+    Gauge g;
+    g.value = r.number("value", 0.0);
+    g.system = r.enumValue("system", kGaugeSystems, GaugeSystem::Awg);
+    return g;
+}
+
+QJsonObject writeGauge(const Gauge &g)
+{
+    return QJsonObject{{u"value"_s, g.value}, {u"system"_s, enumToString(kGaugeSystems, g.system)}};
+}
+
+Library readLibrary(ObjectReader r)
+{
+    Library library;
+    const QJsonArray types = r.array("wireTypes");
+    for (qsizetype i = 0; i < types.size(); ++i) {
+        const QString context = indexed(QStringLiteral("library.wireTypes"), i);
+        ObjectReader typeReader(requireObject(types[i], context), context);
+        WireType t;
+        t.id = typeReader.id();
+        t.name = typeReader.string("name");
+        t.approximate = typeReader.boolean("approximate", false);
+        const QJsonArray ods = typeReader.array("outerDiameters");
+        for (qsizetype j = 0; j < ods.size(); ++j) {
+            const QString odContext = indexed(context + QStringLiteral(".outerDiameters"), j);
+            ObjectReader odr(requireObject(ods[j], odContext), odContext);
+            WireOuterDiameter od;
+            od.gauge = readGauge(ObjectReader(odr.object("gauge", true), odContext + QStringLiteral(".gauge")));
+            od.odMm = odr.number("odMm", 0.0, true);
+            if (od.odMm <= 0)
+                fail(tr("%1: \"odMm\" must be positive.")
+                         .arg(odContext));
+            t.outerDiameters.push_back(od);
+        }
+        t.extra = typeReader.extra();
+        if (library.wireType(t.id))
+            fail(tr("Duplicate wire type id \"%1\".").arg(t.id));
+        library.wireTypes.push_back(t);
+    }
+    const QJsonArray sleevings = r.array("sleevings");
+    for (qsizetype i = 0; i < sleevings.size(); ++i) {
+        const QString context = indexed(QStringLiteral("library.sleevings"), i);
+        ObjectReader sr(requireObject(sleevings[i], context), context);
+        Sleeving s;
+        s.id = sr.id();
+        s.family = sr.string("family");
+        s.kind = sr.enumValue("kind", kSleevingKinds, SleevingKind::Other);
+        s.sizeLabel = sr.string("sizeLabel");
+        s.innerDiameterMm = sr.number("innerDiameterMm", 0.0, true);
+        s.recoveredDiameterMm = sr.optionalNumber("recoveredDiameterMm");
+        s.approximate = sr.boolean("approximate", false);
+        s.extra = sr.extra();
+        if (library.sleeving(s.id))
+            fail(tr("Duplicate sleeving id \"%1\".").arg(s.id));
+        library.sleevings.push_back(s);
+    }
+    return library;
+}
+
+QJsonObject writeLibrary(const Library &library)
+{
+    QJsonArray types;
+    for (const WireType &t : library.wireTypes) {
+        QJsonObject o = t.extra;
+        o[u"id"] = t.id;
+        o[u"name"] = t.name;
+        o[u"approximate"] = t.approximate;
+        QJsonArray ods;
+        for (const WireOuterDiameter &od : t.outerDiameters)
+            ods.append(QJsonObject{{u"gauge"_s, writeGauge(od.gauge)}, {u"odMm"_s, od.odMm}});
+        o[u"outerDiameters"] = ods;
+        types.append(o);
+    }
+    QJsonArray sleevings;
+    for (const Sleeving &s : library.sleevings) {
+        QJsonObject o = s.extra;
+        o[u"id"] = s.id;
+        o[u"family"] = s.family;
+        o[u"kind"] = enumToString(kSleevingKinds, s.kind);
+        o[u"sizeLabel"] = s.sizeLabel;
+        o[u"innerDiameterMm"] = s.innerDiameterMm;
+        o[u"approximate"] = s.approximate;
+        if (s.recoveredDiameterMm)
+            o[u"recoveredDiameterMm"] = *s.recoveredDiameterMm;
+        else
+            o.remove(u"recoveredDiameterMm");
+        sleevings.append(o);
+    }
+    return QJsonObject{{u"wireTypes"_s, types}, {u"sleevings"_s, sleevings}};
+}
+
 // Placements whose item no longer exists carry no information; drop them.
 void dropOrphanPlacements(Harness &h)
 {
@@ -685,7 +782,7 @@ bool isKnownEntry(const QString &name)
 {
     return name == kManifestEntry || name == kHarnessEntry || name == kConnectorsEntry
            || name == kWiresEntry || name == kSplicesEntry || name == kLayoutEntry
-           || name == kSchematicEntry;
+           || name == kSchematicEntry || name == kLibraryEntry;
 }
 
 } // namespace
@@ -722,6 +819,7 @@ ZipEntries serializeHarness(const Harness &h)
             .toJson(QJsonDocument::Indented);
     entries[QString(kSchematicEntry)] =
         QJsonDocument(writeSchematic(h.schematic)).toJson(QJsonDocument::Indented);
+    entries[QString(kLibraryEntry)] = serializeLibrary(h.library);
     return entries;
 }
 
@@ -774,6 +872,13 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
             h.schematic = readSchematic(ObjectReader(schematicDoc.object(), QStringLiteral("schematic")));
         }
 
+        const QJsonDocument libraryDoc = parseEntry(entries, kLibraryEntry, false);
+        if (!libraryDoc.isNull()) {
+            if (!libraryDoc.isObject())
+                fail(tr("\"%1\" must contain a JSON object.").arg(kLibraryEntry));
+            h.library = readLibrary(ObjectReader(libraryDoc.object(), QStringLiteral("library")));
+        }
+
         for (const auto &[name, data] : entries) {
             if (!isKnownEntry(name))
                 h.otherEntries[name] = data;
@@ -782,6 +887,26 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         checkIntegrity(h);
         dropOrphanPlacements(h);
         return h;
+    } catch (const FormatError &e) {
+        if (error)
+            *error = e.message;
+        return std::nullopt;
+    }
+}
+
+QByteArray serializeLibrary(const Library &library)
+{
+    return QJsonDocument(writeLibrary(library)).toJson(QJsonDocument::Indented);
+}
+
+std::optional<Library> deserializeLibrary(const QByteArray &json, QString *error)
+{
+    try {
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+            fail(tr("The library is not valid JSON: %1").arg(parseError.errorString()));
+        return readLibrary(ObjectReader(doc.object(), QStringLiteral("library")));
     } catch (const FormatError &e) {
         if (error)
             *error = e.message;

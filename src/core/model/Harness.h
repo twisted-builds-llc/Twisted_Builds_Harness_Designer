@@ -191,6 +191,57 @@ struct Schematic {
 // Placement key of a wire's free end: "<wireId>/a" or "<wireId>/b".
 QString freeEndPlacementKey(const QString &wireId, bool endB);
 
+// ---- Parts libraries (5.7) ----------------------------------------------------------
+// Wire types with outer diameters, and sleeving. Each user keeps a library; a harness file
+// embeds the entries it uses so it opens the same way on another machine. Shipped seed
+// values are approximate.
+
+struct WireOuterDiameter {
+    Gauge gauge;
+    double odMm = 0.0; // insulated outer diameter
+    bool operator==(const WireOuterDiameter &) const = default;
+};
+
+struct WireType {
+    QString id;
+    QString name; // e.g. "GXL"
+    std::vector<WireOuterDiameter> outerDiameters;
+    // Shipped seed data not verified by the user; the UI must label it approximate.
+    bool approximate = false;
+    QJsonObject extra;
+
+    // OD for an exact gauge match, or nullopt.
+    std::optional<double> outerDiameterMm(const Gauge &gauge) const;
+    bool operator==(const WireType &) const = default;
+};
+
+enum class SleevingKind { Braided, SplitLoom, HeatShrink, Other };
+
+struct Sleeving {
+    QString id;
+    QString family;    // the "type" the user picks, e.g. "PET braided"
+    SleevingKind kind = SleevingKind::Other;
+    QString sizeLabel; // e.g. "1/4 in"
+    double innerDiameterMm = 0.0; // nominal / as-supplied inner diameter
+    std::optional<double> recoveredDiameterMm; // heat shrink: fully recovered diameter
+    bool approximate = false; // see WireType::approximate
+    QJsonObject extra;
+
+    bool operator==(const Sleeving &) const = default;
+};
+
+struct Library {
+    std::vector<WireType> wireTypes;
+    std::vector<Sleeving> sleevings;
+
+    const WireType *wireType(const QString &id) const;
+    const Sleeving *sleeving(const QString &id) const;
+    // Distinct sleeving families in catalog order.
+    QStringList sleevingFamilies() const;
+    bool isEmpty() const { return wireTypes.empty() && sleevings.empty(); }
+    bool operator==(const Library &) const = default;
+};
+
 struct Harness {
     HarnessInfo info;
     Settings settings;
@@ -201,9 +252,10 @@ struct Harness {
     std::vector<LayoutNode> layoutNodes;
     std::vector<LayoutSegment> layoutSegments;
     Schematic schematic;
+    Library library; // embedded library entries (library.json)
     QJsonObject extra; // unknown keys of harness.json
-    // Container entries this version does not parse (e.g. bom.json,
-    // library.json until their milestones), kept byte-for-byte.
+    // Container entries this version does not parse (e.g. bom.json until its
+    // milestone), kept byte-for-byte.
     std::map<QString, QByteArray> otherEntries;
 
     bool operator==(const Harness &) const = default;

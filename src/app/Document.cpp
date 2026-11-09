@@ -3,6 +3,7 @@
 
 #include "Preferences.h"
 #include "io/TbhFile.h"
+#include "model/Library.h"
 
 namespace tbh::app {
 
@@ -38,7 +39,10 @@ bool Document::open(const QString &path, QString *error)
 
 bool Document::saveAs(const QString &path, QString *error)
 {
-    if (!io::writeTbhFile(path, m_model.harness(), error))
+    // Embed the library entries this harness uses so it opens the same elsewhere.
+    Harness harness = m_model.harness();
+    harness.library = usedLibraryEntries(harness, m_model.library());
+    if (!io::writeTbhFile(path, harness, error))
         return false;
     m_undoStack.setClean();
     setFilePath(path);

@@ -373,6 +373,39 @@ void SchematicScene::syncSelectionFromModel()
     m_syncingSelection = false;
 }
 
+void SchematicScene::setHighlight(const std::optional<calc::HighlightSet> &set)
+{
+    m_highlight = set;
+    applyHighlight();
+}
+
+void SchematicScene::applyHighlight()
+{
+    constexpr qreal kDimmed = 0.18;
+    const calc::HighlightSet *set = m_highlight ? &*m_highlight : nullptr;
+    auto opacity = [set](const QSet<QString> &ids, const QString &id) {
+        return !set || ids.contains(id) ? 1.0 : kDimmed;
+    };
+    for (auto it = m_connectors.cbegin(); it != m_connectors.cend(); ++it) {
+        it.value()->setOpacity(set ? opacity(set->connectors, it.key()) : 1.0);
+        QSet<QString> pins;
+        if (set) {
+            const QString prefix = it.key() + QLatin1Char('/');
+            for (const QString &key : set->pins) {
+                if (key.startsWith(prefix))
+                    pins.insert(key.mid(prefix.size()));
+            }
+        }
+        it.value()->setRelatedPins(set != nullptr, pins);
+    }
+    for (auto it = m_splices.cbegin(); it != m_splices.cend(); ++it)
+        it.value()->setOpacity(set ? opacity(set->splices, it.key()) : 1.0);
+    for (auto it = m_wires.cbegin(); it != m_wires.cend(); ++it)
+        it.value()->setOpacity(set ? opacity(set->wires, it.key()) : 1.0);
+    for (auto it = m_freeEnds.cbegin(); it != m_freeEnds.cend(); ++it)
+        it.value()->setOpacity(set ? opacity(set->freeEnds, it.key()) : 1.0);
+}
+
 void SchematicScene::setSearchText(const QString &text)
 {
     m_search = text;

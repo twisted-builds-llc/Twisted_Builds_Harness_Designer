@@ -2,6 +2,8 @@
 # Everything except main() lives in tbh_app_lib so tests can link it.
 add_library(tbh_app_lib STATIC
     Document.h Document.cpp
+    Highlighter.h Highlighter.cpp
+    LibraryStore.h LibraryStore.cpp
     Preferences.h Preferences.cpp
     SelectionModel.h
     commands/EditOps.h commands/EditOps.cpp
@@ -16,6 +18,7 @@ add_library(tbh_app_lib STATIC
     ui/CanvasView.h ui/CanvasView.cpp
     ui/ConnectorEdits.h ui/ConnectorEdits.cpp
     ui/Format.h ui/Format.cpp
+    ui/LibraryDialog.h ui/LibraryDialog.cpp
     ui/MainWindow.h ui/MainWindow.cpp
     ui/PinPatternDialog.h ui/PinPatternDialog.cpp
     ui/ProblemsPanel.h ui/ProblemsPanel.cpp
@@ -31,6 +34,10 @@ add_library(tbh_app_lib STATIC
     ui/WireColors.h ui/WireColors.cpp
 )
 target_include_directories(tbh_app_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+qt_add_resources(tbh_app_lib "default_library"
+    PREFIX "/"
+    BASE "${PROJECT_SOURCE_DIR}/resources"
+    FILES "${PROJECT_SOURCE_DIR}/resources/default-library/library.json")
 target_link_libraries(tbh_app_lib PUBLIC tbh_core Qt6::Widgets)
 tbh_set_warnings(tbh_app_lib)
 

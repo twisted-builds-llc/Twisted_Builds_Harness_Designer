@@ -2,6 +2,7 @@
 #include "layout/LayoutScene.h"
 
 #include "SelectionModel.h"
+#include "calc/Bundle.h"
 #include "calc/WireLength.h"
 #include "model/Queries.h"
 #include "ui/CanvasView.h"
@@ -22,6 +23,8 @@ LayoutScene::LayoutScene(HarnessModel *model, SelectionModel *selection, QObject
     connect(model, &HarnessModel::entityChanged, this, &LayoutScene::onChanged);
     connect(model, &HarnessModel::entityRemoved, this, &LayoutScene::onRemoved);
     connect(model, &HarnessModel::infoChanged, this, &LayoutScene::scheduleRefresh); // units
+    connect(model, &HarnessModel::settingsChanged, this, &LayoutScene::scheduleRefresh); // packing factor
+    connect(model, &HarnessModel::libraryChanged, this, &LayoutScene::scheduleRefresh);
     connect(this, &QGraphicsScene::selectionChanged, this, &LayoutScene::syncSelectionToModel);
     connect(selection, &SelectionModel::selectionChanged, this, &LayoutScene::syncSelectionFromModel);
     rebuild();
@@ -136,15 +139,49 @@ void LayoutScene::refreshCaptions()
 
     const calc::LayoutGraph graph(h);
     const auto usage = calc::wiresBySegment(h, graph);
+    const Library &library = m_model->library();
     for (LayoutSegmentItem *item : std::as_const(m_segments)) {
         const LayoutSegment &s = item->segment();
-        const int count = int(usage.value(s.id).size());
-        QString usageText = tr("%n wire(s)", nullptr, count);
+        const auto wires = usage.value(s.id);
+        QString usageText = tr("%n wire(s)", nullptr, int(wires.size()));
+        if (m_showDiameters && !wires.empty()) {
+            const calc::BundleDiameter bundle = calc::bundleDiameter(h, library, wires);
+            // "~" marks a diameter that uses estimated wire ODs.
+            usageText += QStringLiteral(" \u00b7 \u00d8 %1%2")
+                             .arg(bundle.estimatedWireIds.empty() ? QString() : QStringLiteral("~"),
+                                  formatLength(bundle.diameterMm, h.info.units));
+        }
         if (!s.label.isEmpty())
-            usageText = s.label + QStringLiteral(" · ") + usageText;
-        item->setCaption(s.lengthMm > 0 ? formatLength(s.lengthMm, h.info.units) : tr("no length"), usageText);
+            usageText = s.label + QStringLiteral(" \u00b7 ") + usageText;
+        QString lengthText = s.lengthMm > 0 ? formatLength(s.lengthMm, h.info.units) : tr("no length");
+        if (const Sleeving *sleeving = library.sleeving(s.sleevingId))
+            lengthText += QStringLiteral(" \u00b7 ") + sleeving->sizeLabel;
+        item->setCaption(lengthText, usageText);
         item->update();
     }
+    applyHighlight();
+}
+
+void LayoutScene::setHighlight(const std::optional<calc::HighlightSet> &set)
+{
+    m_highlight = set;
+    applyHighlight();
+}
+
+void LayoutScene::applyHighlight()
+{
+    constexpr qreal kDimmed = 0.18;
+    const calc::HighlightSet *set = m_highlight ? &*m_highlight : nullptr;
+    for (auto it = m_nodes.cbegin(); it != m_nodes.cend(); ++it)
+        it.value()->setOpacity(!set || set->layoutNodes.contains(it.key()) ? 1.0 : kDimmed);
+    for (auto it = m_segments.cbegin(); it != m_segments.cend(); ++it)
+        it.value()->setOpacity(!set || set->layoutSegments.contains(it.key()) ? 1.0 : kDimmed);
+}
+
+void LayoutScene::setShowBundleDiameters(bool on)
+{
+    m_showDiameters = on;
+    refreshCaptions();
 }
 
 void LayoutScene::syncSelectionToModel()

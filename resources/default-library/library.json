@@ -1,0 +1,489 @@
+{
+  "sleevings": [
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-1-8",
+      "innerDiameterMm": 3.2,
+      "kind": "braided",
+      "sizeLabel": "1/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-3-16",
+      "innerDiameterMm": 4.8,
+      "kind": "braided",
+      "sizeLabel": "3/16 in"
+    },
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-1-4",
+      "innerDiameterMm": 6.4,
+      "kind": "braided",
+      "sizeLabel": "1/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-3-8",
+      "innerDiameterMm": 9.5,
+      "kind": "braided",
+      "sizeLabel": "3/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-1-2",
+      "innerDiameterMm": 12.7,
+      "kind": "braided",
+      "sizeLabel": "1/2 in"
+    },
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-5-8",
+      "innerDiameterMm": 15.9,
+      "kind": "braided",
+      "sizeLabel": "5/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-3-4",
+      "innerDiameterMm": 19.1,
+      "kind": "braided",
+      "sizeLabel": "3/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "PET expandable braid",
+      "id": "seed-pet-1",
+      "innerDiameterMm": 25.4,
+      "kind": "braided",
+      "sizeLabel": "1 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-1-8",
+      "innerDiameterMm": 3.2,
+      "kind": "splitLoom",
+      "sizeLabel": "1/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-3-16",
+      "innerDiameterMm": 4.8,
+      "kind": "splitLoom",
+      "sizeLabel": "3/16 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-1-4",
+      "innerDiameterMm": 6.4,
+      "kind": "splitLoom",
+      "sizeLabel": "1/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-3-8",
+      "innerDiameterMm": 9.5,
+      "kind": "splitLoom",
+      "sizeLabel": "3/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-1-2",
+      "innerDiameterMm": 12.7,
+      "kind": "splitLoom",
+      "sizeLabel": "1/2 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-5-8",
+      "innerDiameterMm": 15.9,
+      "kind": "splitLoom",
+      "sizeLabel": "5/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-3-4",
+      "innerDiameterMm": 19.1,
+      "kind": "splitLoom",
+      "sizeLabel": "3/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "Split loom",
+      "id": "seed-loom-1",
+      "innerDiameterMm": 25.4,
+      "kind": "splitLoom",
+      "sizeLabel": "1 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-3-32",
+      "innerDiameterMm": 2.4,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 1.2,
+      "sizeLabel": "3/32 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-1-8",
+      "innerDiameterMm": 3.2,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 1.6,
+      "sizeLabel": "1/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-3-16",
+      "innerDiameterMm": 4.8,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 2.4,
+      "sizeLabel": "3/16 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-1-4",
+      "innerDiameterMm": 6.4,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 3.2,
+      "sizeLabel": "1/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-3-8",
+      "innerDiameterMm": 9.5,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 4.75,
+      "sizeLabel": "3/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-1-2",
+      "innerDiameterMm": 12.7,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 6.35,
+      "sizeLabel": "1/2 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-3-4",
+      "innerDiameterMm": 19.1,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 9.55,
+      "sizeLabel": "3/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 2:1",
+      "id": "seed-hs2-1",
+      "innerDiameterMm": 25.4,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 12.7,
+      "sizeLabel": "1 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 3:1 (adhesive)",
+      "id": "seed-hs3-1-4",
+      "innerDiameterMm": 6.4,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 2.13,
+      "sizeLabel": "1/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 3:1 (adhesive)",
+      "id": "seed-hs3-3-8",
+      "innerDiameterMm": 9.5,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 3.17,
+      "sizeLabel": "3/8 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 3:1 (adhesive)",
+      "id": "seed-hs3-1-2",
+      "innerDiameterMm": 12.7,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 4.23,
+      "sizeLabel": "1/2 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 3:1 (adhesive)",
+      "id": "seed-hs3-3-4",
+      "innerDiameterMm": 19.1,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 6.37,
+      "sizeLabel": "3/4 in"
+    },
+    {
+      "approximate": true,
+      "family": "Heat shrink 3:1 (adhesive)",
+      "id": "seed-hs3-1",
+      "innerDiameterMm": 25.4,
+      "kind": "heatShrink",
+      "recoveredDiameterMm": 8.47,
+      "sizeLabel": "1 in"
+    }
+  ],
+  "wireTypes": [
+    {
+      "approximate": true,
+      "id": "seed-txl",
+      "name": "TXL",
+      "outerDiameters": [
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 22
+          },
+          "odMm": 1.22
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 20
+          },
+          "odMm": 1.37
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 18
+          },
+          "odMm": 1.57
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 16
+          },
+          "odMm": 1.85
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 14
+          },
+          "odMm": 2.21
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 12
+          },
+          "odMm": 2.67
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 10
+          },
+          "odMm": 3.25
+        }
+      ]
+    },
+    {
+      "approximate": true,
+      "id": "seed-gxl",
+      "name": "GXL",
+      "outerDiameters": [
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 22
+          },
+          "odMm": 1.6
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 20
+          },
+          "odMm": 1.78
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 18
+          },
+          "odMm": 2.06
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 16
+          },
+          "odMm": 2.36
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 14
+          },
+          "odMm": 2.74
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 12
+          },
+          "odMm": 3.25
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 10
+          },
+          "odMm": 3.81
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 8
+          },
+          "odMm": 5.1
+        }
+      ]
+    },
+    {
+      "approximate": true,
+      "id": "seed-sxl",
+      "name": "SXL",
+      "outerDiameters": [
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 20
+          },
+          "odMm": 2.16
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 18
+          },
+          "odMm": 2.46
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 16
+          },
+          "odMm": 2.79
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 14
+          },
+          "odMm": 3.18
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 12
+          },
+          "odMm": 3.68
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 10
+          },
+          "odMm": 4.32
+        },
+        {
+          "gauge": {
+            "system": "awg",
+            "value": 8
+          },
+          "odMm": 5.6
+        }
+      ]
+    },
+    {
+      "approximate": true,
+      "id": "seed-flry-b",
+      "name": "FLRY-B",
+      "outerDiameters": [
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 0.35
+          },
+          "odMm": 1.3
+        },
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 0.5
+          },
+          "odMm": 1.6
+        },
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 0.75
+          },
+          "odMm": 1.9
+        },
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 1.0
+          },
+          "odMm": 2.1
+        },
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 1.5
+          },
+          "odMm": 2.4
+        },
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 2.5
+          },
+          "odMm": 3.0
+        },
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 4.0
+          },
+          "odMm": 3.7
+        },
+        {
+          "gauge": {
+            "system": "mm2",
+            "value": 6.0
+          },
+          "odMm": 4.3
+        }
+      ]
+    }
+  ]
+}

@@ -3,7 +3,12 @@
 
 #include "Document.h"
 #include "io/FileFormat.h"
+#include "Highlighter.h"
+#include "LibraryStore.h"
 #include "SelectionModel.h"
+#include "layout/LayoutScene.h"
+#include "schematic/SchematicScene.h"
+#include "ui/LibraryDialog.h"
 #include "model/Queries.h"
 #include "layout/LayoutView.h"
 #include "schematic/SchematicView.h"
@@ -29,6 +34,7 @@
 #include <QSettings>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTimer>
 #include <QToolBar>
 #include <QTreeWidget>
 
@@ -61,8 +67,20 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     , m_document(new Document(this))
     , m_selection(new SelectionModel(m_document->model(), this))
 {
+    QString libraryWarning;
+    m_document->model()->setUserLibrary(libraryStore::loadUserLibrary(&libraryWarning));
+    if (!libraryWarning.isEmpty())
+        QTimer::singleShot(0, this, [this, libraryWarning] {
+            QMessageBox::warning(this, tr("Parts Library"), libraryWarning);
+        });
+
     m_schematic = new SchematicView(m_document, m_selection, this);
     m_layout = new LayoutEditor(m_document, m_selection, this);
+    m_highlighter = new Highlighter(m_document->model(), m_selection, this);
+    connect(m_highlighter, &Highlighter::changed, this, [this] {
+        m_schematic->schematicScene()->setHighlight(m_highlighter->current());
+        m_layout->view()->layoutScene()->setHighlight(m_highlighter->current());
+    });
     m_tabs = new QTabWidget(this);
     m_tabs->setDocumentMode(true);
     m_tabs->addTab(m_schematic, tr("Schematic"));
@@ -214,6 +232,7 @@ void MainWindow::createMenus()
         m_find->selectAll();
     });
     edit->addSeparator();
+    edit->addAction(tr("Parts &Library..."), this, &MainWindow::editLibrary);
     QAction *preferences = edit->addAction(tr("&Preferences..."), QKeySequence::Preferences, this,
                                            [this] { PreferencesDialog(this).exec(); });
     preferences->setMenuRole(QAction::PreferencesRole);
@@ -289,6 +308,24 @@ void MainWindow::createMenus()
         view->setSnapToGrid(on);
         layout->setSnapToGrid(on);
     });
+    QAction *highlight = m_viewMenu->addAction(tr("&Highlight Related Items"));
+    highlight->setCheckable(true);
+    highlight->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_H));
+    highlight->setToolTip(tr("Selecting something highlights everything connected to it and dims the rest"));
+    highlight->setChecked(QSettings().value(QStringLiteral("view/highlight"), true).toBool());
+    m_highlighter->setEnabled(highlight->isChecked());
+    connect(highlight, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue(QStringLiteral("view/highlight"), on);
+        m_highlighter->setEnabled(on);
+    });
+    QAction *diameters = m_viewMenu->addAction(tr("Show &Bundle Diameters"));
+    diameters->setCheckable(true);
+    diameters->setChecked(QSettings().value(QStringLiteral("view/bundleDiameters"), true).toBool());
+    m_layout->view()->layoutScene()->setShowBundleDiameters(diameters->isChecked());
+    connect(diameters, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue(QStringLiteral("view/bundleDiameters"), on);
+        m_layout->view()->layoutScene()->setShowBundleDiameters(on);
+    });
     m_viewMenu->addSeparator();
     for (QDockWidget *dock : findChildren<QDockWidget *>())
         m_viewMenu->addAction(dock->toggleViewAction());
@@ -347,6 +384,17 @@ void MainWindow::createMenus()
     };
     connect(m_tabs, &QTabWidget::currentChanged, this, syncToolbars);
     syncToolbars();
+}
+
+void MainWindow::editLibrary()
+{
+    LibraryDialog dialog(m_document->model()->userLibrary(), this);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    QString error;
+    if (!libraryStore::saveUserLibrary(dialog.library(), &error))
+        QMessageBox::warning(this, tr("Parts Library"), error);
+    m_document->model()->setUserLibrary(dialog.library());
 }
 
 void MainWindow::showSelectionStatus()

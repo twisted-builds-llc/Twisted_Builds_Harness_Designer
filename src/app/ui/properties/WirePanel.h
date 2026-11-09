@@ -59,8 +59,8 @@ private:
     QPushButton *m_baseCustom;
     QPushButton *m_stripeCustom;
     GaugeEditor *m_gauge;
-    QLineEdit *m_wireType;
-    bool m_wireTypeMixed = false;
+    QComboBox *m_wireType;
+    QLabel *m_outerDiameter;
     QLabel *m_length;
     QLabel *m_lengthDetail;
     void refreshLength(const std::vector<Wire> &wires);

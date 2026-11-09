@@ -18,6 +18,8 @@ ProblemsPanel::ProblemsPanel(Document *document, QWidget *parent)
     connect(model, &HarnessModel::entityAdded, this, &ProblemsPanel::scheduleRefresh);
     connect(model, &HarnessModel::entityChanged, this, &ProblemsPanel::scheduleRefresh);
     connect(model, &HarnessModel::entityRemoved, this, &ProblemsPanel::scheduleRefresh);
+    connect(model, &HarnessModel::settingsChanged, this, &ProblemsPanel::scheduleRefresh);
+    connect(model, &HarnessModel::libraryChanged, this, &ProblemsPanel::scheduleRefresh);
     auto activate = [this](QListWidgetItem *item) {
         emit problemActivated(calc::Problem::Kind(item->data(Qt::UserRole).toInt()),
                               item->data(Qt::UserRole + 1).toString());
@@ -41,7 +43,7 @@ void ProblemsPanel::scheduleRefresh()
 void ProblemsPanel::refresh()
 {
     clear();
-    const auto problems = calc::findProblems(m_document->model()->harness());
+    const auto problems = calc::findProblems(m_document->model()->harness(), m_document->model()->library());
     const QIcon icon = style()->standardIcon(QStyle::SP_MessageBoxWarning);
     for (const calc::Problem &p : problems) {
         auto *item = new QListWidgetItem(icon, p.message, this);

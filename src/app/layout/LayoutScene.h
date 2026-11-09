@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "calc/Highlight.h"
 #include "layout/LayoutItems.h"
 #include "model/HarnessModel.h"
 
@@ -28,6 +29,9 @@ public:
     LayoutNodeItem *nodeItem(const QString &id) const { return m_nodes.value(id); }
     LayoutSegmentItem *segmentItem(const QString &id) const { return m_segments.value(id); }
 
+    void setHighlight(const std::optional<calc::HighlightSet> &set);
+    void setShowBundleDiameters(bool on);
+
     // Called by LayoutNodeItem when it moves.
     void nodeMoved(LayoutNodeItem *item);
 
@@ -53,6 +57,9 @@ private:
     bool m_snap = true;
     bool m_syncingSelection = false;
     bool m_refreshPending = false;
+    bool m_showDiameters = true;
+    std::optional<calc::HighlightSet> m_highlight;
+    void applyHighlight();
     QHash<QString, LayoutNodeItem *> m_nodes;
     QHash<QString, LayoutSegmentItem *> m_segments;
 };
