@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Document.h"
+#include "Preferences.h"
 #include "commands/SetHarnessInfoCommand.h"
 
+#include <QSettings>
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTest>
 
@@ -15,13 +18,39 @@ class TestCommands : public QObject
     Q_OBJECT
 
 private slots:
+    void initTestCase()
+    {
+        // Keep tests away from the user's real settings.
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setOrganizationName(u"tbh-tests"_s);
+        QCoreApplication::setApplicationName(u"tst_commands"_s);
+    }
+
+    void init() { QSettings().clear(); }
+    void cleanupTestCase() { QSettings().clear(); }
+
+    void defaultUnitsPreference()
+    {
+        QCOMPARE(preferences::defaultUnits(), Units::Inches); // unset -> inches
+        QCOMPARE(Document().model()->harness().info.units, Units::Inches);
+
+        preferences::setDefaultUnits(Units::Centimeters);
+        QCOMPARE(preferences::defaultUnits(), Units::Centimeters);
+        Document doc;
+        QCOMPARE(doc.model()->harness().info.units, Units::Centimeters);
+
+        preferences::setDefaultUnits(Units::Millimeters);
+        doc.newHarness();
+        QCOMPARE(doc.model()->harness().info.units, Units::Millimeters);
+    }
+
     void setHarnessInfoUndoRedo()
     {
         Document doc;
         const HarnessInfo before = doc.model()->harness().info;
         HarnessInfo after = before;
         after.name = u"Renamed"_s;
-        after.units = Units::Inches;
+        after.units = Units::Centimeters;
         after.description = u"desc"_s;
 
         doc.undoStack()->push(new SetHarnessInfoCommand(doc.model(), after));

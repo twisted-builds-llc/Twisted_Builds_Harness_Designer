@@ -42,7 +42,6 @@ struct EnumName
     const char *name;
 };
 
-constexpr EnumName<Units> kUnits[] = {{Units::Millimeters, "mm"}, {Units::Inches, "in"}};
 constexpr EnumName<Gender> kGenders[] = {
     {Gender::None, "none"}, {Gender::Male, "male"}, {Gender::Female, "female"}};
 constexpr EnumName<GaugeSystem> kGaugeSystems[] = {
@@ -626,7 +625,7 @@ ZipEntries serializeHarness(const Harness &h)
     harness[u"description"] = h.info.description;
     harness[u"revision"] = h.info.revision;
     harness[u"author"] = h.info.author;
-    harness[u"units"] = enumToString(kUnits, h.info.units);
+    harness[u"units"] = unitsSymbol(h.info.units);
     harness[u"settings"] = writeSettings(h.settings);
     entries[QString(kHarnessEntry)] = QJsonDocument(harness).toJson(QJsonDocument::Indented);
 
@@ -659,7 +658,13 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         h.info.description = r.string("description");
         h.info.revision = r.string("revision");
         h.info.author = r.string("author");
-        h.info.units = r.enumValue("units", kUnits, Units::Millimeters);
+        const QString units = r.string("units");
+        if (!units.isEmpty()) {
+            const auto parsed = unitsFromSymbol(units);
+            if (!parsed)
+                fail(tr("harness: unknown value \"%1\" for \"units\".").arg(units));
+            h.info.units = *parsed;
+        }
         h.settings = readSettings(ObjectReader(r.object("settings"), QStringLiteral("settings")));
         h.extra = r.extra();
 

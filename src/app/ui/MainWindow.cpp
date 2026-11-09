@@ -4,6 +4,7 @@
 #include "Document.h"
 #include "io/FileFormat.h"
 #include "ui/HarnessPropertiesPanel.h"
+#include "ui/PreferencesDialog.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -113,6 +114,10 @@ void MainWindow::createMenus()
     redo->setShortcut(QKeySequence::Redo);
     edit->addAction(undo);
     edit->addAction(redo);
+    edit->addSeparator();
+    QAction *preferences = edit->addAction(tr("&Preferences..."), QKeySequence::Preferences, this,
+                                           [this] { PreferencesDialog(this).exec(); });
+    preferences->setMenuRole(QAction::PreferencesRole);
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     for (QDockWidget *dock : findChildren<QDockWidget *>())

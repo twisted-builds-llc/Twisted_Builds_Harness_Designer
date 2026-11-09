@@ -76,11 +76,11 @@ Loading fails with a message if:
     "wasteFactorSleevingPercent": 5,
     "wasteFactorWirePercent": 5
   },
-  "units": "mm"
+  "units": "in"
 }
 ```
 
-- `units`: `mm` | `in` (display unit only).
+- `units`: `in` | `mm` | `cm` (display unit only; default `in` when absent).
 - `stripAllowanceMm` keys: `pin`, `splice`, `flyingLead`, `eyelet`, `ringTerminal`, `bare`.
   A missing key means 0 mm.
 

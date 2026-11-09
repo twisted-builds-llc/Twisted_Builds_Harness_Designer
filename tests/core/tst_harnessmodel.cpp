@@ -36,6 +36,17 @@ private slots:
         QCOMPARE(model.harness().info.name, u"B"_s);
     }
 
+    void unitsSymbols()
+    {
+        QCOMPARE(unitsSymbol(Units::Inches), u"in"_s);
+        QCOMPARE(unitsSymbol(Units::Millimeters), u"mm"_s);
+        QCOMPARE(unitsSymbol(Units::Centimeters), u"cm"_s);
+        for (Units u : {Units::Inches, Units::Millimeters, Units::Centimeters})
+            QCOMPARE(unitsFromSymbol(unitsSymbol(u)), std::optional<Units>(u));
+        QVERIFY(!unitsFromSymbol(u"ft"_s));
+        QCOMPARE(HarnessInfo().units, Units::Inches);
+    }
+
     void newIdIsUniqueUuid()
     {
         const QString a = newId();
