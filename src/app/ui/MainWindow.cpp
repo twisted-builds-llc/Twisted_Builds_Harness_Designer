@@ -3,8 +3,12 @@
 
 #include "Document.h"
 #include "io/FileFormat.h"
-#include "ui/HarnessPropertiesPanel.h"
+#include "SelectionModel.h"
+#include "model/Queries.h"
+#include "schematic/SchematicView.h"
 #include "ui/PreferencesDialog.h"
+#include "ui/properties/ConnectorPanel.h"
+#include "ui/properties/PropertiesPanel.h"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -14,12 +18,15 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QLabel>
+#include <QLineEdit>
 #include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QScrollArea>
 #include <QSettings>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QToolBar>
 #include <QTreeWidget>
 
 namespace tbh::app {
@@ -49,12 +56,14 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     : QMainWindow(parent)
     , m_theme(theme)
     , m_document(new Document(this))
+    , m_selection(new SelectionModel(this))
 {
+    m_schematic = new SchematicView(m_document, m_selection, this);
     auto *tabs = new QTabWidget(this);
     tabs->setDocumentMode(true);
-    tabs->addTab(placeholder(tr("Schematic editor (milestone 2)")), tr("Schematic"));
-    tabs->addTab(placeholder(tr("Layout editor (milestone 3)")), tr("Layout"));
-    tabs->addTab(placeholder(tr("Bill of materials (milestone 5)")), tr("BOM"));
+    tabs->addTab(m_schematic, tr("Schematic"));
+    tabs->addTab(placeholder(tr("Layout editor (coming in a later version)")), tr("Layout"));
+    tabs->addTab(placeholder(tr("Bill of materials (coming in a later version)")), tr("BOM"));
     setCentralWidget(tabs);
 
     createDocks();
@@ -62,13 +71,23 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
 
     connect(m_document, &Document::filePathChanged, this, &MainWindow::updateTitle);
     connect(m_document, &Document::modifiedChanged, this, &MainWindow::updateTitle);
-    connect(m_document->model(), &HarnessModel::harnessReset, this, &MainWindow::refreshProjectTree);
-    connect(m_document->model(), &HarnessModel::infoChanged, this, &MainWindow::refreshProjectTree);
+    HarnessModel *model = m_document->model();
+    connect(model, &HarnessModel::harnessReset, this, &MainWindow::refreshProjectTree);
+    connect(model, &HarnessModel::infoChanged, this, &MainWindow::refreshProjectTree);
+    connect(model, &HarnessModel::entityAdded, this, &MainWindow::refreshProjectTree);
+    connect(model, &HarnessModel::entityRemoved, this, &MainWindow::refreshProjectTree);
+    connect(model, &HarnessModel::entityChanged, this, [this](EntityKind kind) {
+        if (kind != EntityKind::Wire)
+            refreshProjectTree();
+    });
+    connect(m_schematic, &SchematicView::statusMessage, this,
+            [this](const QString &message) { statusBar()->showMessage(message, 5000); });
+    connect(m_selection, &SelectionModel::selectionChanged, this, &MainWindow::showSelectionStatus);
 
     refreshProjectTree();
     updateTitle();
     statusBar()->showMessage(tr("Ready"));
-    resize(1280, 800);
+    resize(1400, 860);
 }
 
 void MainWindow::createDocks()
@@ -83,15 +102,24 @@ void MainWindow::createDocks()
     projectDock->setWidget(m_projectTree);
     addDockWidget(Qt::LeftDockWidgetArea, projectDock);
 
+    auto *properties = new PropertiesPanel(m_document, m_selection, this);
+    connect(properties->connectorPanel(), &ConnectorPanel::displayChangeRequested, m_schematic,
+            &SchematicView::setConnectorDisplay);
+    auto *scroll = new QScrollArea(this);
+    scroll->setWidget(properties);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
     auto *propertiesDock = new QDockWidget(tr("Properties"), this);
     propertiesDock->setObjectName(QStringLiteral("propertiesDock"));
-    propertiesDock->setWidget(new HarnessPropertiesPanel(m_document, propertiesDock));
+    propertiesDock->setWidget(scroll);
+    propertiesDock->setMinimumWidth(360);
     addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
 
     auto *problemsDock = new QDockWidget(tr("Problems"), this);
     problemsDock->setObjectName(QStringLiteral("problemsDock"));
     problemsDock->setWidget(new QListWidget(problemsDock));
     addDockWidget(Qt::BottomDockWidgetArea, problemsDock);
+    problemsDock->hide(); // nothing reports problems yet
 }
 
 void MainWindow::createMenus()
@@ -107,6 +135,7 @@ void MainWindow::createMenus()
     file->addSeparator();
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
+    SchematicView *view = m_schematic;
     QMenu *edit = menuBar()->addMenu(tr("&Edit"));
     QAction *undo = m_document->undoStack()->createUndoAction(this, tr("&Undo"));
     undo->setShortcut(QKeySequence::Undo);
@@ -115,11 +144,77 @@ void MainWindow::createMenus()
     edit->addAction(undo);
     edit->addAction(redo);
     edit->addSeparator();
+    // Canvas actions only fire while the schematic has focus, so they never steal
+    // keys (Delete, Ctrl+C...) from text fields in the panels.
+    auto canvasAction = [&](QMenu *menu, const QString &text, const QKeySequence &key, auto slot) {
+        QAction *action = menu->addAction(text);
+        action->setShortcut(key);
+        action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        view->addAction(action);
+        connect(action, &QAction::triggered, view, slot);
+        return action;
+    };
+    canvasAction(edit, tr("&Copy"), QKeySequence::Copy, &SchematicView::copySelection);
+    canvasAction(edit, tr("&Paste"), QKeySequence::Paste, &SchematicView::paste);
+    canvasAction(edit, tr("D&uplicate"), QKeySequence(Qt::CTRL | Qt::Key_D), &SchematicView::duplicateSelection);
+    QAction *del = canvasAction(edit, tr("&Delete"), QKeySequence::Delete, &SchematicView::deleteSelection);
+    del->setShortcuts({QKeySequence::Delete, QKeySequence(Qt::Key_Backspace)});
+    canvasAction(edit, tr("Re&name"), QKeySequence(Qt::Key_F2), &SchematicView::renameSelection);
+    canvasAction(edit, tr("Select &All"), QKeySequence::SelectAll, &SchematicView::selectAll);
+    edit->addSeparator();
+    edit->addAction(tr("&Find Pin..."), QKeySequence::Find, this, [this] {
+        m_find->setFocus();
+        m_find->selectAll();
+    });
+    edit->addSeparator();
     QAction *preferences = edit->addAction(tr("&Preferences..."), QKeySequence::Preferences, this,
                                            [this] { PreferencesDialog(this).exec(); });
     preferences->setMenuRole(QAction::PreferencesRole);
 
+    QMenu *place = menuBar()->addMenu(tr("&Place"));
+    QAction *addConnector =
+        canvasAction(place, tr("Add &Connector"), QKeySequence(Qt::Key_C), &SchematicView::addConnector);
+    QAction *addSplice = canvasAction(place, tr("Add &Splice"), QKeySequence(Qt::Key_S), &SchematicView::addSplice);
+    place->addSeparator();
+    auto *toolGroup = new QActionGroup(this);
+    QAction *selectTool = place->addAction(tr("S&elect Tool"));
+    QAction *wireTool = place->addAction(tr("&Wire Tool"));
+    selectTool->setShortcut(QKeySequence(Qt::Key_V));
+    wireTool->setShortcut(QKeySequence(Qt::Key_W));
+    for (QAction *tool : {selectTool, wireTool}) {
+        tool->setCheckable(true);
+        tool->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        toolGroup->addAction(tool);
+        view->addAction(tool);
+    }
+    selectTool->setChecked(true);
+    selectTool->setToolTip(tr("Select and move items; drag from a pin to draw a wire (V)"));
+    wireTool->setToolTip(tr("Draw wires from pins or splices (W)"));
+    connect(selectTool, &QAction::triggered, view, [view] { view->setTool(SchematicView::Tool::Select); });
+    connect(wireTool, &QAction::triggered, view, [view] { view->setTool(SchematicView::Tool::Wire); });
+
+    QMenu *arrange = menuBar()->addMenu(tr("&Arrange"));
+    const std::pair<QString, Qt::Alignment> alignments[] = {
+        {tr("Align &Left"), Qt::AlignLeft},       {tr("Align &Right"), Qt::AlignRight},
+        {tr("Align &Top"), Qt::AlignTop},         {tr("Align &Bottom"), Qt::AlignBottom},
+        {tr("Align Centers &Horizontally"), Qt::AlignHCenter},
+        {tr("Align Centers &Vertically"), Qt::AlignVCenter}};
+    for (const auto &[text, alignment] : alignments)
+        arrange->addAction(text, view, [view, alignment] { view->align(alignment); });
+    arrange->addSeparator();
+    arrange->addAction(tr("Distribute Hori&zontally"), view, [view] { view->distribute(Qt::Horizontal); });
+    arrange->addAction(tr("Distribute Verti&cally"), view, [view] { view->distribute(Qt::Vertical); });
+
     m_viewMenu = menuBar()->addMenu(tr("&View"));
+    m_viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, view, &SchematicView::zoomIn);
+    m_viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, view, &SchematicView::zoomOut);
+    QAction *fit = m_viewMenu->addAction(tr("Zoom to &Fit"), QKeySequence(Qt::CTRL | Qt::Key_0), view,
+                                         &SchematicView::zoomToFit);
+    QAction *snap = m_viewMenu->addAction(tr("&Snap to Grid"));
+    snap->setCheckable(true);
+    snap->setChecked(true);
+    connect(snap, &QAction::toggled, view, &SchematicView::setSnapToGrid);
+    m_viewMenu->addSeparator();
     for (QDockWidget *dock : findChildren<QDockWidget *>())
         m_viewMenu->addAction(dock->toggleViewAction());
     m_viewMenu->addSeparator();
@@ -138,6 +233,44 @@ void MainWindow::createMenus()
 
     QMenu *help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("&About"), this, &MainWindow::showAbout);
+
+    QToolBar *toolbar = addToolBar(tr("Schematic"));
+    toolbar->setObjectName(QStringLiteral("schematicToolbar"));
+    toolbar->setMovable(false);
+    toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    toolbar->addAction(selectTool);
+    toolbar->addAction(wireTool);
+    toolbar->addSeparator();
+    toolbar->addAction(addConnector);
+    toolbar->addAction(addSplice);
+    toolbar->addSeparator();
+    toolbar->addAction(fit);
+    toolbar->addSeparator();
+    m_find = new QLineEdit(toolbar);
+    m_find->setPlaceholderText(tr("Find pin or circuit (Enter = next)"));
+    m_find->setClearButtonEnabled(true);
+    m_find->setMaximumWidth(280);
+    toolbar->addWidget(m_find);
+    connect(m_find, &QLineEdit::returnPressed, view, [this] { m_schematic->find(m_find->text()); });
+    connect(m_find, &QLineEdit::textChanged, view, [this](const QString &text) {
+        if (text.isEmpty())
+            m_schematic->find({});
+    });
+}
+
+void MainWindow::showSelectionStatus()
+{
+    const Selection &s = m_selection->selection();
+    const Harness &h = m_document->model()->harness();
+    if (s.wires.size() == 1 && s.connectors.isEmpty() && s.splices.isEmpty()) {
+        if (const Wire *w = m_document->model()->find<Wire>(*s.wires.begin()))
+            statusBar()->showMessage(tr("Wire: %1 — length needs the layout editor").arg(describeWire(h, *w)));
+    } else if (!s.isEmpty()) {
+        statusBar()->showMessage(tr("%n item(s) selected", nullptr,
+                                    int(s.wires.size() + s.connectors.size() + s.splices.size())));
+    } else {
+        statusBar()->clearMessage();
+    }
 }
 
 bool MainWindow::openFile(const QString &path)

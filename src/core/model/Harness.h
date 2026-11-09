@@ -30,6 +30,9 @@ enum class Units { Inches, Millimeters, Centimeters };
 // "in" | "mm" | "cm"; used in files and settings, and as the display symbol.
 QString unitsSymbol(Units units);
 std::optional<Units> unitsFromSymbol(const QString &symbol);
+// Length conversion between millimeters (storage) and a display unit.
+double mmToUnits(double mm, Units units);
+double unitsToMm(double value, Units units);
 enum class Gender { None, Male, Female };
 enum class GaugeSystem { Awg, Mm2 };
 enum class FreeEndKind { FlyingLead, Eyelet, RingTerminal, Bare };
@@ -167,6 +170,27 @@ struct LayoutSegment {
     bool operator==(const LayoutSegment &) const = default;
 };
 
+// Where an item sits on the schematic canvas. Presentation only.
+struct SchematicPlacement {
+    QPointF position;
+    bool collapsed = false;
+    int maxVisibleRows = 0; // connectors: rows shown before scrolling; 0 = show all
+    QJsonObject extra;
+
+    bool operator==(const SchematicPlacement &) const = default;
+};
+
+struct Schematic {
+    // Key: connector or splice id, or freeEndPlacementKey() for a wire's free end.
+    std::map<QString, SchematicPlacement> placements;
+    QJsonObject extra;
+
+    bool operator==(const Schematic &) const = default;
+};
+
+// Placement key of a wire's free end: "<wireId>/a" or "<wireId>/b".
+QString freeEndPlacementKey(const QString &wireId, bool endB);
+
 struct Harness {
     HarnessInfo info;
     Settings settings;
@@ -176,8 +200,9 @@ struct Harness {
     std::vector<Splice> splices;
     std::vector<LayoutNode> layoutNodes;
     std::vector<LayoutSegment> layoutSegments;
+    Schematic schematic;
     QJsonObject extra; // unknown keys of harness.json
-    // Container entries this version does not parse (e.g. schematic.json, bom.json,
+    // Container entries this version does not parse (e.g. bom.json,
     // library.json until their milestones), kept byte-for-byte.
     std::map<QString, QByteArray> otherEntries;
 

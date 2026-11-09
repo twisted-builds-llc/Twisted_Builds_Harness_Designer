@@ -2,7 +2,10 @@
 # tbh_core: model, calculations, BOM and file I/O. Links Qt6::Core ONLY.
 add_library(tbh_core STATIC
     model/Harness.h model/Harness.cpp
+    model/Fragment.h model/Fragment.cpp
     model/HarnessModel.h model/HarnessModel.cpp
+    model/PinLabels.h model/PinLabels.cpp
+    model/Queries.h model/Queries.cpp
     io/FileFormat.h
     io/HarnessJson.h io/HarnessJson.cpp
     io/Migrations.h io/Migrations.cpp
