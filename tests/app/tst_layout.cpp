@@ -177,6 +177,58 @@ private slots:
         verifyLoadable(document.model()->harness());
     }
 
+    void dragLeadDrawsSegmentInSelectTool()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        Harness h = sample();
+        h.layoutSegments.pop_back(); // n4-n5 missing
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(300, 100);
+        HarnessModel *model = document.model();
+
+        // Splice node n4 at (300, 200): its right lead spans x 308..322 (radius 7 + 1, length 14).
+        const QPoint lead = view.mapFromScene(QPointF(315, 200));
+        const QPoint to = view.mapFromScene(QPointF(500, 200)); // flying lead node n5
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, lead);
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        QCOMPARE(model->harness().layoutSegments.size(), size_t(4));
+        const LayoutSegment created = model->harness().layoutSegments.back();
+        QCOMPARE(created.nodeA, u"n4"_s);
+        QCOMPARE(created.nodeB, u"n5"_s);
+        QCOMPARE(model->find<LayoutNode>(u"n4"_s)->position, QPointF(300, 200)); // not moved
+        QTest::qWait(1);
+        QTest::keyClick(visibleEditor(view.viewport()), Qt::Key_Escape);
+
+        // Connector node n3 at (600, 0): box half width 55, so its right lead spans x 656..670.
+        // Dragging it to empty space adds a branch point.
+        const QPoint connectorLead = view.mapFromScene(QPointF(663, 0));
+        const QPoint empty = view.mapFromScene(QPointF(700, 350));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, connectorLead);
+        QTest::mouseMove(view.viewport(), empty);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, empty);
+        QCOMPARE(model->harness().layoutNodes.size(), size_t(6));
+        QCOMPARE(model->harness().layoutSegments.back().nodeA, u"n3"_s);
+        QTest::qWait(1);
+        QTest::keyClick(visibleEditor(view.viewport()), Qt::Key_Escape);
+
+        // Dragging the node itself still moves it, without a segment.
+        const QPoint dot = view.mapFromScene(QPointF(300, 200));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, dot);
+        QTest::mouseMove(view.viewport(), dot + QPoint(10, 10));
+        QTest::mouseMove(view.viewport(), dot + QPoint(40, 40));
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, dot + QPoint(40, 40));
+        QCOMPARE(model->harness().layoutSegments.size(), size_t(5));
+        QVERIFY(model->find<LayoutNode>(u"n4"_s)->position != QPointF(300, 200));
+        verifyLoadable(model->harness());
+    }
+
     void deletingNodeRemovesSegmentsAndOverrides()
     {
         HarnessModel model;

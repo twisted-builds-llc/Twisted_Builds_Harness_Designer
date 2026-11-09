@@ -169,8 +169,10 @@ ConnectorItem::Hit ConnectorItem::hitTest(const QPointF &p) const
     }
     const int first = isScrollMode() ? m_firstRow : 0;
     const int row = first + int((p.y() - kHeaderHeight) / kRowHeight);
-    if (rowRect(row).isNull() || p.x() < 0 || p.x() > kWidth)
+    if (rowRect(row).isNull() || p.x() < -kStubLength || p.x() > kWidth + kStubLength)
         return {};
+    if (p.x() < 0 || p.x() > kWidth)
+        return {Part::PinStub, row};
     return {p.x() < kLabelColumn ? Part::PinLabel : Part::PinCircuit, row};
 }
 
@@ -179,16 +181,18 @@ Anchor ConnectorItem::pinAnchor(int row, const QPointF &towards) const
     const QPointF towardsLocal = mapFromScene(towards);
     const bool right = towardsLocal.x() > kWidth / 2;
     qreal y;
+    qreal x = right ? kWidth : 0;
     const QRectF r = rowRect(row);
     if (!r.isNull()) {
         y = r.center().y();
+        x += right ? kStubLength : -kStubLength; // tip of the pin lead
     } else if (m_collapsed || visibleRowCount() == 0) {
         y = kHeaderHeight / 2;
     } else {
         // Scrolled out of view: attach at the top or bottom edge of the row area.
         y = row < m_firstRow ? kHeaderHeight + 2 : boundingRect().bottom() - 2;
     }
-    return {mapToScene(QPointF(right ? kWidth : 0, y)), right ? 1 : -1};
+    return {mapToScene(QPointF(x, y)), right ? 1 : -1};
 }
 
 void ConnectorItem::setHoverRow(int row)
@@ -235,9 +239,27 @@ std::vector<int> ConnectorItem::searchMatches() const
     return rows;
 }
 
+QRectF ConnectorItem::bodyRect() const
+{
+    return QRectF(0, 0, kWidth, kHeaderHeight + visibleRowCount() * kRowHeight);
+}
+
 QRectF ConnectorItem::boundingRect() const
 {
-    return QRectF(0, 0, kWidth, kHeaderHeight + visibleRowCount() * kRowHeight).adjusted(-3, -3, 3, 3);
+    return bodyRect().adjusted(-kStubLength - 3, -3, kStubLength + 3, 3);
+}
+
+QPainterPath ConnectorItem::shape() const
+{
+    // The body plus the strips of pin leads on both sides (not the header corners).
+    QPainterPath path;
+    path.addRect(bodyRect().adjusted(-3, -3, 3, 3));
+    const qreal rows = visibleRowCount() * kRowHeight;
+    if (rows > 0) {
+        path.addRect(QRectF(-kStubLength, kHeaderHeight, kStubLength, rows));
+        path.addRect(QRectF(kWidth, kHeaderHeight, kStubLength, rows));
+    }
+    return path;
 }
 
 void ConnectorItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *)
@@ -247,7 +269,7 @@ void ConnectorItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *opt
     const QColor base = pal.color(QPalette::Base);
     const QColor border = mix(base, text, 0.45);
     const QColor header = mix(pal.color(QPalette::Button), pal.color(QPalette::Highlight), 0.12);
-    const QRectF body(0, 0, kWidth, kHeaderHeight + visibleRowCount() * kRowHeight);
+    const QRectF body = bodyRect();
     const qreal lod = option->levelOfDetailFromTransform(painter->worldTransform());
 
     painter->setPen(QPen(border, 1));
@@ -338,6 +360,12 @@ void ConnectorItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *opt
                 if (row == m_hoverRow)
                     fill = hover;
                 painter->fillRect(r.adjusted(1, 0, -1, 0), fill);
+                // Pin leads: drag handles for drawing a wire.
+                const qreal cy = r.center().y();
+                painter->setPen(QPen(row == m_hoverRow ? pal.color(QPalette::Highlight) : border, 2,
+                                     Qt::SolidLine, Qt::FlatCap));
+                painter->drawLine(QPointF(-kStubLength, cy), QPointF(-1, cy));
+                painter->drawLine(QPointF(kWidth + 1, cy), QPointF(kWidth + kStubLength, cy));
                 if (!drawText)
                     continue;
                 const Pin &pin = m_connector.pins[size_t(row)];
@@ -408,11 +436,25 @@ QRectF SpliceItem::boundingRect() const
     return QRectF(-60, -30, 120, 30 + kRadius + 4);
 }
 
+QRectF SpliceItem::stubRect(bool right)
+{
+    // Starts at the dot's edge; 10 px tall so it is easy to grab.
+    return right ? QRectF(kRadius + 1, -5, kStubLength, 10) : QRectF(-kRadius - 1 - kStubLength, -5, kStubLength, 10);
+}
+
+bool SpliceItem::isStubAt(const QPointF &itemPos) const
+{
+    return (stubRect(false).contains(itemPos) || stubRect(true).contains(itemPos))
+           && std::hypot(itemPos.x(), itemPos.y()) > kRadius + 1;
+}
+
 QPainterPath SpliceItem::shape() const
 {
     QPainterPath path;
     path.addEllipse(QPointF(0, 0), kRadius + 4, kRadius + 4);
     path.addRect(QRectF(-40, -26, 80, 16));
+    path.addRect(stubRect(false));
+    path.addRect(stubRect(true));
     return path;
 }
 
@@ -424,6 +466,12 @@ void SpliceItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWid
         painter->setPen(Qt::NoPen);
         painter->setBrush(pal.color(QPalette::Highlight));
         painter->drawEllipse(QPointF(0, 0), kRadius + 4, kRadius + 4);
+    }
+    // Leads on both sides: drag handles for drawing a wire.
+    painter->setPen(QPen(m_highlighted ? pal.color(QPalette::Highlight) : text, 2, Qt::SolidLine, Qt::FlatCap));
+    for (bool right : {false, true}) {
+        const QRectF r = stubRect(right);
+        painter->drawLine(QPointF(r.left(), 0), QPointF(r.right(), 0));
     }
     painter->setPen(QPen(pal.color(QPalette::Base), 1.5));
     painter->setBrush(text);

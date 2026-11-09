@@ -59,6 +59,26 @@ LayoutNodeItem *LayoutView::nodeAt(const QPoint &viewPos) const
     return nullptr;
 }
 
+LayoutNodeItem *LayoutView::nodeLeadAt(const QPoint &viewPos) const
+{
+    LayoutNodeItem *node = nodeAt(viewPos);
+    return node && node->isStubAt(node->mapFromScene(mapToScene(viewPos))) ? node : nullptr;
+}
+
+void LayoutView::setHoveredLead(LayoutNodeItem *node)
+{
+    const QString id = node ? node->id() : QString();
+    if (id == m_hoveredLead)
+        return;
+    if (LayoutNodeItem *old = m_scene->nodeItem(m_hoveredLead))
+        old->setStubHovered(false);
+    m_hoveredLead = id;
+    if (node)
+        node->setStubHovered(true);
+    if (m_tool == Tool::Select)
+        viewport()->setCursor(node ? Qt::CrossCursor : Qt::ArrowCursor);
+}
+
 QPointF LayoutView::nextPlacePosition()
 {
     const QPointF center = mapToScene(viewport()->rect().center());
@@ -140,8 +160,9 @@ void LayoutView::editSegmentLength(const QString &segmentId)
 void LayoutView::mousePressEvent(QMouseEvent *event)
 {
     closeEditor();
-    if (event->button() == Qt::LeftButton && m_tool == Tool::Segment) {
-        if (LayoutNodeItem *node = nodeAt(event->pos())) {
+    if (event->button() == Qt::LeftButton) {
+        LayoutNodeItem *node = m_tool == Tool::Segment ? nodeAt(event->pos()) : nodeLeadAt(event->pos());
+        if (node) {
             m_segmentStart = node->id();
             m_preview = new QGraphicsLineItem(QLineF(node->pos(), node->pos()));
             m_preview->setPen(QPen(palette().color(QPalette::Highlight), 3, Qt::DashLine));
@@ -169,6 +190,8 @@ void LayoutView::mouseMoveEvent(QMouseEvent *event)
         m_preview->setLine(QLineF(m_preview->line().p1(), end));
         return;
     }
+    if (event->buttons() == Qt::NoButton && !isPanning())
+        setHoveredLead(nodeLeadAt(event->pos()));
     CanvasView::mouseMoveEvent(event);
 }
 
@@ -293,8 +316,8 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     QFont font = title->font();
     font.setBold(true);
     title->setFont(font);
-    auto *hint = new QLabel(tr("Double-click to place. Then draw segments with the Segment tool "
-                               "and type each branch length."),
+    auto *hint = new QLabel(tr("Double-click to place. Then draw segments by dragging the short lead "
+                               "on the side of a point, and type each branch length."),
                             side);
     hint->setWordWrap(true);
     hint->setEnabled(false);
