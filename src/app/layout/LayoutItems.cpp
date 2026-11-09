@@ -128,6 +128,55 @@ std::optional<QPointF> bendThroughMidpoint(const QPointF &a, const QPointF &b, c
     return QPointF((v.x() * d.x() + v.y() * d.y()) / lengthSquared, (v.x() * n.x() + v.y() * n.y()) / lengthSquared);
 }
 
+namespace {
+
+// Inverse of bendControlPoint() for a curve with control point `c`.
+std::optional<QPointF> bendFromControl(const QPointF &a, const QPointF &b, const QPointF &c)
+{
+    const QPointF d = b - a;
+    const qreal lengthSquared = d.x() * d.x() + d.y() * d.y();
+    if (lengthSquared < 1e-6)
+        return std::nullopt;
+    const QPointF v = c - a;
+    const QPointF n(-d.y(), d.x());
+    return QPointF((v.x() * d.x() + v.y() * d.y()) / lengthSquared, (v.x() * n.x() + v.y() * n.y()) / lengthSquared);
+}
+
+} // namespace
+
+SegmentSplit splitNear(const QPointF &a, const QPointF &b, const std::optional<QPointF> &bend,
+                       const QPointF &scenePos)
+{
+    const QPointF c = bendControlPoint(a, b, bend);
+    auto at = [&](qreal u) { return (1 - u) * (1 - u) * a + 2 * (1 - u) * u * c + u * u * b; };
+    // Sample the curve: nearest sample to the drop, and drawn length up to each sample.
+    constexpr int kSteps = 200;
+    std::vector<qreal> lengthTo(kSteps + 1, 0.0);
+    int nearest = 0;
+    qreal nearestDistance = QLineF(at(0), scenePos).length();
+    for (int i = 1; i <= kSteps; ++i) {
+        const QPointF p = at(qreal(i) / kSteps);
+        lengthTo[size_t(i)] = lengthTo[size_t(i - 1)] + QLineF(at(qreal(i - 1) / kSteps), p).length();
+        const qreal distance = QLineF(p, scenePos).length();
+        if (distance < nearestDistance) {
+            nearest = i;
+            nearestDistance = distance;
+        }
+    }
+    const int lo = kSteps / 20;
+    nearest = std::clamp(nearest, lo, kSteps - lo);
+    const qreal u = qreal(nearest) / kSteps;
+    SegmentSplit split;
+    split.point = at(u);
+    split.fraction = lengthTo.back() > 1e-6 ? lengthTo[size_t(nearest)] / lengthTo.back() : u;
+    if (bend) {
+        // de Casteljau: the halves of a quadratic Bezier at u.
+        split.bendA = bendFromControl(a, split.point, a + u * (c - a));
+        split.bendB = bendFromControl(split.point, b, c + u * (b - c));
+    }
+    return split;
+}
+
 // ---- LayoutNodeItem -----------------------------------------------------------
 
 LayoutNodeItem::LayoutNodeItem(const LayoutNode &node)

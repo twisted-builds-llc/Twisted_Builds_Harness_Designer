@@ -422,6 +422,25 @@ void LayoutView::commitMoves()
         }
     }
     QUndoStack *stack = m_document->undoStack();
+    if (joins.empty() && moved.size() == 1) {
+        // A lone splice dropped onto a bundle goes inside it.
+        const QString id = *moved.begin();
+        const QString segmentId = segmentUnderLoneSplice(id);
+        if (!segmentId.isEmpty()) {
+            LayoutSegmentItem *segmentItem = m_scene->segmentItem(segmentId);
+            const SegmentSplit split = splitNear(segmentItem->endA(), segmentItem->endB(),
+                                                 segmentItem->segment().bend, m_scene->nodeItem(id)->pos());
+            stack->beginMacro(tr("Place splice in bundle"));
+            stack->push(macro.release());
+            LayoutNode updated = *model->find<LayoutNode>(id);
+            updated.position = split.point; // onto the line itself
+            stack->push(new UpdateEntityCommand<LayoutNode>(model, updated, {}));
+            stack->push(splitSegmentAt(model, segmentId, id, split.fraction, split.bendA, split.bendB).release());
+            stack->endMacro();
+            QTimer::singleShot(0, this, [this, id] { editPositionAlongRun(id); });
+            return;
+        }
+    }
     if (joins.empty()) {
         stack->push(macro.release());
         return;
@@ -433,6 +452,65 @@ void LayoutView::commitMoves()
             stack->push(join.release());
     }
     stack->endMacro();
+}
+
+QString LayoutView::segmentUnderLoneSplice(const QString &nodeId) const
+{
+    const Harness &h = m_document->model()->harness();
+    const LayoutNode *node = m_document->model()->find<LayoutNode>(nodeId);
+    LayoutNodeItem *item = m_scene->nodeItem(nodeId);
+    if (!node || !item || node->type != LayoutNodeType::Splice)
+        return {};
+    if (std::any_of(h.layoutSegments.begin(), h.layoutSegments.end(),
+                    [&](const LayoutSegment &s) { return s.nodeA == nodeId || s.nodeB == nodeId; }))
+        return {};
+    // The bundle's own shape (line plus caption) under the splice's center.
+    for (QGraphicsItem *under : m_scene->items(item->pos())) {
+        if (under->type() == LayoutSegmentItemType)
+            return static_cast<LayoutSegmentItem *>(under)->id();
+    }
+    return {};
+}
+
+void LayoutView::editPositionAlongRun(const QString &nodeId)
+{
+    HarnessModel *model = m_document->model();
+    const LayoutNode *node = model->find<LayoutNode>(nodeId);
+    if (!node || node->type != LayoutNodeType::Splice)
+        return;
+    std::vector<const LayoutSegment *> run;
+    for (const LayoutSegment &s : model->harness().layoutSegments) {
+        if (s.nodeA == nodeId || s.nodeB == nodeId)
+            run.push_back(&s);
+    }
+    if (run.size() != 2)
+        return;
+    const LayoutSegment &from = *run[0];
+    LayoutSegmentItem *fromItem = m_scene->segmentItem(from.id);
+    LayoutNodeItem *farItem = m_scene->nodeItem(from.nodeA == nodeId ? from.nodeB : from.nodeA);
+    LayoutNodeItem *spliceItem = m_scene->nodeItem(nodeId);
+    if (!fromItem || !farItem || !spliceItem)
+        return;
+    const QString farLabel = farItem->label().isEmpty() ? tr("the branch point") : farItem->label();
+    emit statusMessage(tr("Distance from %1 to splice %2 (the bundle keeps its total length).")
+                           .arg(farLabel, spliceItem->label()));
+    const Units units = model->harness().info.units;
+    const QString segmentId = from.id;
+    const QString text = from.lengthMm > 0 ? formatLength(from.lengthMm, units, false) : QString();
+    editText(QRectF(fromItem->midpoint() - QPointF(46, 17), QSizeF(92, 18)), text,
+             [this, nodeId, segmentId, units, text](const QString &value, Nav) {
+                 if (value.trimmed().isEmpty() || value == text)
+                     return;
+                 const auto mm = parseLength(value, units);
+                 if (!mm) {
+                     emit statusMessage(tr("\"%1\" is not a length in %2.").arg(value, unitsSymbol(units)));
+                     return;
+                 }
+                 if (auto command = setDistanceAlongRun(m_document->model(), nodeId, segmentId, *mm))
+                     m_document->undoStack()->push(command.release());
+                 else
+                     emit statusMessage(tr("The splice must sit inside the bundle: enter a distance shorter than its total length."));
+             });
 }
 
 bool LayoutView::nudgeSelection(const QPointF &delta)
@@ -459,6 +537,14 @@ void LayoutView::mouseDoubleClickEvent(QMouseEvent *event)
             if (item->type() == LayoutSegmentItemType) {
                 editSegmentLength(static_cast<LayoutSegmentItem *>(item)->id());
                 return;
+            }
+            if (item->type() == LayoutNodeItemType) {
+                const auto *node = static_cast<LayoutNodeItem *>(item);
+                if (node->node().type == LayoutNodeType::Splice && node->legCount() == 2) {
+                    editPositionAlongRun(node->id());
+                    return;
+                }
+                break;
             }
         }
     }
@@ -492,6 +578,12 @@ void LayoutView::contextMenuEvent(QContextMenuEvent *event)
             menu.addAction(tr("Edit Length"), this, [this, id] { editSegmentLength(id); });
             QAction *straighten = menu.addAction(tr("Straighten Segment"), this, [this, id] { straightenSegment(id); });
             straighten->setEnabled(segment->segment().bend.has_value());
+        } else if (item->type() == LayoutNodeItemType) {
+            const auto *node = static_cast<LayoutNodeItem *>(item);
+            if (node->node().type != LayoutNodeType::Splice || node->legCount() != 2)
+                break;
+            const QString id = node->id();
+            menu.addAction(tr("Position Along Bundle..."), this, [this, id] { editPositionAlongRun(id); });
         } else {
             continue;
         }
@@ -515,7 +607,8 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     font.setBold(true);
     title->setFont(font);
     auto *hint = new QLabel(tr("Double-click to place. Then draw segments by dragging the short lead "
-                               "on the side of a point, and type each branch length."),
+                               "on the side of a point, and type each branch length. Drag a splice onto "
+                               "a bundle to put it inside; double-click it to set its distance."),
                             side);
     hint->setWordWrap(true);
     hint->setEnabled(false);

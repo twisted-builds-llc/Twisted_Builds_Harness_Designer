@@ -299,6 +299,75 @@ std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<
     return macro;
 }
 
+std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString &segmentId,
+                                             const QString &nodeId, double fraction,
+                                             std::optional<QPointF> bendA,
+                                             std::optional<QPointF> bendB, QString *newSegmentId)
+{
+    const LayoutSegment *segment = model->find<LayoutSegment>(segmentId);
+    if (!segment || !model->find<LayoutNode>(nodeId))
+        return nullptr;
+    const Harness &h = model->harness();
+    if (std::any_of(h.layoutSegments.begin(), h.layoutSegments.end(),
+                    [&](const LayoutSegment &s) { return s.nodeA == nodeId || s.nodeB == nodeId; }))
+        return nullptr;
+    fraction = std::clamp(fraction, 0.0, 1.0);
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Place in segment"));
+    for (const Wire &w : h.wires) {
+        if (std::find(w.routeSegmentIds.begin(), w.routeSegmentIds.end(), segmentId) != w.routeSegmentIds.end()) {
+            Wire updated = w;
+            updated.routeSegmentIds.clear();
+            new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
+        }
+    }
+    LayoutSegment first = *segment;
+    LayoutSegment second = *segment;
+    first.nodeB = nodeId;
+    first.lengthMm = segment->lengthMm * fraction;
+    first.bend = bendA;
+    second.id = newId();
+    second.nodeA = nodeId;
+    second.lengthMm = segment->lengthMm - first.lengthMm;
+    second.bend = bendB;
+    second.extra = {};
+    if (newSegmentId)
+        *newSegmentId = second.id;
+    new UpdateEntityCommand<LayoutSegment>(model, std::move(first), {}, macro.get());
+    new AddEntityCommand<LayoutSegment>(model, std::move(second), {}, {}, macro.get());
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> setDistanceAlongRun(HarnessModel *model, const QString &nodeId,
+                                                  const QString &fromSegmentId, double distanceMm)
+{
+    std::vector<const LayoutSegment *> run;
+    for (const LayoutSegment &s : model->harness().layoutSegments) {
+        if (s.nodeA == nodeId || s.nodeB == nodeId)
+            run.push_back(&s);
+    }
+    if (run.size() != 2 || distanceMm <= 0)
+        return nullptr;
+    if (run[1]->id == fromSegmentId)
+        std::swap(run[0], run[1]);
+    if (run[0]->id != fromSegmentId)
+        return nullptr;
+    const double total = std::max(0.0, run[0]->lengthMm) + std::max(0.0, run[1]->lengthMm);
+    if (total > 0 && distanceMm >= total)
+        return nullptr;
+    LayoutSegment from = *run[0];
+    LayoutSegment other = *run[1];
+    from.lengthMm = distanceMm;
+    if (total > 0)
+        other.lengthMm = total - distanceMm;
+    if (from == *run[0] && other == *run[1])
+        return nullptr;
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Set position along bundle"));
+    new UpdateEntityCommand<LayoutSegment>(model, std::move(from), {}, macro.get());
+    if (other != *run[1])
+        new UpdateEntityCommand<LayoutSegment>(model, std::move(other), {}, macro.get());
+    return macro;
+}
+
 std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString &branchId,
                                               const QString &intoId)
 {

@@ -24,7 +24,9 @@ class SelectionModel;
 // handle to curve it, drag a node's lead (the short dash on either side) to draw a segment.
 // Segment tool: drag from anywhere on a node. A segment goes to another node, or to empty
 // space, which adds a branch point; its length editor opens at once. Dropping a branch
-// point onto another point (or a point onto a branch point) joins the two.
+// point onto another point (or a point onto a branch point) joins the two. Dropping a
+// splice that has no segments onto a segment puts it inside that bundle (the segment is
+// split there); double-click it to type its distance along the bundle.
 class LayoutView : public CanvasView
 {
     Q_OBJECT
@@ -49,6 +51,9 @@ public:
     void deleteSelection();
     void selectAll();
     void editSegmentLength(const QString &segmentId);
+    // For a splice inside a bundle (on exactly two segments): types its distance from the
+    // far end of its first segment; the bundle's total length stays the same.
+    void editPositionAlongRun(const QString &nodeId);
 
 signals:
     void statusMessage(const QString &message);
@@ -81,6 +86,8 @@ private:
     void finishSegment(const QPoint &viewPos);
     void cancelSegment();
     void commitMoves();
+    // Segment under a lone splice node just dropped at `nodeId`'s position, or empty.
+    QString segmentUnderLoneSplice(const QString &nodeId) const;
 
     Document *m_document;
     SelectionModel *m_selection;

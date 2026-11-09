@@ -186,18 +186,54 @@ private slots:
 
     void fillEmptyCircuitTextNamesUnnamedWire()
     {
-        // w2 joins J1.2 and splice S1 (not pin to pin) and has no name: it takes "SIG"
-        // from J1.2. Unknown wire ids are skipped.
+        // w2 joins J1.2 and splice S1 and has no name: it takes "SIG" from J1.2.
+        // w3 (S1 to flying lead) is in the same net through S1, so it is named "SIG" too.
+        // Unknown wire ids are skipped. No pins are empty, so no connector changes.
         Harness h = sample();
         h.connectors[0].pins[1].circuitText = u"SIG"_s;
         const CircuitTextFill fill = fillEmptyCircuitText(h, {u"w2"_s, u"nope"_s});
         QCOMPARE(h.wires[1].name, u"SIG"_s);
-        QCOMPARE(fill.wireIds, QSet<QString>{u"w2"_s});
+        QCOMPARE(h.wires[2].name, u"SIG"_s);
+        QCOMPARE(fill.wireIds, (QSet<QString>{u"w2"_s, u"w3"_s}));
         QVERIFY(fill.connectorIds.isEmpty());
 
-        // w3 (splice to flying lead) has no pins: nothing changes.
-        QVERIFY(fillEmptyCircuitText(h, {u"w3"_s}).wireIds.isEmpty());
-        QVERIFY(h.wires[2].name.isEmpty());
+        // No pin text anywhere in the net (w3 + w2): nothing changes.
+        Harness empty = sample();
+        QVERIFY(fillEmptyCircuitText(empty, {u"w3"_s}).wireIds.isEmpty());
+        QCOMPARE(empty, sample());
+    }
+
+    void fillEmptyCircuitTextCrossesSplice()
+    {
+        // J1.2 -w2- S1 -w4- J3.1 and S1 -w5- J4.1. Text "POWER" on J1.2 only.
+        // Drawing w4 (S1 to J3.1) must reach J1.2 through S1: J3.1 and J4.1 get
+        // "POWER"; unnamed w2, w3, w4, w5 are named "POWER"; J1 itself is unchanged.
+        Harness h = sample();
+        h.connectors.push_back(connector(u"j3"_s, u"J3"_s, 1));
+        h.connectors.push_back(connector(u"j4"_s, u"J4"_s, 1));
+        h.wires.push_back(wire(u"w4"_s, SpliceRef{u"s1"_s}, PinRef{u"j3"_s, u"j3-p1"_s}));
+        h.wires.push_back(wire(u"w5"_s, PinRef{u"j4"_s, u"j4-p1"_s}, SpliceRef{u"s1"_s}));
+        h.connectors[0].pins[1].circuitText = u"POWER"_s;
+        const CircuitTextFill fill = fillEmptyCircuitText(h, {u"w4"_s});
+        QCOMPARE(h.connectors[2].pins[0].circuitText, u"POWER"_s);
+        QCOMPARE(h.connectors[3].pins[0].circuitText, u"POWER"_s);
+        QCOMPARE(fill.connectorIds, (QSet<QString>{u"j3"_s, u"j4"_s}));
+        QCOMPARE(fill.wireIds, (QSet<QString>{u"w2"_s, u"w3"_s, u"w4"_s, u"w5"_s}));
+        QCOMPARE(h.wires[3].name, u"POWER"_s);
+        // w1 (J1.1 to J2.1) is not on S1: untouched.
+        QVERIFY(h.connectors[1].pins[0].circuitText.isEmpty());
+
+        // A renamed pin in the net is never overwritten: J3.1 "POWER B" stays, and an
+        // unnamed wire on it takes its own pin's text rather than the net's.
+        Harness r = sample();
+        r.connectors.push_back(connector(u"j3"_s, u"J3"_s, 1));
+        r.wires.push_back(wire(u"w4"_s, SpliceRef{u"s1"_s}, PinRef{u"j3"_s, u"j3-p1"_s}));
+        r.connectors[0].pins[1].circuitText = u"POWER"_s;
+        r.connectors[2].pins[0].circuitText = u"POWER B"_s;
+        fillEmptyCircuitText(r, {u"w2"_s});
+        QCOMPARE(r.connectors[2].pins[0].circuitText, u"POWER B"_s);
+        QCOMPARE(r.wires[3].name, u"POWER B"_s);
+        QCOMPARE(r.wires[1].name, u"POWER"_s);
     }
 };
 
