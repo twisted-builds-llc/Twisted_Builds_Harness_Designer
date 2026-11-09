@@ -1,0 +1,393 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+#include "io/FileFormat.h"
+#include "io/HarnessJson.h"
+#include "io/TbhFile.h"
+#include "io/ZipArchive.h"
+#include "model/Harness.h"
+
+#include <QFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QTemporaryDir>
+#include <QTest>
+
+using namespace tbh;
+using namespace Qt::StringLiterals;
+
+namespace {
+
+// A small harness touching every model field and every wire-end variant.
+Harness sampleHarness()
+{
+    Harness h;
+    h.info = {u"Test harness"_s, u"Line one\nLine two"_s, u"B"_s, u"Bench"_s, Units::Inches};
+    h.settings.packingFactor = 0.75;
+    h.settings.serviceLoopPercent = 2.5;
+    h.settings.stripAllowanceMm = {{EndType::Pin, 6.0}, {EndType::RingTerminal, 8.5}};
+    h.settings.lengthRoundingIncrementMm = 5.0;
+    h.createdAt = QDateTime(QDate(2026, 1, 2), QTime(3, 4, 5, 678), QTimeZone::UTC);
+
+    Connector ecu;
+    ecu.id = u"c-ecu"_s;
+    ecu.label = u"ECU-A"_s;
+    ecu.partNumber = u"PN-1"_s;
+    ecu.manufacturer = u"Maker"_s;
+    ecu.gender = Gender::Female;
+    for (int i = 1; i <= 3; ++i) {
+        Pin p;
+        p.id = u"ecu-p%1"_s.arg(i);
+        p.label = u"A%1"_s.arg(i);
+        p.circuitText = u"Circuit %1"_s.arg(i);
+        p.terminalPartNumber = u"T-1"_s;
+        ecu.pins.push_back(p);
+    }
+    ecu.pins[2].isCavityPlug = true;
+
+    Connector sensor;
+    sensor.id = u"c-sensor"_s;
+    sensor.label = u"SENSOR"_s;
+    sensor.gender = Gender::Male;
+    sensor.pins.push_back(Pin{u"s-p1"_s, u"+"_s, u"5V"_s, {}, u"SEAL-1"_s, false, u"note"_s, {}});
+    h.connectors = {ecu, sensor};
+
+    h.splices.push_back(Splice{u"sp1"_s, u"S1"_s, u"SPL-1"_s, {}});
+
+    Wire pinToPin;
+    pinToPin.id = u"w1"_s;
+    pinToPin.name = u"5V REF"_s;
+    pinToPin.endA = PinRef{u"c-ecu"_s, u"ecu-p1"_s};
+    pinToPin.endB = PinRef{u"c-sensor"_s, u"s-p1"_s};
+    pinToPin.baseColor = u"RED"_s;
+    pinToPin.stripeColor = u"#ffffff"_s;
+    pinToPin.gauge = {20, GaugeSystem::Awg};
+    pinToPin.lengthOverrideMm = 1234.5;
+    pinToPin.routeSegmentIds = {u"seg1"_s};
+
+    Wire toSplice;
+    toSplice.id = u"w2"_s;
+    toSplice.endA = PinRef{u"c-ecu"_s, u"ecu-p2"_s};
+    toSplice.endB = SpliceRef{u"sp1"_s};
+    toSplice.baseColor = u"BLK"_s;
+    toSplice.gauge = {0.5, GaugeSystem::Mm2};
+
+    Wire toRing;
+    toRing.id = u"w3"_s;
+    toRing.endA = SpliceRef{u"sp1"_s};
+    toRing.endB = FreeEnd{FreeEndKind::RingTerminal, u"RING-M6"_s, u"GND"_s};
+    toRing.baseColor = u"BLK"_s;
+    h.wires = {pinToPin, toSplice, toRing};
+
+    h.layoutNodes = {
+        LayoutNode{u"n1"_s, LayoutNodeType::Connector, u"c-ecu"_s, QPointF(0, 0), {}},
+        LayoutNode{u"n2"_s, LayoutNodeType::Branch, {}, QPointF(100.25, -50), {}},
+        LayoutNode{u"n3"_s, LayoutNodeType::Connector, u"c-sensor"_s, QPointF(300, 0), {}},
+        LayoutNode{u"n4"_s, LayoutNodeType::Splice, u"sp1"_s, QPointF(150, 80), {}},
+    };
+    h.layoutSegments = {
+        LayoutSegment{u"seg1"_s, u"n1"_s, u"n2"_s, 250.0, u"Trunk"_s, {}, SleevingCoverage::Full, {}},
+        LayoutSegment{u"seg2"_s, u"n2"_s, u"n3"_s, 0.1, {}, u"sleeve-x"_s, SleevingCoverage::Full, {}},
+        LayoutSegment{u"seg3"_s, u"n2"_s, u"n4"_s, 75.0, {}, {}, SleevingCoverage::Full, {}},
+    };
+
+    h.otherEntries[u"schematic.json"_s] = QByteArrayLiteral("{\"future\": true}\n");
+    return h;
+}
+
+io::ZipEntries readRaw(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return {};
+    return io::readZip(file.readAll(), nullptr).value_or(io::ZipEntries{});
+}
+
+void writeRaw(const QString &path, const io::ZipEntries &entries)
+{
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write(io::writeZip(entries, nullptr).value());
+}
+
+QByteArray toBytes(const QJsonObject &o)
+{
+    return QJsonDocument(o).toJson();
+}
+
+QByteArray toBytes(const QJsonArray &a)
+{
+    return QJsonDocument(a).toJson();
+}
+
+} // namespace
+
+class TestTbhFile : public QObject
+{
+    Q_OBJECT
+
+private:
+    QTemporaryDir m_dir;
+    QString path(const QString &name) const { return m_dir.filePath(name); }
+
+    // Writes the sample, applies `edit` to the raw entries, and returns the read error.
+    template<typename Edit>
+    QString readErrorAfter(Edit edit)
+    {
+        const QString file = path(u"edited.tbh"_s);
+        if (!io::writeTbhFile(file, sampleHarness(), nullptr))
+            return u"<write failed>"_s;
+        io::ZipEntries entries = readRaw(file);
+        edit(entries);
+        writeRaw(file, entries);
+        QString error;
+        if (io::readTbhFile(file, &error))
+            return {};
+        return error;
+    }
+
+private slots:
+    void roundTripPreservesEverything()
+    {
+        const Harness original = sampleHarness();
+        const QString file = path(u"round.tbh"_s);
+        QString error;
+        QVERIFY2(io::writeTbhFile(file, original, &error), qPrintable(error));
+
+        const auto loaded = io::readTbhFile(file, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QVERIFY(loaded->info == original.info);
+        QVERIFY(loaded->settings == original.settings);
+        QCOMPARE(loaded->createdAt, original.createdAt);
+        QVERIFY(loaded->connectors == original.connectors);
+        QVERIFY(loaded->wires == original.wires);
+        QVERIFY(loaded->splices == original.splices);
+        QVERIFY(loaded->layoutNodes == original.layoutNodes);
+        QVERIFY(loaded->layoutSegments == original.layoutSegments);
+        QVERIFY(loaded->otherEntries == original.otherEntries);
+        QVERIFY(*loaded == original);
+    }
+
+    void manifestContents()
+    {
+        const QString file = path(u"manifest.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
+        const io::ZipEntries entries = readRaw(file);
+        const QJsonObject manifest =
+            QJsonDocument::fromJson(entries.at(QString(io::kManifestEntry))).object();
+        QCOMPARE(manifest.value(u"schemaVersion").toInt(), io::kSchemaVersion);
+        QCOMPARE(manifest.value(u"appVersion").toString(), QStringLiteral(TBH_APP_VERSION));
+        QCOMPARE(manifest.value(u"createdAt").toString(), u"2026-01-02T03:04:05.678Z"_s);
+        QVERIFY(QDateTime::fromString(manifest.value(u"modifiedAt").toString(), Qt::ISODateWithMs)
+                    .isValid());
+    }
+
+    void missingCreatedAtIsFilledOnSave()
+    {
+        Harness h = sampleHarness();
+        h.createdAt = {};
+        const QString file = path(u"created.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        const auto loaded = io::readTbhFile(file, nullptr);
+        QVERIFY(loaded);
+        QVERIFY(loaded->createdAt.isValid());
+    }
+
+    void serializationIsStable()
+    {
+        // Same model -> identical bytes; read + re-serialize -> identical bytes.
+        const Harness h = sampleHarness();
+        const io::ZipEntries first = io::serializeHarness(h);
+        QVERIFY(first == io::serializeHarness(h));
+        const auto reread = io::deserializeHarness(first, nullptr);
+        QVERIFY(reread);
+        QVERIFY(io::serializeHarness(*reread) == first);
+    }
+
+    void unknownKeysAndEntriesArePreserved()
+    {
+        const QString file = path(u"unknown.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
+        io::ZipEntries entries = readRaw(file);
+
+        QJsonObject harness = QJsonDocument::fromJson(entries.at(u"harness.json"_s)).object();
+        harness[u"futureHarnessKey"] = 42;
+        entries[u"harness.json"_s] = toBytes(harness);
+
+        QJsonArray connectors = QJsonDocument::fromJson(entries.at(u"connectors.json"_s)).array();
+        QJsonObject ecu = connectors[0].toObject();
+        ecu[u"futureConnectorKey"] = u"x"_s;
+        QJsonArray pins = ecu[u"pins"].toArray();
+        QJsonObject pin = pins[0].toObject();
+        pin[u"futurePinKey"] = true;
+        pins[0] = pin;
+        ecu[u"pins"] = pins;
+        connectors[0] = ecu;
+        entries[u"connectors.json"_s] = toBytes(connectors);
+        entries[u"future/thing.bin"_s] = QByteArrayLiteral("\x00\x01\x02");
+        writeRaw(file, entries);
+
+        QString error;
+        const auto loaded = io::readTbhFile(file, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->extra.value(u"futureHarnessKey").toInt(), 42);
+        QCOMPARE(loaded->connectors[0].extra.value(u"futureConnectorKey").toString(), u"x"_s);
+        QCOMPARE(loaded->connectors[0].pins[0].extra.value(u"futurePinKey").toBool(), true);
+
+        // Survives a second save.
+        QVERIFY(io::writeTbhFile(file, *loaded, nullptr));
+        const io::ZipEntries resaved = readRaw(file);
+        QVERIFY(resaved.at(u"harness.json"_s).contains("futureHarnessKey"));
+        QVERIFY(resaved.at(u"connectors.json"_s).contains("futureConnectorKey"));
+        QVERIFY(resaved.at(u"connectors.json"_s).contains("futurePinKey"));
+        QCOMPARE(resaved.at(u"future/thing.bin"_s), QByteArrayLiteral("\x00\x01\x02"));
+        QCOMPARE(resaved.at(u"schematic.json"_s), QByteArrayLiteral("{\"future\": true}\n"));
+    }
+
+    void newerSchemaIsRejected()
+    {
+        const QString error = readErrorAfter([](io::ZipEntries &e) {
+            e[QString(io::kManifestEntry)] = toBytes(QJsonObject{{u"schemaVersion"_s, 99}});
+        });
+        QVERIFY(error.contains(u"99"));
+    }
+
+    void invalidSchemaVersionIsRejected()
+    {
+        QVERIFY(!readErrorAfter([](io::ZipEntries &e) {
+                     e[QString(io::kManifestEntry)] = toBytes(QJsonObject{{u"schemaVersion"_s, 0}});
+                 }).isEmpty());
+        QVERIFY(!readErrorAfter([](io::ZipEntries &e) {
+                     e[QString(io::kManifestEntry)] = QByteArrayLiteral("{}");
+                 }).isEmpty());
+    }
+
+    void missingManifestIsRejected()
+    {
+        QVERIFY(!readErrorAfter([](io::ZipEntries &e) { e.erase(QString(io::kManifestEntry)); })
+                     .isEmpty());
+    }
+
+    void notAZipIsRejected()
+    {
+        const QString file = path(u"garbage.tbh"_s);
+        QFile f(file);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("definitely not a zip file");
+        f.close();
+        QString error;
+        QVERIFY(!io::readTbhFile(file, &error));
+        QVERIFY(!error.isEmpty());
+    }
+
+    void missingFileIsRejected()
+    {
+        QString error;
+        QVERIFY(!io::readTbhFile(path(u"does-not-exist.tbh"_s), &error));
+        QVERIFY(!error.isEmpty());
+    }
+
+    void invalidJsonIsRejected()
+    {
+        const QString error = readErrorAfter(
+            [](io::ZipEntries &e) { e[u"wires.json"_s] = QByteArrayLiteral("[{"); });
+        QVERIFY(error.contains(u"wires.json"));
+    }
+
+    void wrongFieldTypeReportsLocation()
+    {
+        const QString error = readErrorAfter([](io::ZipEntries &e) {
+            QJsonArray connectors = QJsonDocument::fromJson(e.at(u"connectors.json"_s)).array();
+            QJsonObject c = connectors[1].toObject();
+            QJsonArray pins = c[u"pins"].toArray();
+            QJsonObject p = pins[0].toObject();
+            p[u"label"] = 7;
+            pins[0] = p;
+            c[u"pins"] = pins;
+            connectors[1] = c;
+            e[u"connectors.json"_s] = toBytes(connectors);
+        });
+        QVERIFY2(error.contains(u"connectors[1].pins[0]") && error.contains(u"label"),
+                 qPrintable(error));
+    }
+
+    void danglingReferencesAreRejected()
+    {
+        auto withWire = [this](auto edit) {
+            return readErrorAfter([&](io::ZipEntries &e) {
+                QJsonArray wires = QJsonDocument::fromJson(e.at(u"wires.json"_s)).array();
+                QJsonObject w = wires[0].toObject();
+                edit(w);
+                wires[0] = w;
+                e[u"wires.json"_s] = toBytes(wires);
+            });
+        };
+        QVERIFY(withWire([](QJsonObject &w) {
+                    w[u"endA"] = QJsonObject{{u"type"_s, u"pin"_s},
+                                             {u"connectorId"_s, u"nope"_s},
+                                             {u"pinId"_s, u"ecu-p1"_s}};
+                }).contains(u"nope"));
+        QVERIFY(withWire([](QJsonObject &w) {
+                    w[u"endA"] = QJsonObject{{u"type"_s, u"pin"_s},
+                                             {u"connectorId"_s, u"c-ecu"_s},
+                                             {u"pinId"_s, u"nope"_s}};
+                }).contains(u"nope"));
+        QVERIFY(withWire([](QJsonObject &w) {
+                    w[u"endB"] = QJsonObject{{u"type"_s, u"splice"_s}, {u"spliceId"_s, u"nope"_s}};
+                }).contains(u"nope"));
+        QVERIFY(withWire([](QJsonObject &w) {
+                    w[u"routeSegmentIds"] = QJsonArray{u"nope"_s};
+                }).contains(u"nope"));
+    }
+
+    void duplicateIdsAreRejected()
+    {
+        const QString error = readErrorAfter([](io::ZipEntries &e) {
+            QJsonArray splices = QJsonDocument::fromJson(e.at(u"splices.json"_s)).array();
+            splices.append(splices[0]);
+            e[u"splices.json"_s] = toBytes(splices);
+        });
+        QVERIFY2(error.contains(u"sp1"), qPrintable(error));
+    }
+
+    void pinCountLimits()
+    {
+        Harness h = sampleHarness();
+        h.wires.clear();
+        h.connectors[0].pins.clear();
+        const QString file = path(u"pins.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        QString error;
+        QVERIFY(!io::readTbhFile(file, &error)); // 0 pins
+
+        for (int i = 0; i < kMaxPins; ++i)
+            h.connectors[0].pins.push_back(Pin{newId(), QString::number(i + 1), {}, {}, {}, false, {}, {}});
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        const auto loaded = io::readTbhFile(file, &error);
+        QVERIFY2(loaded, qPrintable(error)); // 999 pins
+        QCOMPARE(loaded->connectors[0].pins.size(), size_t(kMaxPins));
+
+        h.connectors[0].pins.push_back(Pin{newId(), u"1000"_s, {}, {}, {}, false, {}, {}});
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        QVERIFY(!io::readTbhFile(file, &error)); // 1000 pins
+    }
+
+    void saveOverwritesExistingFile()
+    {
+        const QString file = path(u"overwrite.tbh"_s);
+        Harness h = sampleHarness();
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        h.info.name = u"Second save"_s;
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        QCOMPARE(io::readTbhFile(file, nullptr)->info.name, u"Second save"_s);
+    }
+
+    void saveToMissingDirectoryFails()
+    {
+        QString error;
+        QVERIFY(!io::writeTbhFile(path(u"no/such/dir/x.tbh"_s), sampleHarness(), &error));
+        QVERIFY(!error.isEmpty());
+    }
+};
+
+QTEST_GUILESS_MAIN(TestTbhFile)
+#include "tst_tbhfile.moc"
