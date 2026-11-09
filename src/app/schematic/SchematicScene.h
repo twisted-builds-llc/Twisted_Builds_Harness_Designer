@@ -18,8 +18,6 @@ class SchematicScene : public QGraphicsScene
     Q_OBJECT
 
 public:
-    static constexpr qreal kGrid = 10;
-
     SchematicScene(HarnessModel *model, SelectionModel *selection, QObject *parent = nullptr);
     ~SchematicScene() override;
 

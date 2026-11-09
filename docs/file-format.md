@@ -42,7 +42,8 @@ Loading fails with a message if:
 - ids are duplicated within a collection (pins: within their connector);
 - a connector has fewer than 1 or more than 999 pins;
 - a wire end, a wire `routeSegmentIds` entry, a layout node `refId` or a segment node
-  reference points to something that does not exist;
+  reference points to something that does not exist, or a layout node `refId` does not
+  match its type, or two layout nodes reference the same item;
 - a segment connects a node to itself or has a negative length.
 
 `wireTypeId` and `sleevingId` are library references and are not validated yet.
@@ -166,7 +167,10 @@ Loading fails with a message if:
 ```
 
 - Node `type`: `connector` | `branch` | `splice` | `flyingLead` | `eyelet`. `refId` is the
-  connector or splice id for those types and empty otherwise.
+  connector id (`connector`), splice id (`splice`), or a wire free-end key `<wireId>/a` or
+  `<wireId>/b` (`flyingLead`, `eyelet`; eyelet is also used for ring terminals). `branch`
+  nodes have no reference. Any node may have an empty `refId` (unassigned).
+- At most one node may reference the same item.
 - `position` is for drawing only. `lengthMm` is the entered branch length and is
   authoritative.
 - `sleevingCoverage`: only `full` in schema 1.

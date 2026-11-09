@@ -3,10 +3,8 @@
 
 #include "model/Harness.h"
 #include "schematic/SchematicItems.h"
+#include "ui/CanvasView.h"
 
-#include <QGraphicsView>
-
-#include <functional>
 #include <map>
 
 class QGraphicsPathItem;
@@ -14,7 +12,6 @@ class QGraphicsPathItem;
 namespace tbh::app {
 
 class Document;
-class InlineEdit;
 class SchematicScene;
 class SelectionModel;
 
@@ -25,7 +22,7 @@ class SelectionModel;
 // pin, a splice, or empty space for a flying lead); double-click text to edit it;
 // wheel zooms (over a scrolling connector it scrolls rows; Ctrl+wheel always zooms);
 // middle-drag pans. The Wire tool also starts wires from splices.
-class SchematicView : public QGraphicsView
+class SchematicView : public CanvasView
 {
     Q_OBJECT
 
@@ -48,9 +45,6 @@ public:
     void paste();
     void duplicateSelection();
     void selectAll();
-    void zoomIn();
-    void zoomOut();
-    void zoomToFit();
     // Qt::AlignLeft/Right/Top/Bottom/HCenter/VCenter.
     void align(Qt::Alignment alignment);
     void distribute(Qt::Orientation orientation);
@@ -66,13 +60,10 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
-    void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
-    void changeEvent(QEvent *event) override;
-    void scrollContentsBy(int dx, int dy) override;
+    bool wheelOverItem(QWheelEvent *event) override;
 
 private:
-    enum class Nav { None, Down, Up, Next, Previous };
     struct DropTarget
     {
         std::optional<WireEnd> end;
@@ -89,6 +80,13 @@ private:
     void cancelWire();
     Anchor startAnchor(const QPointF &towards) const;
 
+    // Re-attach: end of the single selected wire under `viewPos` (pin or splice end).
+    std::optional<bool> selectedWireEndAt(const QPoint &viewPos) const;
+    void finishReattach(const QPointF &scenePos);
+    // A free end being dragged (single selection), or empty.
+    QString draggedFreeEnd() const;
+    bool dropFreeEnd(const QPointF &scenePos);
+
     void rememberPressPositions();
     void commitMoves();
     void toggleCollapsed(ConnectorItem *item);
@@ -96,9 +94,6 @@ private:
     void editPinCell(const QString &connectorId, int row, int column);
     void editConnectorTitle(const QString &connectorId);
     void editPinCount(const QString &connectorId);
-    void editText(const QRectF &sceneRect, const QString &text,
-                  std::function<void(const QString &, Nav)> commit);
-    void closeEditor();
 
     QString uniqueLabel(const QString &prefix, bool splice) const;
     QPointF viewCenterSnapped() const;
@@ -119,15 +114,13 @@ private:
     QGraphicsPathItem *m_preview = nullptr;
     ConnectorItem *m_hoverConnector = nullptr;
     SpliceItem *m_hoverSplice = nullptr;
+    // Re-attaching an existing wire end.
+    QString m_reattachWire;
+    bool m_reattachEndB = false;
 
     // Moving.
     std::map<QString, QPointF> m_pressPositions;
 
-    // Panning.
-    bool m_panning = false;
-    QPoint m_panLast;
-
-    InlineEdit *m_editor = nullptr;
     int m_pasteCount = 0;
     QString m_searchText;
     int m_searchIndex = -1;

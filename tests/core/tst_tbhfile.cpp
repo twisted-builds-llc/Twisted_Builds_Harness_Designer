@@ -391,6 +391,29 @@ private slots:
                 }).contains(u"ft"));
     }
 
+    void layoutNodeReferences()
+    {
+        // A flying-lead node may reference a wire's free end ("<wireId>/b").
+        Harness h = sampleHarness();
+        h.layoutNodes.push_back(
+            LayoutNode{u"n5"_s, LayoutNodeType::FlyingLead, freeEndPlacementKey(u"w3"_s, true), QPointF(), {}});
+        QString error;
+        QVERIFY2(io::deserializeHarness(io::serializeHarness(h), &error), qPrintable(error));
+
+        Harness pinEnd = h; // w1's end B is a pin, not a free end
+        pinEnd.layoutNodes.back().refId = freeEndPlacementKey(u"w1"_s, true);
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(pinEnd), &error));
+
+        Harness duplicate = h; // two nodes for one connector
+        duplicate.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Connector, u"c-ecu"_s, QPointF(), {}});
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(duplicate), &error));
+        QVERIFY(error.contains(u"c-ecu"));
+
+        Harness wrongType = h; // a connector id on a splice node
+        wrongType.layoutNodes.back() = LayoutNode{u"n5"_s, LayoutNodeType::Splice, u"c-sensor"_s, QPointF(), {}};
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(wrongType), &error));
+    }
+
     void orphanPlacementsAreDropped()
     {
         Harness h = sampleHarness();

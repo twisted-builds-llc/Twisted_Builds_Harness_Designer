@@ -7,8 +7,8 @@ lengths, bundle diameters and a bill of materials.
 **Privacy:** this application makes no network connections. No cloud, no accounts, no telemetry,
 no update checks. Your designs never leave your computer.
 
-> Status: early development (milestone 2 of 6: schematic editor). The layout editor, wire
-> lengths, bundle diameters and BOM come in later milestones.
+> Status: early development (milestone 3 of 6: schematic, layout and wire lengths).
+> Highlighting, bundle diameters, sleeving and the BOM come in later milestones.
 > See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for scope and roadmap.
 
 ## Using the schematic editor
@@ -20,6 +20,7 @@ no update checks. Your designs never leave your computer.
 | Fill pin labels in bulk | Properties > **Pin labels...** (e.g. `A1-A8, B1-B8, C1-C12`) |
 | Edit a pin label or circuit | Double-click it; **Enter** moves down, **Tab** moves across |
 | Draw a wire | Drag from a pin row to another pin or a splice; drop on empty space for a flying lead |
+| Move a wire end | Select the wire, then drag its end to another pin or splice (or empty space for a flying lead); drag a flying lead onto a pin to attach it |
 | Wire from a splice | Wire tool (**W**), then drag from the splice |
 | Move items | Drag a connector by its header |
 | Color, stripe, gauge | Properties panel; select several wires to change them together |
@@ -29,6 +30,20 @@ no update checks. Your designs never leave your computer.
 | Pan / zoom | Middle-drag / mouse wheel (**Ctrl+wheel** over a scrolling connector), **Ctrl+0** fits |
 | Copy, paste, duplicate, delete | **Ctrl+C**, **Ctrl+V**, **Ctrl+D**, **Delete** |
 | Align / distribute | **Arrange** menu |
+
+## Using the layout editor and wire lengths
+
+| Action | How |
+|---|---|
+| Put an item in the layout | **Layout** tab > double-click it in "Not in the layout yet" |
+| Add a branch point | **B** |
+| Draw a branch (segment) | Segment tool (**W**), drag from one point to another, or to empty space for a new branch point, then type its length |
+| Change a branch length | Double-click the segment, or edit it in Properties |
+| Allowances, service loop, rounding | Select nothing; edit the harness settings in Properties |
+| See a wire's cut length | Select the wire: Properties and the status bar show the length and how it was calculated |
+| Fix unrouted wires | **Problems** panel lists them; click one to select it |
+
+Branch lengths are what you type, not what you draw: the drawing does not need to be to scale.
 
 ## Building from source
 

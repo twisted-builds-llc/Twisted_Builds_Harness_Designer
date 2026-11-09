@@ -13,6 +13,14 @@ std::vector<Wire> &HarnessModel::items<Wire>() { return m_harness.wires; }
 template<>
 std::vector<Splice> &HarnessModel::items<Splice>() { return m_harness.splices; }
 template<>
+std::vector<LayoutNode> &HarnessModel::items<LayoutNode>() { return m_harness.layoutNodes; }
+template<>
+std::vector<LayoutSegment> &HarnessModel::items<LayoutSegment>() { return m_harness.layoutSegments; }
+template<>
+const std::vector<LayoutNode> &HarnessModel::items<LayoutNode>() const { return m_harness.layoutNodes; }
+template<>
+const std::vector<LayoutSegment> &HarnessModel::items<LayoutSegment>() const { return m_harness.layoutSegments; }
+template<>
 const std::vector<Connector> &HarnessModel::items<Connector>() const { return m_harness.connectors; }
 template<>
 const std::vector<Wire> &HarnessModel::items<Wire>() const { return m_harness.wires; }
@@ -36,6 +44,14 @@ void HarnessModel::setInfo(const HarnessInfo &info)
         return;
     m_harness.info = info;
     emit infoChanged();
+}
+
+void HarnessModel::setSettings(const Settings &settings)
+{
+    if (m_harness.settings == settings)
+        return;
+    m_harness.settings = settings;
+    emit settingsChanged();
 }
 
 template<typename T>
@@ -95,9 +111,17 @@ void HarnessModel::remove(const QString &id)
 
 std::vector<QString> HarnessModel::placementKeys(EntityKind kind, const QString &id)
 {
-    if (kind == EntityKind::Wire)
+    switch (kind) {
+    case EntityKind::Wire:
         return {freeEndPlacementKey(id, false), freeEndPlacementKey(id, true)};
-    return {id};
+    case EntityKind::Connector:
+    case EntityKind::Splice:
+        return {id};
+    case EntityKind::LayoutNode:
+    case EntityKind::LayoutSegment:
+        return {};
+    }
+    return {};
 }
 
 const SchematicPlacement *HarnessModel::placement(const QString &key) const
@@ -132,6 +156,8 @@ void HarnessModel::setPlacement(const QString &key, const std::optional<Schemati
 TBH_INSTANTIATE(Connector)
 TBH_INSTANTIATE(Wire)
 TBH_INSTANTIATE(Splice)
+TBH_INSTANTIATE(LayoutNode)
+TBH_INSTANTIATE(LayoutSegment)
 #undef TBH_INSTANTIATE
 
 } // namespace tbh

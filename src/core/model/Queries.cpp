@@ -97,4 +97,38 @@ QString describeWire(const Harness &harness, const Wire &wire)
     return wire.name.isEmpty() ? ends : QStringLiteral("%1 (%2)").arg(wire.name, ends);
 }
 
+std::vector<LayoutRef> layoutRefs(const Harness &harness)
+{
+    std::vector<LayoutRef> refs;
+    for (const Connector &c : harness.connectors)
+        refs.push_back({c.id, LayoutNodeType::Connector, c.label});
+    for (const Splice &s : harness.splices)
+        refs.push_back({s.id, LayoutNodeType::Splice, s.label});
+    for (const Wire &w : harness.wires) {
+        for (bool endB : {false, true}) {
+            const WireEnd &end = endB ? w.endB : w.endA;
+            const auto *free = std::get_if<FreeEnd>(&end);
+            if (!free)
+                continue;
+            const bool eyelet = free->kind == FreeEndKind::Eyelet || free->kind == FreeEndKind::RingTerminal;
+            const QString wireName = w.name.isEmpty() ? describeWireEnd(harness, endB ? w.endA : w.endB) : w.name;
+            refs.push_back({freeEndPlacementKey(w.id, endB),
+                            eyelet ? LayoutNodeType::Eyelet : LayoutNodeType::FlyingLead,
+                            QStringLiteral("%1 (%2)").arg(describeWireEnd(harness, end), wireName)});
+        }
+    }
+    return refs;
+}
+
+QString layoutRefLabel(const Harness &harness, const QString &refId)
+{
+    if (refId.isEmpty())
+        return {};
+    for (const LayoutRef &ref : layoutRefs(harness)) {
+        if (ref.refId == refId)
+            return ref.label;
+    }
+    return {};
+}
+
 } // namespace tbh

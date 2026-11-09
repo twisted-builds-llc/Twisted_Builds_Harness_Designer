@@ -6,6 +6,7 @@ add_library(tbh_core STATIC
     model/HarnessModel.h model/HarnessModel.cpp
     model/PinLabels.h model/PinLabels.cpp
     model/Queries.h model/Queries.cpp
+    calc/WireLength.h calc/WireLength.cpp
     io/FileFormat.h
     io/HarnessJson.h io/HarnessJson.cpp
     io/Migrations.h io/Migrations.cpp

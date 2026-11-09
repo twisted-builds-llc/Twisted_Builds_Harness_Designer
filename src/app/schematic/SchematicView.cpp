@@ -27,94 +27,16 @@ namespace tbh::app {
 namespace {
 
 constexpr auto kFragmentMime = "application/x-twisted-harness-fragment";
-constexpr qreal kMinScale = 0.05;
-constexpr qreal kMaxScale = 8.0;
 
 } // namespace
 
-// One-line editor laid over the canvas. Enter/Tab commit and move on, Esc cancels,
-// losing focus commits.
-class InlineEdit : public QLineEdit
-{
-public:
-    using Commit = std::function<void(const QString &, int nav)>;
-
-    InlineEdit(QWidget *parent, Commit commit)
-        : QLineEdit(parent)
-        , m_commit(std::move(commit))
-    {
-    }
-
-    void finish(int nav)
-    {
-        if (m_done)
-            return;
-        m_done = true;
-        if (nav >= 0)
-            m_commit(text(), nav);
-        hide();
-        deleteLater();
-    }
-
-protected:
-    void keyPressEvent(QKeyEvent *event) override
-    {
-        switch (event->key()) {
-        case Qt::Key_Return:
-        case Qt::Key_Enter:
-            finish(event->modifiers() & Qt::ShiftModifier ? 2 : 1); // Up : Down
-            return;
-        case Qt::Key_Tab:
-            finish(3);
-            return;
-        case Qt::Key_Backtab:
-            finish(4);
-            return;
-        case Qt::Key_Escape:
-            finish(-1);
-            return;
-        default:
-            QLineEdit::keyPressEvent(event);
-        }
-    }
-
-    bool event(QEvent *event) override
-    {
-        // Keep Tab for navigation instead of focus change.
-        if (event->type() == QEvent::KeyPress) {
-            auto *key = static_cast<QKeyEvent *>(event);
-            if (key->key() == Qt::Key_Tab || key->key() == Qt::Key_Backtab) {
-                keyPressEvent(key);
-                return true;
-            }
-        }
-        return QLineEdit::event(event);
-    }
-
-    void focusOutEvent(QFocusEvent *event) override
-    {
-        QLineEdit::focusOutEvent(event);
-        finish(0);
-    }
-
-private:
-    Commit m_commit;
-    bool m_done = false;
-};
-
 SchematicView::SchematicView(Document *document, SelectionModel *selection, QWidget *parent)
-    : QGraphicsView(parent)
+    : CanvasView(parent)
     , m_document(document)
     , m_selection(selection)
     , m_scene(new SchematicScene(document->model(), selection, this))
 {
     setScene(m_scene);
-    setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing);
-    setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
-    setOptimizationFlags(QGraphicsView::DontSavePainterState);
-    setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-    setDragMode(QGraphicsView::RubberBandDrag);
-    setFocusPolicy(Qt::StrongFocus);
     centerOn(QPointF(400, 300));
 
     connect(document->model(), &HarnessModel::harnessReset, this, [this] {
@@ -179,18 +101,22 @@ void SchematicView::setHover(const DropTarget &target)
 void SchematicView::mousePressEvent(QMouseEvent *event)
 {
     closeEditor();
-    if (event->button() == Qt::MiddleButton) {
-        m_panning = true;
-        m_panLast = event->pos();
-        viewport()->setCursor(Qt::ClosedHandCursor);
-        return;
-    }
     if (event->button() != Qt::LeftButton) {
-        QGraphicsView::mousePressEvent(event);
+        CanvasView::mousePressEvent(event);
         return;
     }
 
     const QPointF scenePos = mapToScene(event->pos());
+    if (const auto endB = selectedWireEndAt(event->pos())) {
+        m_reattachWire = *m_selection->selection().wires.begin();
+        m_reattachEndB = *endB;
+        m_pressPos = event->pos();
+        m_preview = new QGraphicsPathItem;
+        m_preview->setPen(QPen(palette().color(QPalette::Highlight), 2, Qt::DashLine));
+        m_preview->setZValue(10);
+        m_scene->addItem(m_preview);
+        return;
+    }
     QGraphicsItem *item = itemAt(event->pos());
     if (item && item->type() == ConnectorItemType) {
         auto *connector = static_cast<ConnectorItem *>(item);
@@ -224,17 +150,14 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
         return;
     }
 
-    QGraphicsView::mousePressEvent(event);
+    CanvasView::mousePressEvent(event);
     rememberPressPositions();
 }
 
 void SchematicView::mouseMoveEvent(QMouseEvent *event)
 {
-    if (m_panning) {
-        const QPoint delta = event->pos() - m_panLast;
-        m_panLast = event->pos();
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+    if (isPanning()) {
+        CanvasView::mouseMoveEvent(event);
         return;
     }
     if (m_wirePending && !m_wireDrawing
@@ -252,13 +175,29 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
     }
     if (m_wirePending)
         return;
-    QGraphicsView::mouseMoveEvent(event);
+    if (!m_reattachWire.isEmpty()) {
+        const QPointF scenePos = mapToScene(event->pos());
+        const DropTarget target = targetAt(scenePos);
+        setHover(target);
+        const Wire *wire = m_document->model()->find<Wire>(m_reattachWire);
+        Anchor end{scenePos, 0};
+        if (target.connector)
+            end = target.connector->pinAnchor(target.row, scenePos);
+        else if (target.splice)
+            end = target.splice->anchor();
+        if (wire)
+            m_preview->setPath(WireItem::routePath(m_scene->endAnchor(*wire, !m_reattachEndB), end));
+        return;
+    }
+    CanvasView::mouseMoveEvent(event);
+    if ((event->buttons() & Qt::LeftButton) && !draggedFreeEnd().isEmpty())
+        setHover(targetAt(mapToScene(event->pos())));
 }
 
 void SchematicView::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (m_panning && event->button() == Qt::MiddleButton) {
-        m_panning = false;
+    if (event->button() == Qt::MiddleButton) {
+        CanvasView::mouseReleaseEvent(event);
         viewport()->setCursor(m_tool == Tool::Wire ? Qt::CrossCursor : Qt::ArrowCursor);
         return;
     }
@@ -269,15 +208,25 @@ void SchematicView::mouseReleaseEvent(QMouseEvent *event)
             cancelWire(); // a plain click on a pin row only selects the connector
         return;
     }
-    QGraphicsView::mouseReleaseEvent(event);
-    if (event->button() == Qt::LeftButton)
-        commitMoves();
+    if (!m_reattachWire.isEmpty() && event->button() == Qt::LeftButton) {
+        if ((event->pos() - m_pressPos).manhattanLength() < QApplication::startDragDistance())
+            cancelWire(); // a click on the end, not a drag
+        else
+            finishReattach(mapToScene(event->pos()));
+        return;
+    }
+    CanvasView::mouseReleaseEvent(event);
+    if (event->button() == Qt::LeftButton) {
+        setHover({});
+        if (!dropFreeEnd(mapToScene(event->pos())))
+            commitMoves();
+    }
 }
 
 void SchematicView::mouseDoubleClickEvent(QMouseEvent *event)
 {
     if (event->button() != Qt::LeftButton) {
-        QGraphicsView::mouseDoubleClickEvent(event);
+        CanvasView::mouseDoubleClickEvent(event);
         return;
     }
     cancelWire();
@@ -309,34 +258,26 @@ void SchematicView::mouseDoubleClickEvent(QMouseEvent *event)
     }
 }
 
-void SchematicView::wheelEvent(QWheelEvent *event)
+bool SchematicView::wheelOverItem(QWheelEvent *event)
 {
-    closeEditor();
-    if (!(event->modifiers() & Qt::ControlModifier)) {
-        if (QGraphicsItem *item = itemAt(event->position().toPoint());
-            item && item->type() == ConnectorItemType) {
-            auto *connector = static_cast<ConnectorItem *>(item);
-            if (connector->isScrollMode()) {
-                const int rows = -event->angleDelta().y() / 40; // 3 rows per notch
-                if (rows != 0 && connector->scrollRows(rows))
-                    m_scene->itemMoved(connector); // re-anchor wires
-                event->accept();
-                return;
-            }
-        }
-    }
-    const qreal factor = std::pow(1.15, event->angleDelta().y() / 120.0);
-    const qreal scale = transform().m11() * factor;
-    if (scale < kMinScale || scale > kMaxScale)
-        return;
-    this->scale(factor, factor);
-    event->accept();
+    if (event->modifiers() & Qt::ControlModifier)
+        return false;
+    QGraphicsItem *item = itemAt(event->position().toPoint());
+    if (!item || item->type() != ConnectorItemType)
+        return false;
+    auto *connector = static_cast<ConnectorItem *>(item);
+    if (!connector->isScrollMode())
+        return false;
+    const int rows = -event->angleDelta().y() / 40; // 3 rows per notch
+    if (rows != 0 && connector->scrollRows(rows))
+        m_scene->itemMoved(connector); // re-anchor wires
+    return true;
 }
 
 void SchematicView::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Escape) {
-        if (m_wirePending) {
+        if (m_wirePending || !m_reattachWire.isEmpty()) {
             cancelWire();
         } else {
             m_scene->clearSelection();
@@ -344,20 +285,7 @@ void SchematicView::keyPressEvent(QKeyEvent *event)
         }
         return;
     }
-    QGraphicsView::keyPressEvent(event);
-}
-
-void SchematicView::changeEvent(QEvent *event)
-{
-    QGraphicsView::changeEvent(event);
-    if (event->type() == QEvent::PaletteChange)
-        viewport()->update();
-}
-
-void SchematicView::scrollContentsBy(int dx, int dy)
-{
-    closeEditor();
-    QGraphicsView::scrollContentsBy(dx, dy);
+    CanvasView::keyPressEvent(event);
 }
 
 // ---- wire drawing ---------------------------------------------------------------
@@ -441,11 +369,79 @@ void SchematicView::finishWire(const QPointF &scenePos)
 
 void SchematicView::cancelWire()
 {
+    m_reattachWire.clear();
     m_wirePending = false;
     m_wireDrawing = false;
     delete m_preview;
     m_preview = nullptr;
     setHover({});
+}
+
+// ---- re-attach --------------------------------------------------------------------
+
+std::optional<bool> SchematicView::selectedWireEndAt(const QPoint &viewPos) const
+{
+    const Selection &s = m_selection->selection();
+    if (s.wires.size() != 1 || !s.connectors.isEmpty() || !s.splices.isEmpty())
+        return std::nullopt;
+    const Wire *wire = m_document->model()->find<Wire>(*s.wires.begin());
+    if (!wire)
+        return std::nullopt;
+    constexpr int kGrabRadius = 8; // pixels
+    for (bool endB : {false, true}) {
+        // Free ends are dragged as items (see dropFreeEnd).
+        if (std::holds_alternative<FreeEnd>(endB ? wire->endB : wire->endA))
+            continue;
+        const QPoint anchor = mapFromScene(m_scene->endAnchor(*wire, endB).point);
+        if ((anchor - viewPos).manhattanLength() <= kGrabRadius)
+            return endB;
+    }
+    return std::nullopt;
+}
+
+void SchematicView::finishReattach(const QPointF &scenePos)
+{
+    const QString wireId = m_reattachWire;
+    const bool endB = m_reattachEndB;
+    cancelWire();
+    const DropTarget target = targetAt(scenePos);
+    const WireEnd newEnd = target.end ? *target.end : WireEnd(FreeEnd{FreeEndKind::FlyingLead, {}, {}});
+    auto command = setWireEnd(m_document->model(), wireId, endB, newEnd, SchematicScene::snapped(scenePos));
+    if (command)
+        m_document->undoStack()->push(command.release());
+    Selection selection;
+    selection.wires.insert(wireId);
+    m_selection->setSelection(selection);
+}
+
+QString SchematicView::draggedFreeEnd() const
+{
+    if (m_pressPositions.size() != 1)
+        return {};
+    PlacedItem *item = m_scene->placedItem(m_pressPositions.begin()->first);
+    return item && item->type() == FreeEndItemType ? item->placementKey() : QString();
+}
+
+bool SchematicView::dropFreeEnd(const QPointF &scenePos)
+{
+    const QString key = draggedFreeEnd();
+    if (key.isEmpty())
+        return false;
+    const DropTarget target = targetAt(scenePos);
+    if (!target.end)
+        return false;
+    auto *item = static_cast<FreeEndItem *>(m_scene->placedItem(key));
+    const QString wireId = item->wireId();
+    const bool endB = item->isEndB();
+    const QPointF before = m_pressPositions.begin()->second;
+    m_pressPositions.clear();
+    auto command = setWireEnd(m_document->model(), wireId, endB, *target.end, {});
+    if (!command) {
+        item->setPos(before); // e.g. dropped on the wire's own other end
+        return true;
+    }
+    m_document->undoStack()->push(command.release());
+    return true;
 }
 
 // ---- moving -----------------------------------------------------------------------
@@ -508,36 +504,6 @@ void SchematicView::setConnectorDisplay(const QString &connectorId, bool collaps
 }
 
 // ---- inline editing ---------------------------------------------------------------
-
-void SchematicView::editText(const QRectF &sceneRect, const QString &text,
-                             std::function<void(const QString &, Nav)> commit)
-{
-    closeEditor();
-    m_editor = new InlineEdit(viewport(), [commit](const QString &value, int nav) {
-        commit(value, Nav(nav));
-    });
-    QFont font = m_editor->font();
-    font.setPixelSize(std::clamp(int(12 * transform().m11()), 9, 28));
-    m_editor->setFont(font);
-    m_editor->setText(text);
-    m_editor->selectAll();
-    const QRect rect = mapFromScene(sceneRect).boundingRect();
-    m_editor->setGeometry(rect.adjusted(0, 0, 0, std::max(0, m_editor->sizeHint().height() - rect.height())));
-    m_editor->show();
-    m_editor->setFocus();
-    InlineEdit *editor = m_editor;
-    connect(m_editor, &QObject::destroyed, this, [this, editor] {
-        if (m_editor == editor)
-            m_editor = nullptr;
-    });
-}
-
-void SchematicView::closeEditor()
-{
-    if (m_editor)
-        m_editor->finish(0);
-    m_editor = nullptr;
-}
 
 void SchematicView::editPinCell(const QString &connectorId, int row, int column)
 {
@@ -824,36 +790,6 @@ void SchematicView::duplicateSelection()
     const QByteArray bytes = selectionFragment();
     if (!bytes.isEmpty())
         pasteFragmentBytes(bytes, QPointF(40, 40));
-}
-
-void SchematicView::zoomIn()
-{
-    if (transform().m11() * 1.25 <= kMaxScale)
-        scale(1.25, 1.25);
-}
-
-void SchematicView::zoomOut()
-{
-    if (transform().m11() / 1.25 >= kMinScale)
-        scale(1 / 1.25, 1 / 1.25);
-}
-
-void SchematicView::zoomToFit()
-{
-    QRectF bounds;
-    for (QGraphicsItem *item : m_scene->items()) {
-        if (item != m_preview)
-            bounds |= item->sceneBoundingRect();
-    }
-    if (bounds.isEmpty()) {
-        resetTransform();
-        centerOn(0, 0);
-        return;
-    }
-    fitInView(bounds.adjusted(-40, -40, 40, 40), Qt::KeepAspectRatio);
-    const qreal scale = std::clamp(transform().m11(), kMinScale, 1.5);
-    setTransform(QTransform::fromScale(scale, scale));
-    centerOn(bounds.center());
 }
 
 void SchematicView::align(Qt::Alignment alignment)

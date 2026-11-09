@@ -9,7 +9,9 @@ namespace tbh::app {
 
 class ConnectorPanel;
 class Document;
-class HarnessPropertiesPanel;
+class HarnessPanel;
+class LayoutNodePanel;
+class SegmentPanel;
 class SelectionModel;
 class SplicePanel;
 class WirePanel;
@@ -29,10 +31,12 @@ private:
     void update();
 
     SelectionModel *m_selection;
-    HarnessPropertiesPanel *m_harness;
+    HarnessPanel *m_harness;
     ConnectorPanel *m_connector;
     WirePanel *m_wires;
     SplicePanel *m_splice;
+    SegmentPanel *m_segment;
+    LayoutNodePanel *m_node;
     QLabel *m_mixed;
 };
 

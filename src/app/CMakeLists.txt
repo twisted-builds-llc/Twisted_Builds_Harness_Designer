@@ -6,15 +6,22 @@ add_library(tbh_app_lib STATIC
     SelectionModel.h
     commands/EditOps.h commands/EditOps.cpp
     commands/EntityCommands.h
-    commands/SetHarnessInfoCommand.h commands/SetHarnessInfoCommand.cpp
+    commands/HarnessCommands.h commands/HarnessCommands.cpp
+    layout/LayoutItems.h layout/LayoutItems.cpp
+    layout/LayoutScene.h layout/LayoutScene.cpp
+    layout/LayoutView.h layout/LayoutView.cpp
     schematic/SchematicItems.h schematic/SchematicItems.cpp
     schematic/SchematicScene.h schematic/SchematicScene.cpp
     schematic/SchematicView.h schematic/SchematicView.cpp
+    ui/CanvasView.h ui/CanvasView.cpp
     ui/ConnectorEdits.h ui/ConnectorEdits.cpp
-    ui/HarnessPropertiesPanel.h ui/HarnessPropertiesPanel.cpp
+    ui/Format.h ui/Format.cpp
     ui/MainWindow.h ui/MainWindow.cpp
     ui/PinPatternDialog.h ui/PinPatternDialog.cpp
+    ui/ProblemsPanel.h ui/ProblemsPanel.cpp
     ui/properties/ConnectorPanel.h ui/properties/ConnectorPanel.cpp
+    ui/properties/HarnessPanel.h ui/properties/HarnessPanel.cpp
+    ui/properties/LayoutPanels.h ui/properties/LayoutPanels.cpp
     ui/properties/PanelWidgets.h ui/properties/PanelWidgets.cpp
     ui/properties/PropertiesPanel.h ui/properties/PropertiesPanel.cpp
     ui/properties/WirePanel.h ui/properties/WirePanel.cpp

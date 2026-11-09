@@ -40,6 +40,17 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
 std::unique_ptr<QUndoCommand> updateWires(HarnessModel *model, const std::vector<Wire> &wires,
                                           const QString &text);
 
+// Removes layout nodes and segments. Segments on removed nodes go too; wires whose
+// manual route used a removed segment fall back to automatic routing.
+std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<QString> &nodeIds,
+                                                const QSet<QString> &segmentIds);
+
+// Moves one end of a wire to `newEnd` (re-attach). A new free end is placed at
+// `freeEndPosition`. Layout references to an old free end are cleared and any manual
+// route is dropped. Returns null if nothing changes or both ends would be the same pin.
+std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wireId, bool endB,
+                                         const WireEnd &newEnd, QPointF freeEndPosition);
+
 // Pins with `count` entries: existing pins are kept, new pins get nextPinLabel() labels.
 std::vector<Pin> resizedPins(const std::vector<Pin> &pins, int count);
 

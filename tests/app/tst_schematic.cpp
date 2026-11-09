@@ -69,7 +69,7 @@ Harness ecuHarness(int ecuPins, int smallConnectors, int pinsEach)
 struct Fixture
 {
     Document document;
-    SelectionModel selection;
+    SelectionModel selection{document.model()};
     SchematicView view{&document, &selection};
 
     Fixture()
@@ -300,7 +300,7 @@ private slots:
         loaded.createdAt = h.createdAt; // stamped on first save
         QVERIFY(loaded == h);
 
-        SelectionModel selection;
+        SelectionModel selection(reopened.model());
         SchematicView view(&reopened, &selection);
         QCOMPARE(view.schematicScene()->connectorItem(h.connectors[0].id)->visibleRowCount(), 40);
         QVERIFY(changePinCount(nullptr, &reopened, h.connectors[1].id, 12));
@@ -333,7 +333,7 @@ private slots:
         Harness h = ecuHarness(999, 50, 10);
         QCOMPARE(h.wires.size(), size_t(500));
         Document document;
-        SelectionModel selection;
+        SelectionModel selection(document.model());
         QElapsedTimer timer;
         timer.start();
         document.model()->reset(h);

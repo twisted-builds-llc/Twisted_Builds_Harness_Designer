@@ -2,6 +2,7 @@
 #include "schematic/SchematicScene.h"
 
 #include "SelectionModel.h"
+#include "ui/CanvasView.h"
 
 #include <QPainter>
 #include <QPalette>
@@ -39,7 +40,7 @@ SchematicScene::~SchematicScene()
 
 QPointF SchematicScene::snapped(const QPointF &point)
 {
-    return QPointF(std::round(point.x() / kGrid) * kGrid, std::round(point.y() / kGrid) * kGrid);
+    return snapToCanvasGrid(point);
 }
 
 PlacedItem *SchematicScene::placedItem(const QString &key) const
@@ -250,6 +251,9 @@ void SchematicScene::itemMoved(PlacedItem *item)
 void SchematicScene::onAdded(EntityKind kind, const QString &id)
 {
     switch (kind) {
+    case EntityKind::LayoutNode:
+    case EntityKind::LayoutSegment:
+        break;
     case EntityKind::Connector:
         addConnector(*m_model->find<Connector>(id));
         updateWiresOf(id);
@@ -267,6 +271,9 @@ void SchematicScene::onAdded(EntityKind kind, const QString &id)
 void SchematicScene::onChanged(EntityKind kind, const QString &id)
 {
     switch (kind) {
+    case EntityKind::LayoutNode:
+    case EntityKind::LayoutSegment:
+        break;
     case EntityKind::Connector:
         if (auto *item = m_connectors.value(id)) {
             item->setConnector(*m_model->find<Connector>(id));
@@ -293,6 +300,9 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
 void SchematicScene::onRemoved(EntityKind kind, const QString &id)
 {
     switch (kind) {
+    case EntityKind::LayoutNode:
+    case EntityKind::LayoutSegment:
+        break;
     case EntityKind::Connector:
         delete m_connectors.take(id);
         break;
@@ -361,8 +371,6 @@ void SchematicScene::syncSelectionFromModel()
             freeEnd->setSelected(false);
     }
     m_syncingSelection = false;
-    // Items that vanished may have been selected; report the effective selection.
-    syncSelectionToModel();
 }
 
 void SchematicScene::setSearchText(const QString &text)
@@ -386,28 +394,7 @@ std::vector<std::pair<QString, int>> SchematicScene::searchMatches() const
 
 void SchematicScene::drawBackground(QPainter *painter, const QRectF &rect)
 {
-    const QPalette pal = palette();
-    painter->fillRect(rect, pal.color(QPalette::Base).darker(pal.color(QPalette::Base).lightness() > 128 ? 103 : 115));
-    const qreal scale = painter->worldTransform().m11();
-    constexpr qreal minor = 20;
-    constexpr qreal major = 100;
-    QColor line = pal.color(QPalette::Text);
-    auto drawGrid = [&](qreal step, qreal alpha) {
-        line.setAlphaF(alpha);
-        painter->setPen(QPen(line, 0));
-        const qreal left = std::floor(rect.left() / step) * step;
-        const qreal top = std::floor(rect.top() / step) * step;
-        QVarLengthArray<QLineF, 256> lines;
-        for (qreal x = left; x < rect.right(); x += step)
-            lines.append(QLineF(x, rect.top(), x, rect.bottom()));
-        for (qreal y = top; y < rect.bottom(); y += step)
-            lines.append(QLineF(rect.left(), y, rect.right(), y));
-        painter->drawLines(lines.constData(), int(lines.size()));
-    };
-    if (scale * minor >= 8)
-        drawGrid(minor, 0.05);
-    if (scale * major >= 8)
-        drawGrid(major, 0.09);
+    drawCanvasBackground(painter, rect, palette());
 }
 
 } // namespace tbh::app

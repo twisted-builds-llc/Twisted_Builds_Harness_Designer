@@ -22,4 +22,19 @@ private:
     HarnessInfo m_new;
 };
 
+// Changes harness settings (allowances, service loop, rounding, waste factors...).
+class SetHarnessSettingsCommand : public QUndoCommand
+{
+public:
+    SetHarnessSettingsCommand(HarnessModel *model, Settings newSettings, QUndoCommand *parent = nullptr);
+
+    void redo() override;
+    void undo() override;
+
+private:
+    HarnessModel *m_model;
+    Settings m_old;
+    Settings m_new;
+};
+
 } // namespace tbh::app

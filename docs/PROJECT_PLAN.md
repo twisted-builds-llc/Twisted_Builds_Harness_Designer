@@ -312,6 +312,8 @@ demo description.
 - Layout nodes/segments with editable lengths; flying leads, eyelets, branch points.
 - Harness settings editor: end/strip allowance per end type (default 0), service loop, rounding
   increment, waste factors. Undoable, saved in the file.
+- Schematic wire re-attach: drag a selected wire's end onto another pin or splice to move it,
+  or onto empty space to make it a flying lead; drop a free end on a pin/splice to attach it.
 - Route resolution, length calculation (8.1), length shown on wire selection in the schematic,
   Problems panel for unrouted wires.
 - *Done when:* clicking a wire in the schematic shows a correct, explained length for a test harness
@@ -360,6 +362,7 @@ multiple harness variants/options in one file, KiCad netlist import for connecto
 
 - ~~Wire routing style on the schematic~~ - resolved in M2: **orthogonal** (horizontal stubs
   out of the pin row, one vertical run).
-- Default end allowances per end type (seed values, user-editable).
+- ~~Default end allowances per end type~~ - resolved in M3: 0 for every end type, editable per
+  harness in the harness properties (nothing selected).
 - Sleeving coverage across multiple segments / partial segments (v1: full segment only).
 - Final file extension (`.tbh` is the default).

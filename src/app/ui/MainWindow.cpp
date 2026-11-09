@@ -5,7 +5,10 @@
 #include "io/FileFormat.h"
 #include "SelectionModel.h"
 #include "model/Queries.h"
+#include "layout/LayoutView.h"
 #include "schematic/SchematicView.h"
+#include "ui/Format.h"
+#include "ui/ProblemsPanel.h"
 #include "ui/PreferencesDialog.h"
 #include "ui/properties/ConnectorPanel.h"
 #include "ui/properties/PropertiesPanel.h"
@@ -56,15 +59,16 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     : QMainWindow(parent)
     , m_theme(theme)
     , m_document(new Document(this))
-    , m_selection(new SelectionModel(this))
+    , m_selection(new SelectionModel(m_document->model(), this))
 {
     m_schematic = new SchematicView(m_document, m_selection, this);
-    auto *tabs = new QTabWidget(this);
-    tabs->setDocumentMode(true);
-    tabs->addTab(m_schematic, tr("Schematic"));
-    tabs->addTab(placeholder(tr("Layout editor (coming in a later version)")), tr("Layout"));
-    tabs->addTab(placeholder(tr("Bill of materials (coming in a later version)")), tr("BOM"));
-    setCentralWidget(tabs);
+    m_layout = new LayoutEditor(m_document, m_selection, this);
+    m_tabs = new QTabWidget(this);
+    m_tabs->setDocumentMode(true);
+    m_tabs->addTab(m_schematic, tr("Schematic"));
+    m_tabs->addTab(m_layout, tr("Layout"));
+    m_tabs->addTab(placeholder(tr("Bill of materials (coming in a later version)")), tr("BOM"));
+    setCentralWidget(m_tabs);
 
     createDocks();
     createMenus();
@@ -80,14 +84,27 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
         if (kind != EntityKind::Wire)
             refreshProjectTree();
     });
-    connect(m_schematic, &SchematicView::statusMessage, this,
-            [this](const QString &message) { statusBar()->showMessage(message, 5000); });
+    auto showMessage = [this](const QString &message) { statusBar()->showMessage(message, 5000); };
+    connect(m_schematic, &SchematicView::statusMessage, this, showMessage);
+    connect(m_layout->view(), &LayoutView::statusMessage, this, showMessage);
     connect(m_selection, &SelectionModel::selectionChanged, this, &MainWindow::showSelectionStatus);
 
     refreshProjectTree();
     updateTitle();
     statusBar()->showMessage(tr("Ready"));
     resize(1400, 860);
+}
+
+bool MainWindow::layoutTabActive() const
+{
+    return m_tabs->currentWidget() == m_layout;
+}
+
+CanvasView *MainWindow::currentCanvas() const
+{
+    if (layoutTabActive())
+        return m_layout->view();
+    return m_schematic;
 }
 
 void MainWindow::createDocks()
@@ -115,11 +132,27 @@ void MainWindow::createDocks()
     propertiesDock->setMinimumWidth(360);
     addDockWidget(Qt::RightDockWidgetArea, propertiesDock);
 
+    auto *problems = new ProblemsPanel(m_document, this);
     auto *problemsDock = new QDockWidget(tr("Problems"), this);
     problemsDock->setObjectName(QStringLiteral("problemsDock"));
-    problemsDock->setWidget(new QListWidget(problemsDock));
+    problemsDock->setWidget(problems);
     addDockWidget(Qt::BottomDockWidgetArea, problemsDock);
-    problemsDock->hide(); // nothing reports problems yet
+    resizeDocks({problemsDock}, {120}, Qt::Vertical);
+    connect(problems, &ProblemsPanel::countChanged, problemsDock, [problemsDock](int count) {
+        problemsDock->setWindowTitle(count ? tr("Problems (%1)").arg(count) : tr("Problems"));
+    });
+    connect(problems, &ProblemsPanel::problemActivated, this,
+            [this](calc::Problem::Kind kind, const QString &id) {
+                Selection selection;
+                if (kind == calc::Problem::Kind::UnroutedWire) {
+                    selection.wires.insert(id);
+                    m_tabs->setCurrentWidget(m_schematic);
+                } else {
+                    selection.layoutSegments.insert(id);
+                    m_tabs->setCurrentWidget(m_layout);
+                }
+                m_selection->setSelection(selection);
+            });
 }
 
 void MainWindow::createMenus()
@@ -136,6 +169,7 @@ void MainWindow::createMenus()
     file->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
     SchematicView *view = m_schematic;
+    LayoutView *layout = m_layout->view();
     QMenu *edit = menuBar()->addMenu(tr("&Edit"));
     QAction *undo = m_document->undoStack()->createUndoAction(this, tr("&Undo"));
     undo->setShortcut(QKeySequence::Undo);
@@ -144,25 +178,38 @@ void MainWindow::createMenus()
     edit->addAction(undo);
     edit->addAction(redo);
     edit->addSeparator();
-    // Canvas actions only fire while the schematic has focus, so they never steal
-    // keys (Delete, Ctrl+C...) from text fields in the panels.
-    auto canvasAction = [&](QMenu *menu, const QString &text, const QKeySequence &key, auto slot) {
+    // Canvas actions: shortcuts only fire while an editor canvas has focus, so they never
+    // steal keys (Delete, Ctrl+C...) from text fields and tables in the panels. From the
+    // menu they act on the editor of the current tab; `onLayout` may be empty.
+    auto canvasAction = [&](QMenu *menu, const QString &text, const QKeySequence &key,
+                            std::function<void()> onSchematic, std::function<void()> onLayout) {
         QAction *action = menu->addAction(text);
         action->setShortcut(key);
         action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
         view->addAction(action);
-        connect(action, &QAction::triggered, view, slot);
+        if (onLayout)
+            layout->addAction(action);
+        connect(action, &QAction::triggered, this, [this, onSchematic, onLayout] {
+            if (!layoutTabActive())
+                onSchematic();
+            else if (onLayout)
+                onLayout();
+        });
         return action;
     };
-    canvasAction(edit, tr("&Copy"), QKeySequence::Copy, &SchematicView::copySelection);
-    canvasAction(edit, tr("&Paste"), QKeySequence::Paste, &SchematicView::paste);
-    canvasAction(edit, tr("D&uplicate"), QKeySequence(Qt::CTRL | Qt::Key_D), &SchematicView::duplicateSelection);
-    QAction *del = canvasAction(edit, tr("&Delete"), QKeySequence::Delete, &SchematicView::deleteSelection);
+    canvasAction(edit, tr("&Copy"), QKeySequence::Copy, [view] { view->copySelection(); }, {});
+    canvasAction(edit, tr("&Paste"), QKeySequence::Paste, [view] { view->paste(); }, {});
+    canvasAction(edit, tr("D&uplicate"), QKeySequence(Qt::CTRL | Qt::Key_D), [view] { view->duplicateSelection(); },
+                 {});
+    QAction *del = canvasAction(edit, tr("&Delete"), QKeySequence::Delete, [view] { view->deleteSelection(); },
+                                [layout] { layout->deleteSelection(); });
     del->setShortcuts({QKeySequence::Delete, QKeySequence(Qt::Key_Backspace)});
-    canvasAction(edit, tr("Re&name"), QKeySequence(Qt::Key_F2), &SchematicView::renameSelection);
-    canvasAction(edit, tr("Select &All"), QKeySequence::SelectAll, &SchematicView::selectAll);
+    canvasAction(edit, tr("Re&name"), QKeySequence(Qt::Key_F2), [view] { view->renameSelection(); }, {});
+    canvasAction(edit, tr("Select &All"), QKeySequence::SelectAll, [view] { view->selectAll(); },
+                 [layout] { layout->selectAll(); });
     edit->addSeparator();
     edit->addAction(tr("&Find Pin..."), QKeySequence::Find, this, [this] {
+        m_tabs->setCurrentWidget(m_schematic);
         m_find->setFocus();
         m_find->selectAll();
     });
@@ -171,27 +218,52 @@ void MainWindow::createMenus()
                                            [this] { PreferencesDialog(this).exec(); });
     preferences->setMenuRole(QAction::PreferencesRole);
 
+    // Tools of one editor: shortcuts bound to that editor only, so both can use V/W.
+    auto toolAction = [this](QWidget *owner, QActionGroup *group, const QString &text, const QKeySequence &key,
+                             const QString &tip, std::function<void()> slot) {
+        QAction *action = new QAction(text, this);
+        action->setShortcut(key);
+        action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+        action->setToolTip(tip);
+        if (group) {
+            action->setCheckable(true);
+            group->addAction(action);
+        }
+        owner->addAction(action);
+        connect(action, &QAction::triggered, this, slot);
+        return action;
+    };
+
     QMenu *place = menuBar()->addMenu(tr("&Place"));
-    QAction *addConnector =
-        canvasAction(place, tr("Add &Connector"), QKeySequence(Qt::Key_C), &SchematicView::addConnector);
-    QAction *addSplice = canvasAction(place, tr("Add &Splice"), QKeySequence(Qt::Key_S), &SchematicView::addSplice);
-    place->addSeparator();
-    auto *toolGroup = new QActionGroup(this);
-    QAction *selectTool = place->addAction(tr("S&elect Tool"));
-    QAction *wireTool = place->addAction(tr("&Wire Tool"));
-    selectTool->setShortcut(QKeySequence(Qt::Key_V));
-    wireTool->setShortcut(QKeySequence(Qt::Key_W));
-    for (QAction *tool : {selectTool, wireTool}) {
-        tool->setCheckable(true);
-        tool->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-        toolGroup->addAction(tool);
-        view->addAction(tool);
-    }
+    auto *schematicTools = new QActionGroup(this);
+    QAction *selectTool = toolAction(view, schematicTools, tr("Select"), QKeySequence(Qt::Key_V),
+                                     tr("Select and move items; drag from a pin to draw a wire, or "
+                                        "drag a selected wire's end to re-attach it (V)"),
+                                     [view] { view->setTool(SchematicView::Tool::Select); });
+    QAction *wireTool = toolAction(view, schematicTools, tr("Wire"), QKeySequence(Qt::Key_W),
+                                   tr("Draw wires from pins or splices (W)"),
+                                   [view] { view->setTool(SchematicView::Tool::Wire); });
     selectTool->setChecked(true);
-    selectTool->setToolTip(tr("Select and move items; drag from a pin to draw a wire (V)"));
-    wireTool->setToolTip(tr("Draw wires from pins or splices (W)"));
-    connect(selectTool, &QAction::triggered, view, [view] { view->setTool(SchematicView::Tool::Select); });
-    connect(wireTool, &QAction::triggered, view, [view] { view->setTool(SchematicView::Tool::Wire); });
+    QAction *addConnector = toolAction(view, nullptr, tr("Add Connector"), QKeySequence(Qt::Key_C),
+                                       tr("Add a connector (C)"), [view] { view->addConnector(); });
+    QAction *addSplice = toolAction(view, nullptr, tr("Add Splice"), QKeySequence(Qt::Key_S),
+                                    tr("Add a splice (S)"), [view] { view->addSplice(); });
+    auto *layoutTools = new QActionGroup(this);
+    QAction *layoutSelect = toolAction(layout, layoutTools, tr("Select"), QKeySequence(Qt::Key_V),
+                                       tr("Select and move layout points; double-click a segment to "
+                                          "type its length (V)"),
+                                       [layout] { layout->setTool(LayoutView::Tool::Select); });
+    QAction *segmentTool = toolAction(layout, layoutTools, tr("Segment"), QKeySequence(Qt::Key_W),
+                                      tr("Drag from a point to another point, or to empty space, to add "
+                                         "a segment (W)"),
+                                      [layout] { layout->setTool(LayoutView::Tool::Segment); });
+    layoutSelect->setChecked(true);
+    QAction *addBranch = toolAction(layout, nullptr, tr("Add Branch Point"), QKeySequence(Qt::Key_B),
+                                    tr("Add a branch point (B)"), [layout] { layout->addBranchPoint(); });
+    place->addSection(tr("Schematic"));
+    place->addActions({addConnector, addSplice, selectTool, wireTool});
+    place->addSection(tr("Layout"));
+    place->addActions({addBranch, layoutSelect, segmentTool});
 
     QMenu *arrange = menuBar()->addMenu(tr("&Arrange"));
     const std::pair<QString, Qt::Alignment> alignments[] = {
@@ -206,14 +278,17 @@ void MainWindow::createMenus()
     arrange->addAction(tr("Distribute Verti&cally"), view, [view] { view->distribute(Qt::Vertical); });
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
-    m_viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, view, &SchematicView::zoomIn);
-    m_viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, view, &SchematicView::zoomOut);
-    QAction *fit = m_viewMenu->addAction(tr("Zoom to &Fit"), QKeySequence(Qt::CTRL | Qt::Key_0), view,
-                                         &SchematicView::zoomToFit);
+    m_viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, this, [this] { currentCanvas()->zoomIn(); });
+    m_viewMenu->addAction(tr("Zoom &Out"), QKeySequence::ZoomOut, this, [this] { currentCanvas()->zoomOut(); });
+    QAction *fit = m_viewMenu->addAction(tr("Zoom to &Fit"), QKeySequence(Qt::CTRL | Qt::Key_0), this,
+                                         [this] { currentCanvas()->zoomToFit(); });
     QAction *snap = m_viewMenu->addAction(tr("&Snap to Grid"));
     snap->setCheckable(true);
     snap->setChecked(true);
-    connect(snap, &QAction::toggled, view, &SchematicView::setSnapToGrid);
+    connect(snap, &QAction::toggled, this, [view, layout](bool on) {
+        view->setSnapToGrid(on);
+        layout->setSnapToGrid(on);
+    });
     m_viewMenu->addSeparator();
     for (QDockWidget *dock : findChildren<QDockWidget *>())
         m_viewMenu->addAction(dock->toggleViewAction());
@@ -234,28 +309,44 @@ void MainWindow::createMenus()
     QMenu *help = menuBar()->addMenu(tr("&Help"));
     help->addAction(tr("&About"), this, &MainWindow::showAbout);
 
-    QToolBar *toolbar = addToolBar(tr("Schematic"));
-    toolbar->setObjectName(QStringLiteral("schematicToolbar"));
-    toolbar->setMovable(false);
-    toolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    toolbar->addAction(selectTool);
-    toolbar->addAction(wireTool);
-    toolbar->addSeparator();
-    toolbar->addAction(addConnector);
-    toolbar->addAction(addSplice);
-    toolbar->addSeparator();
-    toolbar->addAction(fit);
-    toolbar->addSeparator();
-    m_find = new QLineEdit(toolbar);
+    // One toolbar per editor; the current tab decides which is shown.
+    QToolBar *schematicBar = addToolBar(tr("Schematic"));
+    schematicBar->setObjectName(QStringLiteral("schematicToolbar"));
+    schematicBar->setMovable(false);
+    schematicBar->addActions({selectTool, wireTool});
+    schematicBar->addSeparator();
+    schematicBar->addActions({addConnector, addSplice});
+    schematicBar->addSeparator();
+    schematicBar->addAction(fit);
+    schematicBar->addSeparator();
+    m_find = new QLineEdit(schematicBar);
     m_find->setPlaceholderText(tr("Find pin or circuit (Enter = next)"));
     m_find->setClearButtonEnabled(true);
     m_find->setMaximumWidth(280);
-    toolbar->addWidget(m_find);
+    schematicBar->addWidget(m_find);
     connect(m_find, &QLineEdit::returnPressed, view, [this] { m_schematic->find(m_find->text()); });
     connect(m_find, &QLineEdit::textChanged, view, [this](const QString &text) {
         if (text.isEmpty())
             m_schematic->find({});
     });
+
+    QToolBar *layoutBar = addToolBar(tr("Layout"));
+    layoutBar->setObjectName(QStringLiteral("layoutToolbar"));
+    layoutBar->setMovable(false);
+    layoutBar->addActions({layoutSelect, segmentTool});
+    layoutBar->addSeparator();
+    layoutBar->addAction(addBranch);
+    layoutBar->addSeparator();
+    layoutBar->addAction(fit);
+
+    for (QToolBar *bar : {schematicBar, layoutBar})
+        bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    auto syncToolbars = [this, schematicBar, layoutBar] {
+        schematicBar->setVisible(!layoutTabActive());
+        layoutBar->setVisible(layoutTabActive());
+    };
+    connect(m_tabs, &QTabWidget::currentChanged, this, syncToolbars);
+    syncToolbars();
 }
 
 void MainWindow::showSelectionStatus()
@@ -263,11 +354,16 @@ void MainWindow::showSelectionStatus()
     const Selection &s = m_selection->selection();
     const Harness &h = m_document->model()->harness();
     if (s.wires.size() == 1 && s.connectors.isEmpty() && s.splices.isEmpty()) {
-        if (const Wire *w = m_document->model()->find<Wire>(*s.wires.begin()))
-            statusBar()->showMessage(tr("Wire: %1 — length needs the layout editor").arg(describeWire(h, *w)));
+        if (const Wire *w = m_document->model()->find<Wire>(*s.wires.begin())) {
+            const WireLengthText length =
+                describeWireLength(h, *w, calc::wireLength(h, calc::LayoutGraph(h), *w));
+            statusBar()->showMessage(tr("Wire %1 — cut length %2. %3")
+                                         .arg(describeWire(h, *w), length.headline, length.detail));
+        }
     } else if (!s.isEmpty()) {
         statusBar()->showMessage(tr("%n item(s) selected", nullptr,
-                                    int(s.wires.size() + s.connectors.size() + s.splices.size())));
+                                    int(s.wires.size() + s.connectors.size() + s.splices.size()
+                                        + s.layoutNodes.size() + s.layoutSegments.size())));
     } else {
         statusBar()->clearMessage();
     }

@@ -62,6 +62,8 @@ private:
     QLineEdit *m_wireType;
     bool m_wireTypeMixed = false;
     QLabel *m_length;
+    QLabel *m_lengthDetail;
+    void refreshLength(const std::vector<Wire> &wires);
     QLineEdit *m_lengthOverride;
     QLabel *m_overrideUnits;
     EndEditor m_endA;

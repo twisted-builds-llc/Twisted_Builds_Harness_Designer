@@ -5,6 +5,7 @@
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "model/Queries.h"
+#include "ui/Format.h"
 #include "ui/properties/PanelWidgets.h"
 
 #include <QColorDialog>
@@ -33,6 +34,7 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     , m_gauge(new GaugeEditor(this))
     , m_wireType(new QLineEdit(this))
     , m_length(new QLabel(this))
+    , m_lengthDetail(new QLabel(this))
     , m_lengthOverride(new QLineEdit(this))
     , m_overrideUnits(new QLabel(this))
 {
@@ -45,8 +47,15 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
         button->setFixedWidth(32);
     }
     m_wireType->setPlaceholderText(tr("e.g. GXL, TXL"));
-    m_length->setText(tr("Needs the layout editor (not available yet)"));
-    m_length->setEnabled(false);
+    QFont lengthFont = m_length->font();
+    lengthFont.setBold(true);
+    m_length->setFont(lengthFont);
+    m_length->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    m_lengthDetail->setWordWrap(true);
+    m_lengthDetail->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    QFont detailFont = m_lengthDetail->font();
+    detailFont.setPointSizeF(detailFont.pointSizeF() * 0.9);
+    m_lengthDetail->setFont(detailFont);
     auto *validator = new QDoubleValidator(0, 1e7, 3, this);
     validator->setNotation(QDoubleValidator::StandardNotation);
     m_lengthOverride->setValidator(validator);
@@ -65,7 +74,8 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     form->addRow(tr("Stripe:"), row(m_stripe, m_stripeCustom));
     form->addRow(tr("Gauge:"), m_gauge);
     form->addRow(tr("Wire &type:"), m_wireType);
-    form->addRow(tr("Length:"), m_length);
+    form->addRow(tr("Cut length:"), m_length);
+    form->addRow(m_lengthDetail);
     form->addRow(tr("Length override:"), row(m_lengthOverride, m_overrideUnits));
 
     m_endA = makeEndEditor(tr("End A"), false);
@@ -135,6 +145,37 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
             refresh();
     });
     connect(model, &HarnessModel::infoChanged, this, &WirePanel::refresh);
+    // Lengths depend on the layout and settings.
+    connect(model, &HarnessModel::settingsChanged, this, &WirePanel::refresh);
+    for (auto signal : {&HarnessModel::entityAdded, &HarnessModel::entityChanged, &HarnessModel::entityRemoved})
+        connect(model, signal, this, [this](EntityKind kind) {
+            if (isVisible() && (kind == EntityKind::LayoutNode || kind == EntityKind::LayoutSegment))
+                refresh();
+        });
+}
+
+void WirePanel::refreshLength(const std::vector<Wire> &wires)
+{
+    const Harness &h = m_document->model()->harness();
+    const calc::LayoutGraph graph(h);
+    if (wires.size() == 1) {
+        const WireLengthText text = describeWireLength(h, wires.front(), calc::wireLength(h, graph, wires.front()));
+        m_length->setText(text.headline);
+        m_lengthDetail->setText(text.detail);
+        return;
+    }
+    double total = 0;
+    int unknown = 0;
+    for (const Wire &w : wires) {
+        const calc::WireLength l = calc::wireLength(h, graph, w);
+        if (l.isKnown())
+            total += l.cutMm;
+        else
+            ++unknown;
+    }
+    m_length->setText(tr("%1 total").arg(formatLength(total, h.info.units)));
+    m_lengthDetail->setText(unknown ? tr("%n selected wire(s) not routed and not counted.", nullptr, unknown)
+                                    : QString());
 }
 
 WirePanel::EndEditor WirePanel::makeEndEditor(const QString &title, bool endB)
@@ -226,6 +267,8 @@ void WirePanel::refresh()
         m_lengthOverride->clear();
         m_lengthOverride->setPlaceholderText(tr("(multiple)"));
     }
+
+    refreshLength(wires);
 
     m_endA.box->setVisible(single);
     m_endB.box->setVisible(single);

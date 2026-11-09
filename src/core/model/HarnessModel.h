@@ -7,7 +7,7 @@
 
 namespace tbh {
 
-enum class EntityKind { Connector, Wire, Splice };
+enum class EntityKind { Connector, Wire, Splice, LayoutNode, LayoutSegment };
 
 template<typename T>
 constexpr EntityKind entityKindOf();
@@ -17,6 +17,10 @@ template<>
 constexpr EntityKind entityKindOf<Wire>() { return EntityKind::Wire; }
 template<>
 constexpr EntityKind entityKindOf<Splice>() { return EntityKind::Splice; }
+template<>
+constexpr EntityKind entityKindOf<LayoutNode>() { return EntityKind::LayoutNode; }
+template<>
+constexpr EntityKind entityKindOf<LayoutSegment>() { return EntityKind::LayoutSegment; }
 
 // Owns the Harness being edited. Views read from it and react to its signals;
 // they never mutate it directly but push QUndoCommands that call the mutators.
@@ -35,8 +39,9 @@ public:
     void reset(Harness harness);
 
     void setInfo(const HarnessInfo &info);
+    void setSettings(const Settings &settings);
 
-    // T is Connector, Wire or Splice.
+    // T is Connector, Wire, Splice, LayoutNode or LayoutSegment.
     template<typename T>
     const T *find(const QString &id) const;
     template<typename T>
@@ -51,7 +56,8 @@ public:
     template<typename T>
     void remove(const QString &id);
 
-    // Placement keys owned by an entity: its id, and for wires the free-end keys.
+    // Schematic placement keys owned by an entity: connector/splice id, wire free-end
+    // keys; none for layout entities (their position is part of the entity).
     static std::vector<QString> placementKeys(EntityKind kind, const QString &id);
 
     const SchematicPlacement *placement(const QString &key) const;
@@ -61,6 +67,7 @@ public:
 signals:
     void harnessReset();
     void infoChanged();
+    void settingsChanged();
     void entityAdded(tbh::EntityKind kind, const QString &id);
     void entityChanged(tbh::EntityKind kind, const QString &id);
     void entityRemoved(tbh::EntityKind kind, const QString &id);
