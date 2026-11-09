@@ -19,9 +19,10 @@ Saving is atomic: the file is written to a temporary file next to the target, th
 | `splices.json`    | Array of splices. Optional, default `[]`.                   |
 | `layout.json`     | Layout graph: `{ "nodes": [...], "segments": [...] }`.      |
 | `schematic.json`  | Schematic placements (positions, collapse, visible rows).   |
+| `library.json`    | Parts library entries this harness uses (embedded on save). |
 
-Any other entry (for example `bom.json`, `library.json`, which later milestones define) is
-kept byte-for-byte when the file is re-saved.
+Any other entry (for example `bom.json`, which a later milestone defines) is kept
+byte-for-byte when the file is re-saved.
 
 ## Conventions
 
@@ -193,6 +194,41 @@ Presentation only: where items sit on the schematic canvas.
 - `maxVisibleRows`: connector rows shown before the box scrolls; `0` shows all rows.
 - Items without a placement are laid out automatically when the file is opened.
 - Placements whose item no longer exists are dropped on load.
+
+## `library.json`
+
+The wire types and sleeving the harness references, copied from the user's parts library
+on every save so the file opens the same on another machine. The same format is used for
+the per-user library file (`library.json` in the app data folder).
+
+```json
+{
+  "sleevings": [
+    {
+      "approximate": true, "family": "PET expandable braid", "id": "seed-pet-1-4",
+      "innerDiameterMm": 6.4, "kind": "braided", "sizeLabel": "1/4 in"
+    },
+    {
+      "approximate": true, "family": "Heat shrink 2:1", "id": "seed-hs2-1-4",
+      "innerDiameterMm": 6.4, "kind": "heatShrink", "recoveredDiameterMm": 3.2, "sizeLabel": "1/4 in"
+    }
+  ],
+  "wireTypes": [
+    {
+      "approximate": true, "id": "seed-gxl", "name": "GXL",
+      "outerDiameters": [ { "gauge": { "system": "awg", "value": 18 }, "odMm": 2.06 } ]
+    }
+  ]
+}
+```
+
+- Wires reference a wire type by `wireTypeId`; segments reference sleeving by `sleevingId`.
+- `kind`: `braided` | `splitLoom` | `heatShrink` | `other`. `recoveredDiameterMm` is only
+  meaningful for heat shrink and is omitted otherwise.
+- `approximate: true` marks shipped seed values the user has not verified; the app labels
+  them as approximate.
+- When opening, the user's own library wins for ids present in both; embedded entries fill
+  in ids the user's library lacks.
 
 ## Schema changes
 

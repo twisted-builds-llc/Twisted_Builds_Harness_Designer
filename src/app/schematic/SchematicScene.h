@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "calc/Highlight.h"
 #include "model/HarnessModel.h"
 #include "schematic/SchematicItems.h"
 
@@ -43,6 +44,9 @@ public:
     // (connector id, row) of every match, in model order.
     std::vector<std::pair<QString, int>> searchMatches() const;
 
+    // Dims everything outside `set`; nullopt turns highlighting off.
+    void setHighlight(const std::optional<calc::HighlightSet> &set);
+
     // Free spot to the right of everything placed so far (scene coords).
     QPointF nextFreePosition() const;
 
@@ -78,6 +82,8 @@ private:
     bool m_building = false;
     bool m_syncingSelection = false;
     QString m_search;
+    std::optional<calc::HighlightSet> m_highlight;
+    void applyHighlight();
 
     QHash<QString, ConnectorItem *> m_connectors;
     QHash<QString, SpliceItem *> m_splices;

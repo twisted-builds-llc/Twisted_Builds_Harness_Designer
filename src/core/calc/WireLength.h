@@ -94,13 +94,14 @@ QHash<QString, std::vector<QString>> wiresBySegment(const Harness &harness, cons
 
 struct Problem
 {
-    enum class Kind { UnroutedWire, SegmentWithoutLength };
+    enum class Kind { UnroutedWire, SegmentWithoutLength, SleevingTooSmall };
     Kind kind;
     QString itemId; // wire or segment id
     QString message;
 };
 
-// Issues the user should fix before lengths can be trusted.
-std::vector<Problem> findProblems(const Harness &harness);
+// Issues the user should fix: unrouted wires, segments without a length, and assigned
+// sleeving too small for its bundle (needs the effective library).
+std::vector<Problem> findProblems(const Harness &harness, const Library &library);
 
 } // namespace tbh::calc

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "model/HarnessModel.h"
 
+#include "model/Library.h"
+
 #include <algorithm>
 
 namespace tbh {
@@ -35,7 +37,15 @@ HarnessModel::HarnessModel(QObject *parent)
 void HarnessModel::reset(Harness harness)
 {
     m_harness = std::move(harness);
+    m_library = mergeLibraries(m_userLibrary, m_harness.library);
     emit harnessReset();
+}
+
+void HarnessModel::setUserLibrary(Library library)
+{
+    m_userLibrary = std::move(library);
+    m_library = mergeLibraries(m_userLibrary, m_harness.library);
+    emit libraryChanged();
 }
 
 void HarnessModel::setInfo(const HarnessInfo &info)

@@ -199,6 +199,15 @@ void ConnectorItem::setHoverRow(int row)
     update();
 }
 
+void ConnectorItem::setRelatedPins(bool active, const QSet<QString> &pinIds)
+{
+    if (active == m_relatedActive && pinIds == m_relatedPins)
+        return;
+    m_relatedActive = active;
+    m_relatedPins = pinIds;
+    update();
+}
+
 void ConnectorItem::setSearchText(const QString &text)
 {
     if (text == m_search)
@@ -332,14 +341,20 @@ void ConnectorItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *opt
                 if (!drawText)
                     continue;
                 const Pin &pin = m_connector.pins[size_t(row)];
-                painter->setPen(text);
+                const bool related = m_relatedActive && m_relatedPins.contains(pin.id);
+                if (related) {
+                    painter->fillRect(r.adjusted(1, 0, -1, 0), mix(fill, pal.color(QPalette::Highlight), 0.25));
+                    painter->fillRect(QRectF(1, r.top(), 4, r.height()), pal.color(QPalette::Highlight));
+                }
+                const QColor rowText = (m_relatedActive && !related) ? mix(text, base, 0.6) : text;
+                painter->setPen(rowText);
                 painter->drawText(QRectF(6, r.top(), kLabelColumn - 10, kRowHeight),
                                   Qt::AlignLeft | Qt::AlignVCenter,
                                   metrics.elidedText(pin.label, Qt::ElideRight, int(kLabelColumn - 10)));
                 const QString circuit = pin.isCavityPlug && pin.circuitText.isEmpty()
                                             ? QApplication::translate("tbh::app::ConnectorItem", "(plug)")
                                             : pin.circuitText;
-                painter->setPen(pin.isCavityPlug ? mix(text, base, 0.5) : text);
+                painter->setPen(pin.isCavityPlug ? mix(rowText, base, 0.5) : rowText);
                 painter->drawText(QRectF(kLabelColumn + 6, r.top(), kWidth - kLabelColumn - 12, kRowHeight),
                                   Qt::AlignLeft | Qt::AlignVCenter,
                                   metrics.elidedText(circuit, Qt::ElideRight, int(kWidth - kLabelColumn - 12)));

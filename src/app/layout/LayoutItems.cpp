@@ -6,6 +6,7 @@
 
 #include <QApplication>
 #include <QPainter>
+#include <QFontMetricsF>
 #include <QPainterPathStroker>
 
 namespace tbh::app {
@@ -182,7 +183,7 @@ void LayoutSegmentItem::setCaption(const QString &lengthText, const QString &usa
 
 QRectF LayoutSegmentItem::labelRect() const
 {
-    return QRectF(midpoint() - QPointF(60, 17), QSizeF(120, 34));
+    return QRectF(midpoint() - QPointF(90, 17), QSizeF(180, 34));
 }
 
 QRectF LayoutSegmentItem::boundingRect() const
@@ -218,7 +219,15 @@ void LayoutSegmentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
     painter->drawLine(m_a, m_b);
 
     // Caption box: length (bold) over wire count.
-    const QRectF box = labelRect().adjusted(14, 0, -14, 0);
+    // Fit the box to the caption text.
+    QFont measure = painter->font();
+    measure.setPixelSize(11);
+    measure.setBold(true);
+    const qreal width = std::min(labelRect().width(),
+                                 std::max(QFontMetricsF(measure).horizontalAdvance(m_lengthText),
+                                          QFontMetricsF(measure).horizontalAdvance(m_usageText) * 0.95)
+                                     + 14);
+    const QRectF box(midpoint().x() - width / 2, labelRect().top(), width, labelRect().height());
     painter->setPen(QPen(mix(base, text, 0.3), 1));
     painter->setBrush(base);
     painter->drawRoundedRect(box, 4, 4);

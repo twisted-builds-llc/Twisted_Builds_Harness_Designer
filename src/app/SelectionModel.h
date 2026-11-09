@@ -10,6 +10,7 @@ namespace tbh::app {
 
 struct Selection {
     QSet<QString> connectors;
+    QSet<QString> pins; // "connectorId/pinId": narrows a selected connector to these pins
     QSet<QString> splices;
     QSet<QString> wires; // selecting a wire's free end selects the wire
     QSet<QString> layoutNodes;

@@ -138,6 +138,7 @@ Wires reference a `conductorKind` that is `single` in v1. Leave room for `twiste
 - **Sleeving catalog**: id, name/type (braided, split loom, heat shrink...), size label,
   nominal inner diameter (and fully-recovered diameter for heat shrink)
 - **Connectors / terminals / seals**: part numbers and descriptions for autofill
+  (not built yet: M4 delivered wire types and sleeving; autofill is still open)
 - Seed values shipped in `resources/default-library/` are **approximate defaults and must be
   labeled as such in the UI**; users are expected to verify against manufacturer datasheets.
   Do not present seeded numbers as authoritative.

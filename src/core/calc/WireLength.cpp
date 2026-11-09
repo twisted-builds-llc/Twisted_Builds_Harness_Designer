@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "calc/WireLength.h"
 
+#include "calc/Bundle.h"
 #include "model/Queries.h"
 
 #include <QCoreApplication>
@@ -206,7 +207,7 @@ QString routeStatusReason(const Harness &harness, const Wire &wire, RouteStatus 
     return {};
 }
 
-std::vector<Problem> findProblems(const Harness &harness)
+std::vector<Problem> findProblems(const Harness &harness, const Library &library)
 {
     std::vector<Problem> problems;
     const LayoutGraph graph(harness);
@@ -223,6 +224,20 @@ std::vector<Problem> findProblems(const Harness &harness)
             const QString name = s.label.isEmpty() ? tr("(unlabeled)") : s.label;
             problems.push_back({Problem::Kind::SegmentWithoutLength, s.id,
                                 tr("Layout segment %1 has no length.").arg(name)});
+        }
+    }
+    const auto usage = wiresBySegment(harness, graph);
+    for (const LayoutSegment &s : harness.layoutSegments) {
+        const Sleeving *sleeving = library.sleeving(s.sleevingId);
+        if (!sleeving)
+            continue;
+        const BundleDiameter bundle = bundleDiameter(harness, library, usage.value(s.id));
+        if (checkSleeving(*sleeving, bundle.diameterMm, harness.settings.sleevingDiameterMarginPercent)
+            == SleevingFit::TooSmall) {
+            const QString name = s.label.isEmpty() ? tr("(unlabeled)") : s.label;
+            problems.push_back({Problem::Kind::SleevingTooSmall, s.id,
+                                tr("Sleeving %1 %2 on segment %3 is too small for its bundle.")
+                                    .arg(sleeving->family, sleeving->sizeLabel, name)});
         }
     }
     return problems;

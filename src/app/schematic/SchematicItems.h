@@ -8,6 +8,7 @@
 
 #include <QGraphicsItem>
 #include <QPainterPath>
+#include <QSet>
 
 namespace tbh::app {
 
@@ -91,6 +92,9 @@ public:
     Anchor pinAnchor(int row, const QPointF &towards) const;
 
     void setHoverRow(int row);
+    // Highlight mode: rows of these pin ids are emphasized, other rows faded.
+    // `active` false clears it.
+    void setRelatedPins(bool active, const QSet<QString> &pinIds);
     void setSearchText(const QString &text);
     std::vector<int> searchMatches() const;
 
@@ -108,6 +112,8 @@ private:
     int m_maxVisibleRows = 0;
     int m_firstRow = 0;
     int m_hoverRow = -1;
+    bool m_relatedActive = false;
+    QSet<QString> m_relatedPins;
     QString m_search;
 };
 

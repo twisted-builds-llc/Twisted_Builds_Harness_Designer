@@ -7,8 +7,8 @@ lengths, bundle diameters and a bill of materials.
 **Privacy:** this application makes no network connections. No cloud, no accounts, no telemetry,
 no update checks. Your designs never leave your computer.
 
-> Status: early development (milestone 3 of 6: schematic, layout and wire lengths).
-> Highlighting, bundle diameters, sleeving and the BOM come in later milestones.
+> Status: early development (milestone 4 of 6: schematic, layout, wire lengths, highlighting,
+> bundle diameters and sleeving). The BOM and installers come in later milestones.
 > See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for scope and roadmap.
 
 ## Using the schematic editor
@@ -44,6 +44,20 @@ no update checks. Your designs never leave your computer.
 | Fix unrouted wires | **Problems** panel lists them; click one to select it |
 
 Branch lengths are what you type, not what you draw: the drawing does not need to be to scale.
+
+## Highlighting, bundle diameters and sleeving
+
+| Action | How |
+|---|---|
+| See everything connected to something | Select a connector, pin, wire, splice, branch point or segment: related items in both editors stay bright and the rest dims. **Esc** or clicking empty space clears it. Toggle with **View > Highlight Related Items** |
+| Highlight a single pin | Click its row in the connector box |
+| Bundle diameter | Shown on each layout segment and in its properties (`~` means some wire sizes are estimated) |
+| Pick sleeving | Select a segment: choose a sleeving type and size, or use the recommended size |
+| Wire types and sleeving sizes | **Edit > Parts Library** |
+
+**The parts library shipped with the app is approximate.** Wire outer diameters and sleeving
+sizes are typical values, marked "approx." in the app until you edit them. Check them
+against your manufacturer's datasheets before trusting bundle diameters or sleeving sizes.
 
 ## Building from source
 

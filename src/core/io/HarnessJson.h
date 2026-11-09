@@ -17,4 +17,8 @@ ZipEntries serializeHarness(const Harness &harness);
 // Harness::otherEntries; unknown keys go to each entity's `extra`.
 std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *error);
 
+// Library JSON, as embedded in library.json and as the per-user library file.
+QByteArray serializeLibrary(const Library &library);
+std::optional<Library> deserializeLibrary(const QByteArray &json, QString *error);
+
 } // namespace tbh::io

@@ -5,6 +5,7 @@
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "model/Queries.h"
+#include "calc/Bundle.h"
 #include "ui/Format.h"
 #include "ui/properties/PanelWidgets.h"
 
@@ -32,7 +33,8 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     , m_baseCustom(new QPushButton(tr("..."), this))
     , m_stripeCustom(new QPushButton(tr("..."), this))
     , m_gauge(new GaugeEditor(this))
-    , m_wireType(new QLineEdit(this))
+    , m_wireType(new QComboBox(this))
+    , m_outerDiameter(new QLabel(this))
     , m_length(new QLabel(this))
     , m_lengthDetail(new QLabel(this))
     , m_lengthOverride(new QLineEdit(this))
@@ -46,7 +48,9 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
         button->setToolTip(tr("Pick a custom color"));
         button->setFixedWidth(32);
     }
-    m_wireType->setPlaceholderText(tr("e.g. GXL, TXL"));
+    m_wireType->setToolTip(tr("Wire types and their outer diameters come from the parts library "
+                              "(Edit > Parts Library)."));
+    m_outerDiameter->setWordWrap(true);
     QFont lengthFont = m_length->font();
     lengthFont.setBold(true);
     m_length->setFont(lengthFont);
@@ -74,6 +78,7 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     form->addRow(tr("Stripe:"), row(m_stripe, m_stripeCustom));
     form->addRow(tr("Gauge:"), m_gauge);
     form->addRow(tr("Wire &type:"), m_wireType);
+    form->addRow(tr("Outer diameter:"), m_outerDiameter);
     form->addRow(tr("Cut length:"), m_length);
     form->addRow(m_lengthDetail);
     form->addRow(tr("Length override:"), row(m_lengthOverride, m_overrideUnits));
@@ -124,10 +129,11 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
         apply([&](Wire &w) { w.gauge = *gauge; }, tr("Set gauge"));
         rememberStyle();
     };
-    connect(m_wireType, &QLineEdit::editingFinished, this, [this] {
-        const QString type = m_wireType->text();
-        if (type.isEmpty() && m_wireTypeMixed)
-            return; // "(multiple)" left untouched
+    connect(m_wireType, &QComboBox::activated, this, [this] {
+        const QVariant data = m_wireType->currentData();
+        if (!data.isValid())
+            return; // "(multiple)" placeholder
+        const QString type = data.toString();
         apply([&](Wire &w) { w.wireTypeId = type; }, tr("Set wire type"));
         rememberStyle();
     });
@@ -147,6 +153,7 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     connect(model, &HarnessModel::infoChanged, this, &WirePanel::refresh);
     // Lengths depend on the layout and settings.
     connect(model, &HarnessModel::settingsChanged, this, &WirePanel::refresh);
+    connect(model, &HarnessModel::libraryChanged, this, &WirePanel::refresh);
     for (auto signal : {&HarnessModel::entityAdded, &HarnessModel::entityChanged, &HarnessModel::entityRemoved})
         connect(model, signal, this, [this](EntityKind kind) {
             if (isVisible() && (kind == EntityKind::LayoutNode || kind == EntityKind::LayoutSegment))
@@ -247,13 +254,29 @@ void WirePanel::refresh()
         m_gauge->setValue(first.gauge);
     else
         m_gauge->setMixed();
-    m_wireTypeMixed = !same([](const Wire &w) { return w.wireTypeId; });
-    if (!m_wireTypeMixed) {
-        m_wireType->setText(first.wireTypeId);
-        m_wireType->setPlaceholderText(tr("e.g. GXL, TXL"));
+    const Library &library = m_document->model()->library();
+    const bool mixedType = !same([](const Wire &w) { return w.wireTypeId; });
+    m_wireType->clear();
+    if (mixedType)
+        m_wireType->addItem(tr("(multiple)")); // no data: not applicable
+    m_wireType->addItem(tr("None"), QString());
+    for (const WireType &t : library.wireTypes)
+        m_wireType->addItem(t.approximate ? tr("%1 (approx.)").arg(t.name) : t.name, t.id);
+    if (!mixedType && !first.wireTypeId.isEmpty() && !library.wireType(first.wireTypeId))
+        m_wireType->addItem(tr("%1 (not in library)").arg(first.wireTypeId), first.wireTypeId);
+    m_wireType->setCurrentIndex(mixedType ? 0 : std::max(0, m_wireType->findData(first.wireTypeId)));
+
+    if (single) {
+        const calc::WireDiameter od = calc::wireOuterDiameter(library, first);
+        const WireType *type = library.wireType(first.wireTypeId);
+        QString text = formatLength(od.odMm, h.info.units);
+        if (od.estimated)
+            text += QLatin1Char(' ') + tr("(estimated from the gauge; add this type and gauge to the parts library)");
+        else if (type && type->approximate)
+            text += QLatin1Char(' ') + tr("(approximate library value)");
+        m_outerDiameter->setText(text);
     } else {
-        m_wireType->clear();
-        m_wireType->setPlaceholderText(tr("(multiple)"));
+        m_outerDiameter->setText(tr("(several wires)"));
     }
 
     const Units units = h.info.units;

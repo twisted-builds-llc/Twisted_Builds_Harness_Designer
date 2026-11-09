@@ -3,10 +3,13 @@
 
 #include <QWidget>
 
+#include <optional>
+
 class QComboBox;
 class QLabel;
 class QLineEdit;
 class QListWidget;
+class QPushButton;
 
 namespace tbh::app {
 
@@ -32,6 +35,19 @@ private:
     QLineEdit *m_label;
     QLabel *m_wireCount;
     QListWidget *m_wires;
+    QLabel *m_bundle;
+    QLabel *m_bundleNote;
+    QComboBox *m_family;
+    QComboBox *m_size;
+    QLabel *m_fit;
+    QLabel *m_recommendation;
+    QPushButton *m_useRecommended;
+    // Family the user picked (may differ from the assigned sleeving until a size is chosen).
+    // nullopt: not picked, use the assigned sleeving's family or the first one; "": none.
+    std::optional<QString> m_familyChoice;
+    QString m_recommendedId;
+
+    void assignSleeving(const QString &sleevingId);
 };
 
 // One layout node: what it stands for (connector, splice, wire end, or a branch point).

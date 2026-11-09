@@ -3,6 +3,7 @@
 
 #include "Document.h"
 #include "SelectionModel.h"
+#include "calc/Highlight.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "io/HarnessJson.h"
@@ -202,10 +203,21 @@ void SchematicView::mouseReleaseEvent(QMouseEvent *event)
         return;
     }
     if (m_wirePending && event->button() == Qt::LeftButton) {
-        if (m_wireDrawing)
+        if (m_wireDrawing) {
             finishWire(mapToScene(event->pos()));
-        else
-            cancelWire(); // a plain click on a pin row only selects the connector
+        } else {
+            // A plain click on a pin row selects that pin (for highlighting).
+            const WireEnd start = m_wireStart;
+            cancelWire();
+            if (const auto *pin = std::get_if<PinRef>(&start)) {
+                Selection selection;
+                if (event->modifiers() & Qt::ControlModifier)
+                    selection = m_selection->selection();
+                selection.connectors.insert(pin->connectorId);
+                selection.pins.insert(calc::pinKey(pin->connectorId, pin->pinId));
+                m_selection->setSelection(selection);
+            }
+        }
         return;
     }
     if (!m_reattachWire.isEmpty() && event->button() == Qt::LeftButton) {

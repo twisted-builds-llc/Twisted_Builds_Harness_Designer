@@ -38,6 +38,12 @@ public:
     // Replace the whole harness (new/open). Not undoable.
     void reset(Harness harness);
 
+    // Library used for calculations: the user's library merged with the entries embedded
+    // in the harness (see mergeLibraries). Not part of the undo history.
+    const Library &library() const { return m_library; }
+    const Library &userLibrary() const { return m_userLibrary; }
+    void setUserLibrary(Library library);
+
     void setInfo(const HarnessInfo &info);
     void setSettings(const Settings &settings);
 
@@ -68,6 +74,7 @@ signals:
     void harnessReset();
     void infoChanged();
     void settingsChanged();
+    void libraryChanged();
     void entityAdded(tbh::EntityKind kind, const QString &id);
     void entityChanged(tbh::EntityKind kind, const QString &id);
     void entityRemoved(tbh::EntityKind kind, const QString &id);
@@ -80,6 +87,8 @@ private:
     const std::vector<T> &items() const;
 
     Harness m_harness;
+    Library m_userLibrary;
+    Library m_library;
 };
 
 } // namespace tbh

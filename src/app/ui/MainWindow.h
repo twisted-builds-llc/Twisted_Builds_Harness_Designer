@@ -14,6 +14,7 @@ namespace tbh::app {
 
 class CanvasView;
 class Document;
+class Highlighter;
 class LayoutEditor;
 class SchematicView;
 class SelectionModel;
@@ -49,6 +50,7 @@ private:
     void updateTitle();
     void showAbout();
     void showSelectionStatus();
+    void editLibrary();
     bool layoutTabActive() const;
     CanvasView *currentCanvas() const;
 
@@ -57,6 +59,7 @@ private:
     SelectionModel *m_selection;
     SchematicView *m_schematic = nullptr;
     LayoutEditor *m_layout = nullptr;
+    Highlighter *m_highlighter = nullptr;
     QTabWidget *m_tabs = nullptr;
     QLineEdit *m_find = nullptr;
     QMenu *m_recentMenu = nullptr;
