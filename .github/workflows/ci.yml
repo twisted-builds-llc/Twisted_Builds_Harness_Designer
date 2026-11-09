@@ -1,9 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: CI
 
+# Runs on pull requests to main and on demand (Actions tab > CI > Run workflow),
+# not on every push.
 on:
-  push:
   pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:

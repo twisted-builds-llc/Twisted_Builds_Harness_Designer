@@ -371,6 +371,22 @@ private slots:
         QVERIFY(!io::readTbhFile(file, &error)); // 1000 pins
     }
 
+    void everyUnitRoundTrips()
+    {
+        const QString file = path(u"units.tbh"_s);
+        for (Units units : {Units::Inches, Units::Millimeters, Units::Centimeters}) {
+            Harness h = sampleHarness();
+            h.info.units = units;
+            QVERIFY(io::writeTbhFile(file, h, nullptr));
+            QCOMPARE(io::readTbhFile(file, nullptr)->info.units, units);
+        }
+        QVERIFY(readErrorAfter([](io::ZipEntries &e) {
+                    QJsonObject harness = QJsonDocument::fromJson(e.at(u"harness.json"_s)).object();
+                    harness[u"units"] = u"ft"_s;
+                    e[u"harness.json"_s] = toBytes(harness);
+                }).contains(u"ft"));
+    }
+
     void saveOverwritesExistingFile()
     {
         const QString file = path(u"overwrite.tbh"_s);

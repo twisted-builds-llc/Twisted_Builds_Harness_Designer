@@ -25,7 +25,11 @@ inline constexpr int kMaxPins = 999;
 // New random UUID without braces.
 QString newId();
 
-enum class Units { Millimeters, Inches };
+// Display unit for lengths. Lengths are always stored in millimeters.
+enum class Units { Inches, Millimeters, Centimeters };
+// "in" | "mm" | "cm"; used in files and settings, and as the display symbol.
+QString unitsSymbol(Units units);
+std::optional<Units> unitsFromSymbol(const QString &symbol);
 enum class Gender { None, Male, Female };
 enum class GaugeSystem { Awg, Mm2 };
 enum class FreeEndKind { FlyingLead, Eyelet, RingTerminal, Bare };
@@ -56,7 +60,7 @@ struct HarnessInfo {
     QString description;
     QString revision;
     QString author;
-    Units units = Units::Millimeters;
+    Units units = Units::Inches;
 
     bool operator==(const HarnessInfo &) const = default;
 };

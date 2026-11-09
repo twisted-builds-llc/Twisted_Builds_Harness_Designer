@@ -3,6 +3,7 @@
 
 #include "Document.h"
 #include "commands/SetHarnessInfoCommand.h"
+#include "ui/UnitsCombo.h"
 
 #include <QComboBox>
 #include <QEvent>
@@ -22,8 +23,7 @@ HarnessPropertiesPanel::HarnessPropertiesPanel(Document *document, QWidget *pare
     , m_units(new QComboBox(this))
     , m_description(new QPlainTextEdit(this))
 {
-    m_units->addItem(tr("Millimeters (mm)"), int(Units::Millimeters));
-    m_units->addItem(tr("Inches (in)"), int(Units::Inches));
+    fillUnitsCombo(m_units);
     m_description->setTabChangesFocus(true);
     m_description->installEventFilter(this);
 
@@ -58,7 +58,7 @@ void HarnessPropertiesPanel::refresh()
     m_name->setText(info.name);
     m_revision->setText(info.revision);
     m_author->setText(info.author);
-    m_units->setCurrentIndex(m_units->findData(int(info.units)));
+    setComboUnits(m_units, info.units);
     if (m_description->toPlainText() != info.description)
         m_description->setPlainText(info.description);
 }
@@ -70,7 +70,7 @@ void HarnessPropertiesPanel::commit()
     info.name = m_name->text();
     info.revision = m_revision->text();
     info.author = m_author->text();
-    info.units = Units(m_units->currentData().toInt());
+    info.units = comboUnits(m_units);
     info.description = m_description->toPlainText();
     if (info != model->harness().info)
         m_document->undoStack()->push(new SetHarnessInfoCommand(model, std::move(info)));

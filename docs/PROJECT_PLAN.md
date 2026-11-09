@@ -91,7 +91,7 @@ All entities have a stable `id` (UUID string). References between entities use i
 or indexes, so files survive reordering.
 
 ### 5.1 Harness (root)
-- `name`, `description`, `revision`, `author`, `units` (`mm` | `in`)
+- `name`, `description`, `revision`, `author`, `units` (`in` | `mm` | `cm`; display only)
 - `settings`: `packingFactor` (default 0.70), `serviceLoopPercent` (default 0),
   `stripAllowance` per end type, `wasteFactorWire` (default 5%), `wasteFactorSleeving` (default 5%),
   `lengthRoundingIncrement` (default 1 mm), `sleevingDiameterMargin` (default 10%)
@@ -257,7 +257,9 @@ wire, pin, or segment.
 - Keyboard-first where possible: shortcuts for tools, delete, duplicate, undo/redo, zoom to fit,
   find. All shortcuts listed in a help dialog.
 - Autosave-to-recovery-file plus a "recover unsaved work" prompt on crash.
-- Units switch (mm/in) at the harness level; store internally in millimeters.
+- Units (in/mm/cm) are set per harness; store internally in millimeters. New harnesses take the
+  default units from **user preferences** (Edit > Preferences, persisted per user; default
+  inches), so users do not have to set them every time.
 - Everything user-visible goes through `tr()` so translation can come later.
 
 ## 10. Testing
@@ -304,6 +306,8 @@ Each milestone ends with: tests passing in CI, docs updated, a short demo descri
 
 **M3 - Layout editor and wire length**
 - Layout nodes/segments with editable lengths; flying leads, eyelets, branch points.
+- Harness settings editor: end/strip allowance per end type (default 0), service loop, rounding
+  increment, waste factors. Undoable, saved in the file.
 - Route resolution, length calculation (8.1), length shown on wire selection in the schematic,
   Problems panel for unrouted wires.
 - *Done when:* clicking a wire in the schematic shows a correct, explained length for a test harness

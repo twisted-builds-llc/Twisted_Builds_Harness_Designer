@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Document.h"
 
+#include "Preferences.h"
 #include "io/TbhFile.h"
 
 namespace tbh::app {
@@ -17,6 +18,7 @@ void Document::newHarness()
 {
     Harness harness;
     harness.info.name = tr("Untitled harness");
+    harness.info.units = preferences::defaultUnits();
     harness.createdAt = QDateTime::currentDateTimeUtc();
     m_undoStack.clear();
     m_model.reset(std::move(harness));
