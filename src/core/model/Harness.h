@@ -165,9 +165,27 @@ struct LayoutSegment {
     QString label;
     QString sleevingId; // library reference, empty = none
     SleevingCoverage sleevingCoverage = SleevingCoverage::Full;
+    // Drawing only: the control point of a curved segment (quadratic Bezier) in the frame of
+    // its ends, so the curve follows when they move: control = A + x * (B - A) + y * n, with
+    // n = (B - A) turned 90 degrees, (-dy, dx). nullopt = straight.
+    std::optional<QPointF> bend;
     QJsonObject extra;
 
     bool operator==(const LayoutSegment &) const = default;
+};
+
+// Which canvas a note is drawn on.
+enum class NoteCanvas { Schematic, Layout };
+
+// Free text on a canvas. Drawing only.
+struct Note {
+    QString id;
+    NoteCanvas canvas = NoteCanvas::Layout;
+    QString text;
+    QPointF position; // top left of the text
+    QJsonObject extra;
+
+    bool operator==(const Note &) const = default;
 };
 
 // Where an item sits on the schematic canvas. Presentation only.
@@ -181,7 +199,8 @@ struct SchematicPlacement {
 };
 
 struct Schematic {
-    // Key: connector or splice id, or freeEndPlacementKey() for a wire's free end.
+    // Key: connector or splice id, freeEndPlacementKey() for a wire's free end, or a wire id
+    // for a wire whose route was dragged (position.x is the x of its vertical run).
     std::map<QString, SchematicPlacement> placements;
     QJsonObject extra;
 
@@ -264,6 +283,7 @@ struct Harness {
     std::vector<Splice> splices;
     std::vector<LayoutNode> layoutNodes;
     std::vector<LayoutSegment> layoutSegments;
+    std::vector<Note> notes; // both canvases; layout.json and schematic.json hold their own
     Schematic schematic;
     Library library; // embedded library entries (library.json)
     std::vector<BomExtra> bomExtras; // bom.json

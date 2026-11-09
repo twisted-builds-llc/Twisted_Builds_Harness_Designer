@@ -102,14 +102,14 @@ private slots:
         s.connectors.insert(u"ecu"_s);
         selection->setSelection(s);
         check("connector");
-        selection->setSelection(Selection{{}, {}, {}, {u"w1"_s}, {}, {}, {}});
+        selection->setSelection(Selection{{}, {}, {}, {u"w1"_s}, {}, {}, {}, {}});
         check("wire");
-        selection->setSelection(Selection{{}, {}, {u"sp"_s}, {}, {}, {}, {}});
+        selection->setSelection(Selection{{}, {}, {u"sp"_s}, {}, {}, {}, {}, {}});
         check("splice");
         tabs->setCurrentIndex(1);
-        selection->setSelection(Selection{{}, {}, {}, {}, {}, {u"seg1"_s}, {}});
+        selection->setSelection(Selection{{}, {}, {}, {}, {}, {u"seg1"_s}, {}, {}});
         check("layout segment");
-        selection->setSelection(Selection{{}, {}, {}, {}, {u"n2"_s}, {}, {}});
+        selection->setSelection(Selection{{}, {}, {}, {}, {u"n2"_s}, {}, {}, {}});
         check("layout node");
         tabs->setCurrentIndex(2);
         check("BOM");
@@ -137,7 +137,7 @@ private slots:
         QCOMPARE(view.schematicScene()->selectedItems().size(), 1);
 
         // Select the ECU and nudge it right, then 10x down with Shift; undo restores.
-        selection.setSelection(Selection{{u"ecu"_s}, {}, {}, {}, {}, {}, {}});
+        selection.setSelection(Selection{{u"ecu"_s}, {}, {}, {}, {}, {}, {}, {}});
         QTest::keyClick(view.viewport(), Qt::Key_Right);
         QCOMPARE(document.model()->placement(u"ecu"_s)->position, QPointF(10, 0));
         QTest::keyClick(view.viewport(), Qt::Key_Down, Qt::ShiftModifier);

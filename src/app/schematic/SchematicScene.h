@@ -4,6 +4,7 @@
 #include "calc/Highlight.h"
 #include "model/HarnessModel.h"
 #include "schematic/SchematicItems.h"
+#include "ui/NoteItem.h"
 
 #include <QGraphicsScene>
 #include <QHash>
@@ -32,6 +33,7 @@ public:
     SpliceItem *spliceItem(const QString &id) const { return m_splices.value(id); }
     WireItem *wireItem(const QString &id) const { return m_wires.value(id); }
     FreeEndItem *freeEndItem(const QString &key) const { return m_freeEnds.value(key); }
+    NoteItem *noteItem(const QString &id) const { return m_notes.value(id); }
     PlacedItem *placedItem(const QString &key) const;
 
     // Anchor of a wire end (scene coords), facing the wire's other end.
@@ -52,6 +54,8 @@ public:
 
     // Called by PlacedItem when it moves.
     void itemMoved(PlacedItem *item);
+    // Re-routes a wire from the model (anchors and stored route).
+    void updateWire(const QString &wireId);
 
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
@@ -68,11 +72,11 @@ private:
     void addConnector(const Connector &connector);
     void addSplice(const Splice &splice);
     void addWire(const Wire &wire);
+    void addNote(const Note &note); // schematic notes only
     void syncFreeEnds(const Wire &wire);
     void applyPlacement(PlacedItem *item);
     void indexWire(const Wire &wire);
     void unindexWire(const QString &wireId);
-    void updateWire(const QString &wireId);
     void updateWiresOf(const QString &key);
     static QStringList endKeys(const Wire &wire);
 
@@ -89,6 +93,7 @@ private:
     QHash<QString, SpliceItem *> m_splices;
     QHash<QString, WireItem *> m_wires;
     QHash<QString, FreeEndItem *> m_freeEnds;     // by placement key
+    QHash<QString, NoteItem *> m_notes;
     QMultiHash<QString, QString> m_wiresByItem;   // connector/splice id or free-end key -> wire id
 };
 

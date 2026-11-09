@@ -63,6 +63,7 @@ void SchematicScene::rebuild()
     m_splices.clear();
     m_wires.clear();
     m_freeEnds.clear();
+    m_notes.clear();
     m_wiresByItem.clear();
 
     const Harness &h = m_model->harness();
@@ -72,6 +73,8 @@ void SchematicScene::rebuild()
         addSplice(s);
     for (const Wire &w : h.wires)
         addWire(w);
+    for (const Note &n : h.notes)
+        addNote(n);
     m_building = false;
     for (const Wire &w : h.wires)
         updateWire(w.id);
@@ -85,6 +88,15 @@ void SchematicScene::addConnector(const Connector &connector)
     addItem(item);
     m_connectors.insert(connector.id, item);
     applyPlacement(item);
+}
+
+void SchematicScene::addNote(const Note &note)
+{
+    if (note.canvas != NoteCanvas::Schematic)
+        return;
+    auto *item = new NoteItem(note, [this](const QPointF &p) { return m_snap ? snapped(p) : p; });
+    addItem(item);
+    m_notes.insert(note.id, item);
 }
 
 void SchematicScene::addSplice(const Splice &splice)
@@ -232,7 +244,9 @@ void SchematicScene::updateWire(const QString &wireId)
     const Wire *wire = m_model->find<Wire>(wireId);
     if (!item || !wire)
         return;
-    item->setRoute(endAnchor(*wire, false), endAnchor(*wire, true));
+    const SchematicPlacement *route = m_model->placement(wireId);
+    item->setRoute(endAnchor(*wire, false), endAnchor(*wire, true),
+                   route ? std::optional(route->position.x()) : std::nullopt);
 }
 
 void SchematicScene::updateWiresOf(const QString &key)
@@ -255,6 +269,9 @@ void SchematicScene::onAdded(EntityKind kind, const QString &id)
     case EntityKind::LayoutSegment:
     case EntityKind::BomExtra:
         break;
+    case EntityKind::Note:
+        addNote(*m_model->find<Note>(id));
+        break;
     case EntityKind::Connector:
         addConnector(*m_model->find<Connector>(id));
         updateWiresOf(id);
@@ -275,6 +292,10 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
     case EntityKind::BomExtra:
+        break;
+    case EntityKind::Note:
+        if (NoteItem *item = m_notes.value(id))
+            item->setNote(*m_model->find<Note>(id));
         break;
     case EntityKind::Connector:
         if (auto *item = m_connectors.value(id)) {
@@ -306,6 +327,9 @@ void SchematicScene::onRemoved(EntityKind kind, const QString &id)
     case EntityKind::LayoutSegment:
     case EntityKind::BomExtra:
         break;
+    case EntityKind::Note:
+        delete m_notes.take(id);
+        break;
     case EntityKind::Connector:
         delete m_connectors.take(id);
         break;
@@ -326,6 +350,8 @@ void SchematicScene::onPlacementChanged(const QString &key)
     if (PlacedItem *item = placedItem(key)) {
         applyPlacement(item);
         updateWiresOf(key);
+    } else if (m_wires.contains(key)) {
+        updateWire(key); // a dragged wire route
     }
 }
 
@@ -347,6 +373,9 @@ void SchematicScene::syncSelectionToModel()
             break;
         case FreeEndItemType:
             selection.wires.insert(static_cast<FreeEndItem *>(item)->wireId());
+            break;
+        case NoteItemType:
+            selection.notes.insert(static_cast<NoteItem *>(item)->id());
             break;
         default:
             break;
@@ -373,6 +402,8 @@ void SchematicScene::syncSelectionFromModel()
         if (!s.wires.contains(freeEnd->wireId()))
             freeEnd->setSelected(false);
     }
+    for (auto it = m_notes.cbegin(); it != m_notes.cend(); ++it)
+        it.value()->setSelected(s.notes.contains(it.key()));
     m_syncingSelection = false;
 }
 

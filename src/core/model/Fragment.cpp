@@ -41,6 +41,7 @@ Harness extractFragment(const Harness &harness, const QSet<QString> &connectorId
             Wire copy = w;
             copy.routeSegmentIds.clear();
             fragment.wires.push_back(copy);
+            copyPlacement(w.id);
             copyPlacement(freeEndPlacementKey(w.id, false));
             copyPlacement(freeEndPlacementKey(w.id, true));
         }
@@ -86,6 +87,7 @@ void assignNewIds(Harness &fragment)
     };
     for (Wire &w : fragment.wires) {
         const QString newWireId = newId();
+        movePlacement(w.id, newWireId);
         movePlacement(freeEndPlacementKey(w.id, false), freeEndPlacementKey(newWireId, false));
         movePlacement(freeEndPlacementKey(w.id, true), freeEndPlacementKey(newWireId, true));
         w.id = newWireId;

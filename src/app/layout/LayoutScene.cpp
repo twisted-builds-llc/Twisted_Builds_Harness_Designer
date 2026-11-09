@@ -7,8 +7,13 @@
 #include "model/Queries.h"
 #include "ui/CanvasView.h"
 #include "ui/Format.h"
+#include "ui/WireColors.h"
 
 #include <QTimer>
+
+#include <algorithm>
+#include <cmath>
+#include <memory>
 
 namespace tbh::app {
 
@@ -44,11 +49,14 @@ void LayoutScene::rebuild()
     }
     m_nodes.clear();
     m_segments.clear();
+    m_notes.clear();
     const Harness &h = m_model->harness();
     for (const LayoutNode &n : h.layoutNodes)
         addNode(n);
     for (const LayoutSegment &s : h.layoutSegments)
         addSegment(s);
+    for (const Note &n : h.notes)
+        addNote(n);
     refreshCaptions();
 }
 
@@ -67,12 +75,57 @@ void LayoutScene::addSegment(const LayoutSegment &segment)
     updateSegmentEnds(item);
 }
 
+void LayoutScene::addNote(const Note &note)
+{
+    if (note.canvas != NoteCanvas::Layout)
+        return;
+    auto *item = new NoteItem(note, [this](const QPointF &p) { return m_snap ? snapToCanvasGrid(p) : p; });
+    addItem(item);
+    m_notes.insert(note.id, item);
+}
+
+void LayoutScene::previewSegment(const LayoutSegment &segment)
+{
+    if (LayoutSegmentItem *item = m_segments.value(segment.id)) {
+        item->setSegment(segment);
+        updateSegmentEnds(item);
+    }
+}
+
 void LayoutScene::updateSegmentEnds(LayoutSegmentItem *item)
 {
     LayoutNodeItem *a = m_nodes.value(item->segment().nodeA);
     LayoutNodeItem *b = m_nodes.value(item->segment().nodeB);
     if (a && b)
         item->setEnds(a->pos(), b->pos());
+    updateLegs(a);
+    updateLegs(b);
+}
+
+void LayoutScene::updateLegs(LayoutNodeItem *node)
+{
+    if (!node)
+        return;
+    std::vector<LayoutNodeItem::Leg> legs;
+    for (const LayoutSegmentItem *segment : std::as_const(m_segments)) {
+        const LayoutSegment &s = segment->segment();
+        const QString other = s.nodeA == node->id() ? s.nodeB : s.nodeB == node->id() ? s.nodeA : QString();
+        const LayoutNodeItem *far = other.isEmpty() ? nullptr : m_nodes.value(other);
+        if (!far)
+            continue;
+        // A curved segment leaves towards its control point (the curve's end tangent).
+        const QPointF toward = s.bend ? bendControlPoint(segment->endA(), segment->endB(), s.bend) : far->pos();
+        QPointF d = toward - node->pos();
+        if (std::hypot(d.x(), d.y()) < 1e-6)
+            d = far->pos() - node->pos();
+        const qreal length = std::hypot(d.x(), d.y());
+        legs.push_back({length > 1e-6 ? d / length : QPointF(1, 0), segment->lineWidth()});
+    }
+    // Model order of segments is not stable in a hash; sort so equal sets compare equal.
+    std::sort(legs.begin(), legs.end(), [](const LayoutNodeItem::Leg &l, const LayoutNodeItem::Leg &r) {
+        return std::atan2(l.direction.y(), l.direction.x()) < std::atan2(r.direction.y(), r.direction.x());
+    });
+    node->setLegs(std::move(legs));
 }
 
 void LayoutScene::nodeMoved(LayoutNodeItem *item)
@@ -89,6 +142,8 @@ void LayoutScene::onAdded(EntityKind kind, const QString &id)
         addNode(*m_model->find<LayoutNode>(id));
     else if (kind == EntityKind::LayoutSegment)
         addSegment(*m_model->find<LayoutSegment>(id));
+    else if (kind == EntityKind::Note)
+        addNote(*m_model->find<Note>(id));
     scheduleRefresh();
 }
 
@@ -101,19 +156,35 @@ void LayoutScene::onChanged(EntityKind kind, const QString &id)
         }
     } else if (kind == EntityKind::LayoutSegment) {
         if (LayoutSegmentItem *item = m_segments.value(id)) {
+            const LayoutSegment old = item->segment();
             item->setSegment(*m_model->find<LayoutSegment>(id));
             updateSegmentEnds(item);
+            updateLegs(m_nodes.value(old.nodeA)); // in case the segment was re-attached
+            updateLegs(m_nodes.value(old.nodeB));
         }
+    } else if (kind == EntityKind::Note) {
+        if (NoteItem *item = m_notes.value(id))
+            item->setNote(*m_model->find<Note>(id));
+        return; // notes do not affect captions
     }
     scheduleRefresh();
 }
 
 void LayoutScene::onRemoved(EntityKind kind, const QString &id)
 {
+    if (kind == EntityKind::Note) {
+        delete m_notes.take(id);
+        return;
+    }
     if (kind == EntityKind::LayoutNode)
         delete m_nodes.take(id);
-    else if (kind == EntityKind::LayoutSegment)
-        delete m_segments.take(id);
+    else if (kind == EntityKind::LayoutSegment) {
+        std::unique_ptr<LayoutSegmentItem> item(m_segments.take(id));
+        if (item) {
+            updateLegs(m_nodes.value(item->segment().nodeA));
+            updateLegs(m_nodes.value(item->segment().nodeB));
+        }
+    }
     scheduleRefresh();
 }
 
@@ -140,25 +211,45 @@ void LayoutScene::refreshCaptions()
     const calc::LayoutGraph graph(h);
     const auto usage = calc::wiresBySegment(h, graph);
     const Library &library = m_model->library();
+    QHash<QString, const Wire *> wiresById;
+    for (const Wire &w : h.wires)
+        wiresById.insert(w.id, &w);
     for (LayoutSegmentItem *item : std::as_const(m_segments)) {
         const LayoutSegment &s = item->segment();
-        const auto wires = usage.value(s.id);
-        QString usageText = tr("%n wire(s)", nullptr, int(wires.size()));
-        if (m_showDiameters && !wires.empty()) {
-            const calc::BundleDiameter bundle = calc::bundleDiameter(h, library, wires);
-            // "~" marks a diameter that uses estimated wire ODs.
-            usageText += QStringLiteral(" \u00b7 \u00d8 %1%2")
-                             .arg(bundle.estimatedWireIds.empty() ? QString() : QStringLiteral("~"),
-                                  formatLength(bundle.diameterMm, h.info.units));
-        }
-        if (!s.label.isEmpty())
-            usageText = s.label + QStringLiteral(" \u00b7 ") + usageText;
+        const auto wires = usage.value(s.id); // in model order: stripes line up across segments
         QString lengthText = s.lengthMm > 0 ? formatLength(s.lengthMm, h.info.units) : tr("no length");
         if (const Sleeving *sleeving = library.sleeving(s.sleevingId))
             lengthText += QStringLiteral(" \u00b7 ") + sleeving->sizeLabel;
-        item->setCaption(lengthText, usageText);
+        QStringList details;
+        if (!s.label.isEmpty())
+            details << s.label;
+        QStringList tip{lengthText, tr("%n wire(s)", nullptr, int(wires.size()))};
+        if (!wires.empty()) {
+            const calc::BundleDiameter bundle = calc::bundleDiameter(h, library, wires);
+            // "~" marks a diameter that uses estimated wire ODs.
+            const QString diameter = QStringLiteral("\u00d8 %1%2")
+                                         .arg(bundle.estimatedWireIds.empty() ? QString() : QStringLiteral("~"),
+                                              formatLength(bundle.diameterMm, h.info.units));
+            tip << diameter;
+            if (m_showDiameters)
+                details << diameter;
+        }
+        if (!s.label.isEmpty())
+            tip.prepend(s.label);
+        item->setCaption(lengthText, details.join(QStringLiteral(" \u00b7 ")));
+        item->setToolTip(tip.join(QStringLiteral(" \u00b7 ")));
+        std::vector<LayoutSegmentItem::WireStripe> stripes;
+        stripes.reserve(wires.size());
+        for (const QString &id : wires) {
+            const Wire *w = wiresById.value(id);
+            stripes.push_back({w ? wireColor(w->baseColor) : QColor(), w ? wireColor(w->stripeColor) : QColor()});
+        }
+        item->setWires(std::move(stripes));
         item->update();
     }
+    // Branch boots follow the segment widths.
+    for (LayoutNodeItem *node : std::as_const(m_nodes))
+        updateLegs(node);
     applyHighlight();
 }
 
@@ -195,6 +286,8 @@ void LayoutScene::syncSelectionToModel()
             selection.layoutNodes.insert(static_cast<LayoutNodeItem *>(item)->id());
         else if (item->type() == LayoutSegmentItemType)
             selection.layoutSegments.insert(static_cast<LayoutSegmentItem *>(item)->id());
+        else if (item->type() == NoteItemType)
+            selection.notes.insert(static_cast<NoteItem *>(item)->id());
     }
     m_syncingSelection = true;
     m_selection->setSelection(selection);
@@ -211,6 +304,8 @@ void LayoutScene::syncSelectionFromModel()
         it.value()->setSelected(s.layoutNodes.contains(it.key()));
     for (auto it = m_segments.cbegin(); it != m_segments.cend(); ++it)
         it.value()->setSelected(s.layoutSegments.contains(it.key()));
+    for (auto it = m_notes.cbegin(); it != m_notes.cend(); ++it)
+        it.value()->setSelected(s.notes.contains(it.key()));
     m_syncingSelection = false;
 }
 

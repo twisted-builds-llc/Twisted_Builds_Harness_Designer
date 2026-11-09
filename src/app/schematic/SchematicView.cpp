@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace tbh::app {
 
@@ -170,6 +171,15 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
     }
 
     CanvasView::mousePressEvent(event);
+    if (item && item->type() == WireItemType && m_tool == Tool::Select) {
+        auto *wire = static_cast<WireItem *>(item);
+        m_routeWire = wire->id();
+        m_routeDragging = false;
+        m_routePressX = scenePos.x();
+        m_routeStartX = wire->runX();
+        m_pressPos = event->pos();
+        return;
+    }
     rememberPressPositions();
 }
 
@@ -208,8 +218,30 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
             m_preview->setPath(WireItem::routePath(m_scene->endAnchor(*wire, !m_reattachEndB), end));
         return;
     }
-    if (event->buttons() == Qt::NoButton && m_tool == Tool::Select)
-        viewport()->setCursor(isLeadAt(mapToScene(event->pos())) ? Qt::CrossCursor : Qt::ArrowCursor);
+    if (!m_routeWire.isEmpty() && (event->buttons() & Qt::LeftButton)) {
+        if (!m_routeDragging
+            && (event->pos() - m_pressPos).manhattanLength() >= QApplication::startDragDistance())
+            m_routeDragging = true;
+        if (m_routeDragging) {
+            if (WireItem *wire = m_scene->wireItem(m_routeWire)) {
+                qreal x = m_routeStartX + mapToScene(event->pos()).x() - m_routePressX;
+                if (m_scene->snapToGrid())
+                    x = SchematicScene::snapped(QPointF(x, 0)).x();
+                wire->setRunX(x);
+            }
+        }
+        return;
+    }
+    if (event->buttons() == Qt::NoButton && m_tool == Tool::Select) {
+        const QPointF scenePos = mapToScene(event->pos());
+        const QGraphicsItem *item = itemAt(event->pos());
+        Qt::CursorShape cursor = Qt::ArrowCursor;
+        if (isLeadAt(scenePos))
+            cursor = Qt::CrossCursor;
+        else if (item && item->type() == WireItemType)
+            cursor = Qt::SizeHorCursor;
+        viewport()->setCursor(cursor);
+    }
     CanvasView::mouseMoveEvent(event);
     if ((event->buttons() & Qt::LeftButton) && !draggedFreeEnd().isEmpty())
         setHover(targetAt(mapToScene(event->pos())));
@@ -245,6 +277,11 @@ void SchematicView::mouseReleaseEvent(QMouseEvent *event)
             cancelWire(); // a click on the end, not a drag
         else
             finishReattach(mapToScene(event->pos()));
+        return;
+    }
+    if (!m_routeWire.isEmpty() && event->button() == Qt::LeftButton) {
+        CanvasView::mouseReleaseEvent(event);
+        finishRouteDrag();
         return;
     }
     CanvasView::mouseReleaseEvent(event);
@@ -285,6 +322,9 @@ void SchematicView::mouseDoubleClickEvent(QMouseEvent *event)
         item->setSelected(true);
         renameSelection();
         return;
+    case NoteItemType:
+        editNote(static_cast<NoteItem *>(item)->id());
+        return;
     default:
         return;
     }
@@ -311,6 +351,8 @@ void SchematicView::keyPressEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_Escape) {
         if (m_wirePending || !m_reattachWire.isEmpty()) {
             cancelWire();
+        } else if (!m_routeWire.isEmpty()) {
+            cancelRouteDrag();
         } else {
             m_scene->clearSelection();
             find({});
@@ -478,11 +520,38 @@ std::vector<PlacedItem *> SchematicView::selectedPlacedItems() const
     return items;
 }
 
+void SchematicView::finishRouteDrag()
+{
+    const QString wireId = std::exchange(m_routeWire, {});
+    const bool dragged = std::exchange(m_routeDragging, false);
+    WireItem *wire = m_scene->wireItem(wireId);
+    if (!dragged || !wire || wire->runX() == m_routeStartX)
+        return;
+    const SchematicPlacement *old = m_document->model()->placement(wireId);
+    SchematicPlacement placement = old ? *old : SchematicPlacement{};
+    placement.position = QPointF(wire->runX(), 0);
+    m_document->undoStack()->push(
+        new SetPlacementsCommand(m_document->model(), {{wireId, placement}}, tr("Move wire")));
+}
+
+void SchematicView::cancelRouteDrag()
+{
+    if (m_routeDragging)
+        m_scene->updateWire(m_routeWire); // back to the stored route
+    m_routeWire.clear();
+    m_routeDragging = false;
+}
+
 void SchematicView::rememberPressPositions()
 {
     m_pressPositions.clear();
+    m_notePressPositions.clear();
     for (PlacedItem *item : selectedPlacedItems())
         m_pressPositions[item->placementKey()] = item->pos();
+    for (QGraphicsItem *item : m_scene->selectedItems()) {
+        if (item->type() == NoteItemType)
+            m_notePressPositions[static_cast<NoteItem *>(item)->id()] = item->pos();
+    }
 }
 
 void SchematicView::commitMoves()
@@ -498,18 +567,33 @@ void SchematicView::commitMoves()
         changes[key] = placement;
     }
     m_pressPositions.clear();
+    HarnessModel *model = m_document->model();
+    auto macro = std::make_unique<QUndoCommand>(tr("Move"));
     if (!changes.empty())
-        m_document->undoStack()->push(new SetPlacementsCommand(m_document->model(), changes, tr("Move")));
+        new SetPlacementsCommand(model, changes, {}, macro.get());
+    for (const auto &[id, before] : m_notePressPositions) {
+        NoteItem *item = m_scene->noteItem(id);
+        const Note *note = model->find<Note>(id);
+        if (!item || !note || item->pos() == before)
+            continue;
+        Note updated = *note;
+        updated.position = item->pos();
+        new UpdateEntityCommand<Note>(model, updated, {}, macro.get());
+    }
+    m_notePressPositions.clear();
+    if (macro->childCount() > 0)
+        m_document->undoStack()->push(macro.release());
 }
 
 bool SchematicView::nudgeSelection(const QPointF &delta)
 {
-    const std::vector<PlacedItem *> items = selectedPlacedItems();
-    if (items.empty())
-        return false;
     rememberPressPositions();
-    for (PlacedItem *item : items)
+    if (m_pressPositions.empty() && m_notePressPositions.empty())
+        return false;
+    for (PlacedItem *item : selectedPlacedItems())
         item->setPos(item->pos() + delta);
+    for (const auto &[id, pos] : m_notePressPositions)
+        m_scene->noteItem(id)->setPos(pos + delta);
     commitMoves();
     return true;
 }
@@ -752,6 +836,35 @@ void SchematicView::addSplice()
     Selection selection;
     selection.splices.insert(id);
     m_selection->setSelection(selection);
+}
+
+void SchematicView::addNote()
+{
+    const QPointF position = viewCenterSnapped();
+    editText(QRectF(position, QSizeF(NoteItem::kWidth, 18)), {}, [this, position](const QString &value, Nav) {
+        const QString text = value.trimmed();
+        if (text.isEmpty())
+            return; // nothing typed: no note
+        Note note{newId(), NoteCanvas::Schematic, text, position, {}};
+        const QString id = note.id;
+        m_document->undoStack()->push(
+            new AddEntityCommand<Note>(m_document->model(), std::move(note), {}, tr("Add note")));
+        Selection selection;
+        selection.notes.insert(id);
+        m_selection->setSelection(selection);
+    });
+}
+
+void SchematicView::editNote(const QString &noteId)
+{
+    NoteItem *item = m_scene->noteItem(noteId);
+    if (!item)
+        return;
+    editText(QRectF(item->pos(), QSizeF(NoteItem::kWidth, 18)), item->note().text,
+             [this, noteId](const QString &value, Nav) {
+                 if (auto command = setNoteText(m_document->model(), noteId, value)) // empty text deletes
+                     m_document->undoStack()->push(command.release());
+             });
 }
 
 void SchematicView::deleteSelection()

@@ -20,9 +20,11 @@ namespace tbh::app {
 std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString> &connectorIds,
                                       const QSet<QString> &spliceIds, const QSet<QString> &wireIds);
 
+// Also removes the notes in `noteIds`.
 std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QString> &connectorIds,
                                           const QSet<QString> &spliceIds,
-                                          const QSet<QString> &wireIds);
+                                          const QSet<QString> &wireIds,
+                                          const QSet<QString> &noteIds = {});
 
 // Wires attached to pins of the connector that are absent from `newPins`.
 std::vector<QString> wiresLostByPinChange(const Harness &harness, const Connector &connector,
@@ -53,10 +55,22 @@ std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connect
 std::unique_ptr<QUndoCommand> updateWires(HarnessModel *model, const std::vector<Wire> &wires,
                                           const QString &text);
 
-// Removes layout nodes and segments. Segments on removed nodes go too; wires whose
+// Removes layout nodes, segments and notes. Segments on removed nodes go too; wires whose
 // manual route used a removed segment fall back to automatic routing.
 std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<QString> &nodeIds,
-                                                const QSet<QString> &segmentIds);
+                                                const QSet<QString> &segmentIds,
+                                                const QSet<QString> &noteIds = {});
+
+// Sets a note's text (trimmed). Empty text deletes the note. Returns null if the note is
+// missing or nothing changes.
+std::unique_ptr<QUndoCommand> setNoteText(HarnessModel *model, const QString &noteId, const QString &text);
+
+// Joins branch point `branchId` into node `intoId`: its segments are re-attached to
+// `intoId`, segments between the two are removed (manual routes through them fall back to
+// automatic), and the branch point is deleted. Returns null unless `branchId` is a branch
+// point and `intoId` another existing node.
+std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString &branchId,
+                                              const QString &intoId);
 
 // Moves one end of a wire to `newEnd` (re-attach). A new free end is placed at
 // `freeEndPosition`. Layout references to an old free end are cleared and any manual

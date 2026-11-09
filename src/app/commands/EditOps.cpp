@@ -96,9 +96,36 @@ std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString
     return ordered;
 }
 
+namespace {
+
+void removeNotes(HarnessModel *model, const QSet<QString> &noteIds, QUndoCommand *macro)
+{
+    const std::vector<Note> &notes = model->harness().notes;
+    for (auto it = notes.rbegin(); it != notes.rend(); ++it) {
+        if (noteIds.contains(it->id))
+            new RemoveEntityCommand<Note>(model, it->id, {}, macro);
+    }
+}
+
+} // namespace
+
+std::unique_ptr<QUndoCommand> setNoteText(HarnessModel *model, const QString &noteId, const QString &text)
+{
+    const Note *current = model->find<Note>(noteId);
+    const QString trimmed = text.trimmed();
+    if (!current || trimmed == current->text)
+        return nullptr;
+    if (trimmed.isEmpty())
+        return std::make_unique<RemoveEntityCommand<Note>>(model, noteId, Tr::tr("Delete note"));
+    Note updated = *current;
+    updated.text = trimmed;
+    return std::make_unique<UpdateEntityCommand<Note>>(model, updated, Tr::tr("Edit note"));
+}
+
 std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QString> &connectorIds,
                                           const QSet<QString> &spliceIds,
-                                          const QSet<QString> &wireIds)
+                                          const QSet<QString> &wireIds,
+                                          const QSet<QString> &noteIds)
 {
     const Harness &h = model->harness();
     auto macro = std::make_unique<QUndoCommand>(Tr::tr("Delete"));
@@ -116,6 +143,7 @@ std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QStrin
         if (connectorIds.contains(it->id))
             new RemoveEntityCommand<Connector>(model, it->id, {}, macro.get());
     }
+    removeNotes(model, noteIds, macro.get());
     return macro;
 }
 
@@ -239,7 +267,8 @@ std::unique_ptr<QUndoCommand> updateWires(HarnessModel *model, const std::vector
 }
 
 std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<QString> &nodeIds,
-                                                const QSet<QString> &segmentIds)
+                                                const QSet<QString> &segmentIds,
+                                                const QSet<QString> &noteIds)
 {
     const Harness &h = model->harness();
     QSet<QString> segments = segmentIds;
@@ -266,6 +295,49 @@ std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<
         if (nodeIds.contains(it->id))
             new RemoveEntityCommand<LayoutNode>(model, it->id, {}, macro.get());
     }
+    removeNotes(model, noteIds, macro.get());
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString &branchId,
+                                              const QString &intoId)
+{
+    const LayoutNode *branch = model->find<LayoutNode>(branchId);
+    if (!branch || branch->type != LayoutNodeType::Branch || branchId == intoId
+        || !model->find<LayoutNode>(intoId))
+        return nullptr;
+    const Harness &h = model->harness();
+    QSet<QString> between;
+    std::vector<LayoutSegment> reattached;
+    for (const LayoutSegment &s : h.layoutSegments) {
+        const bool onBranch = s.nodeA == branchId || s.nodeB == branchId;
+        if (!onBranch)
+            continue;
+        if (s.nodeA == intoId || s.nodeB == intoId) {
+            between.insert(s.id);
+            continue;
+        }
+        LayoutSegment updated = s;
+        (updated.nodeA == branchId ? updated.nodeA : updated.nodeB) = intoId;
+        reattached.push_back(updated);
+    }
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Join points"));
+    for (const Wire &w : h.wires) {
+        if (std::any_of(w.routeSegmentIds.begin(), w.routeSegmentIds.end(),
+                        [&](const QString &id) { return between.contains(id); })) {
+            Wire updated = w;
+            updated.routeSegmentIds.clear();
+            new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
+        }
+    }
+    // Remove from the back so recorded indices restore the original order on undo.
+    for (auto it = h.layoutSegments.rbegin(); it != h.layoutSegments.rend(); ++it) {
+        if (between.contains(it->id))
+            new RemoveEntityCommand<LayoutSegment>(model, it->id, {}, macro.get());
+    }
+    for (LayoutSegment &s : reattached)
+        new UpdateEntityCommand<LayoutSegment>(model, std::move(s), {}, macro.get());
+    new RemoveEntityCommand<LayoutNode>(model, branchId, {}, macro.get());
     return macro;
 }
 

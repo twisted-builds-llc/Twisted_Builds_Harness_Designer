@@ -20,7 +20,8 @@ class SelectionModel;
 //
 // Mouse: drag a connector by its header; drag from a pin row or its lead (the short dash
 // on either side) to draw a wire (drop on a pin, a splice, or empty space for a flying
-// lead); drag a splice's lead to start a wire from it; double-click text to edit it;
+// lead); drag a splice's lead to start a wire from it; drag a wire sideways to move its
+// vertical run (keeps parallel wires apart); double-click text to edit it;
 // wheel zooms (over a scrolling connector it scrolls rows; Ctrl+wheel always zooms);
 // middle-drag pans. The Wire tool also starts wires from anywhere on a splice.
 class SchematicView : public CanvasView
@@ -40,6 +41,10 @@ public:
 
     void addConnector();
     void addSplice();
+    // Opens a text editor at the view center; typing text and pressing Enter adds a note.
+    void addNote();
+    // Edits a note's text in place; clearing the text deletes the note.
+    void editNote(const QString &noteId);
     void deleteSelection();
     void renameSelection();
     void copySelection();
@@ -91,6 +96,9 @@ private:
     QString draggedFreeEnd() const;
     bool dropFreeEnd(const QPointF &scenePos);
 
+    void finishRouteDrag();
+    void cancelRouteDrag();
+
     void rememberPressPositions();
     void commitMoves();
     void toggleCollapsed(ConnectorItem *item);
@@ -123,7 +131,13 @@ private:
     bool m_reattachEndB = false;
 
     // Moving.
-    std::map<QString, QPointF> m_pressPositions;
+    std::map<QString, QPointF> m_pressPositions;     // placement key -> position at press
+    std::map<QString, QPointF> m_notePressPositions; // selected notes at press
+    // Dragging a wire's vertical run.
+    QString m_routeWire;
+    bool m_routeDragging = false;
+    qreal m_routePressX = 0;   // scene x where the drag started
+    qreal m_routeStartX = 0;   // run x before the drag
 
     int m_pasteCount = 0;
     QString m_searchText;
