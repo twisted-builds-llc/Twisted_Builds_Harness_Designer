@@ -1,0 +1,5 @@
+/build/
+CMakeUserPresets.json
+CMakeLists.txt.user*
+*.autosave
+.qtcreator/
