@@ -876,6 +876,171 @@ private slots:
         QVERIFY(model->harness() == h);
     }
 
+    void typingStubLengthToForkPutsSpliceAtFork()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        // Splice sp2 (node n6) on a stub off the ECU (n1); s1 (n1 - n2) is 300 mm and n2 is
+        // the fork to the sensor (s2) and splice sp (s3). w4 sp2 -> sensor:2.
+        Harness h = sample();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.wires.push_back(wire(u"w4"_s, SpliceRef{u"sp2"_s}, PinRef{u"sensor"_s, u"sensor2"_s}));
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(100, 100), {}});
+        h.layoutSegments.push_back(
+            LayoutSegment{u"stub"_s, u"n1"_s, u"n6"_s, 0, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        HarnessModel *model = document.model();
+
+        // 300 mm from the ECU is exactly the fork n2.
+        const auto atFork = loomPositionForStub(model->harness(), u"stub"_s, 300);
+        QVERIFY(atFork);
+        QCOMPARE(atFork->atNodeId, u"n2"_s);
+        QVERIFY(atFork->segmentId.isEmpty());
+
+        // Placing it: n2 and the stub go away, n6 sits at n2's spot and takes s1, s2, s3.
+        QVERIFY(view.placeSpliceAlongLoom(u"stub"_s, 300));
+        QVERIFY(!model->find<LayoutNode>(u"n2"_s));
+        QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
+        QCOMPARE(model->find<LayoutNode>(u"n6"_s)->position, QPointF(300, 0));
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->nodeB, u"n6"_s);
+        QCOMPARE(model->find<LayoutSegment>(u"s2"_s)->nodeA, u"n6"_s);
+        QCOMPARE(model->find<LayoutSegment>(u"s3"_s)->nodeA, u"n6"_s);
+        QCOMPARE(model->harness().layoutSegments.size(), size_t(4));
+        verifyLoadable(model->harness());
+        const calc::LayoutGraph graph(model->harness());
+        // w4 sp2 -> sensor: s2 only, 450 mm (not 300 + 450 back through the ECU).
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w4"_s)).baseMm, 450.0);
+        // w1 ecu -> sensor still 300 + 450 = 750 mm, through the splice point.
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w1"_s)).baseMm, 750.0);
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
+    }
+
+    void droppingStubSpliceOnForkPutsItThere()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        // Splice sp2 (n6) on a 50 mm stub off the sensor (n3); w4 ecu:3 -> sp2.
+        Harness h = sample();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.wires.push_back(wire(u"w4"_s, PinRef{u"ecu"_s, u"ecu3"_s}, SpliceRef{u"sp2"_s}));
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(600, -150), {}});
+        h.layoutSegments.push_back(
+            LayoutSegment{u"stub"_s, u"n3"_s, u"n6"_s, 50, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(450, 0);
+        HarnessModel *model = document.model();
+        // Drag n6 onto the fork n2 (300, 0).
+        const QPoint from = view.mapFromScene(QPointF(600, -150));
+        const QPoint to = view.mapFromScene(QPointF(300, 0));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), from + QPoint(0, 10));
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        QVERIFY(!model->find<LayoutNode>(u"n2"_s));
+        QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
+        QCOMPARE(model->find<LayoutNode>(u"n6"_s)->position, QPointF(300, 0));
+        QCOMPARE(model->harness().layoutSegments.size(), size_t(4));
+        verifyLoadable(model->harness());
+        // w4 ecu -> sp2: s1 only, 300 mm (not 300 + 450 + 50 out to the sensor and back).
+        const calc::LayoutGraph graph(model->harness());
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w4"_s)).baseMm, 300.0);
+        // One undo step for the drag and the placing.
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
+    }
+
+    void droppingStubSpliceOnFarSegmentPutsItInside()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        // Splice sp2 (n6) on a 50 mm stub off the sensor (n3), dropped onto s1 (ECU n1 -
+        // fork n2, 300 mm), which does not start at the sensor.
+        Harness h = sample();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.wires.push_back(wire(u"w4"_s, PinRef{u"ecu"_s, u"ecu3"_s}, SpliceRef{u"sp2"_s}));
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(600, -150), {}});
+        h.layoutSegments.push_back(
+            LayoutSegment{u"stub"_s, u"n3"_s, u"n6"_s, 50, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(300, 0);
+        HarnessModel *model = document.model();
+        const QPoint from = view.mapFromScene(QPointF(600, -150));
+        const QPoint to = view.mapFromScene(QPointF(150, 0));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), from + QPoint(0, 10));
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        // Stub gone, s1 split in the middle: n1 - n6 150, n6 - n2 300 - 150 = 150.
+        QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->nodeB, u"n6"_s);
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->lengthMm, 150.0);
+        const LayoutSegment &rest = model->harness().layoutSegments.back();
+        QCOMPARE(rest.nodeA, u"n6"_s);
+        QCOMPARE(rest.nodeB, u"n2"_s);
+        QCOMPARE(rest.lengthMm, 150.0);
+        verifyLoadable(model->harness());
+        // w4 ecu -> sp2: 150 mm.
+        const calc::LayoutGraph graph(model->harness());
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w4"_s)).baseMm, 150.0);
+        // The distance editor opens, since the stub's length is not a distance along s1.
+        QTest::qWait(1);
+        QVERIFY(visibleEditor(view.viewport()));
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
+    }
+
+    void droppingStubSpliceOnSpliceSitsSideBySide()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        // Splice sp2 (n6) on a stub off the sensor (n3), dropped onto splice sp's point n4
+        // (300, 200), at the end of s3 (fork n2 - n4, 120 mm).
+        Harness h = sample();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.wires.push_back(wire(u"w4"_s, PinRef{u"ecu"_s, u"ecu3"_s}, SpliceRef{u"sp2"_s}));
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(600, 200), {}});
+        h.layoutSegments.push_back(
+            LayoutSegment{u"stub"_s, u"n3"_s, u"n6"_s, 50, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(450, 200);
+        HarnessModel *model = document.model();
+        const QPoint from = view.mapFromScene(QPointF(600, 200));
+        const QPoint to = view.mapFromScene(QPointF(300, 200));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), from + QPoint(-10, 0));
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        QVERIFY(!model->find<LayoutNode>(u"n6"_s));
+        QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
+        QCOMPARE(model->find<LayoutNode>(u"n4"_s)->sharedSpliceIds, std::vector<QString>{u"sp2"_s});
+        verifyLoadable(model->harness());
+        // w4 ecu -> sp2: 300 + 120 = 420 mm.
+        const calc::LayoutGraph graph(model->harness());
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w4"_s)).baseMm, 420.0);
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
+    }
+
     void segmentDroppedNextToPointJoinsIt()
     {
         Document document;
@@ -901,6 +1066,95 @@ private slots:
         QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
         QCOMPARE(model->harness().layoutNodes.size(), size_t(5));
         QCOMPARE(model->harness().layoutSegments.back().nodeB, u"n5"_s);
+    }
+
+    void segmentDrawnOntoBundleBranchesOffIt()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        Harness h = sample();
+        h.connectors.push_back(connector(u"lamp2"_s, 1));
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Connector, u"lamp2"_s, QPointF(150, -150), {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(150, 0);
+        HarnessModel *model = document.model();
+        view.setTool(LayoutView::Tool::Segment);
+        // From n6 (150, -150) onto the middle of s1 (ECU n1 (0,0) - fork n2 (300,0), 300 mm):
+        // a new point at (150, 0) splits s1 into 150 + 150, and the drawn segment ends there.
+        const QPoint from = view.mapFromScene(QPointF(150, -150));
+        const QPoint to = view.mapFromScene(QPointF(150, 0));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        QCOMPARE(model->harness().layoutNodes.size(), size_t(7));
+        const LayoutNode &point = model->harness().layoutNodes.back();
+        QCOMPARE(point.type, LayoutNodeType::Branch);
+        QCOMPARE(point.position, QPointF(150, 0));
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->nodeB, point.id);
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->lengthMm, 150.0);
+        const LayoutSegment &drawn = model->harness().layoutSegments.back();
+        QCOMPARE(drawn.nodeA, u"n6"_s);
+        QCOMPARE(drawn.nodeB, point.id);
+        verifyLoadable(model->harness());
+        // One undo step.
+        QTest::keyClick(visibleEditor(view.viewport()), Qt::Key_Escape);
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
+    }
+
+    void spliceLeadDrawnOntoBundlePutsSpliceInside()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        // Splice sp2 (n6) on a 50 mm stub off the sensor n3; w4 ecu:3 -> sp2. Its lead is
+        // drawn onto s1 (ECU n1 - fork n2, 300 mm) between the ECU and the fork.
+        Harness h = sample();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.wires.push_back(wire(u"w4"_s, PinRef{u"ecu"_s, u"ecu3"_s}, SpliceRef{u"sp2"_s}));
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(150, -150), {}});
+        h.layoutSegments.push_back(
+            LayoutSegment{u"stub"_s, u"n3"_s, u"n6"_s, 50, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(150, 0);
+        HarnessModel *model = document.model();
+        view.setTool(LayoutView::Tool::Segment);
+        const QPoint from = view.mapFromScene(QPointF(150, -150));
+        const QPoint to = view.mapFromScene(QPointF(150, 0));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        // No new point or segment: the stub goes, n6 sits in s1 at (150, 0), 150 + 150.
+        QCOMPARE(model->harness().layoutNodes.size(), size_t(6));
+        QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
+        QCOMPARE(model->find<LayoutNode>(u"n6"_s)->position, QPointF(150, 0));
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->nodeB, u"n6"_s);
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->lengthMm, 150.0);
+        verifyLoadable(model->harness());
+        // w4 ecu -> sp2: 150 mm.
+        const calc::LayoutGraph graph(model->harness());
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w4"_s)).baseMm, 150.0);
+        // Its distance along s1 is asked for: typing 2 in (50.8 mm) from the ECU gives
+        // n1 - n6 50.8 and n6 - n2 300 - 50.8 = 249.2.
+        QTest::qWait(1);
+        QLineEdit *editor = visibleEditor(view.viewport());
+        QVERIFY(editor);
+        editor->setText(u"50.8"_s);
+        QTest::keyClick(editor, Qt::Key_Return);
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->lengthMm, 50.8);
+        QVERIFY(std::abs(model->harness().layoutSegments.back().lengthMm - 249.2) < 1e-9);
+        document.undoStack()->undo();
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
     }
 
     void deletingNodeRemovesSegmentsAndOverrides()

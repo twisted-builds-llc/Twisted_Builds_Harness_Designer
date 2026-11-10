@@ -472,6 +472,15 @@ QString spliceOfStub(const Harness &harness, const QString &stubId)
     return stub != harness.layoutSegments.end() ? stubSpliceNode(harness, *stub) : QString();
 }
 
+QString stubOfSplice(const Harness &harness, const QString &spliceNodeId)
+{
+    const std::vector<const LayoutSegment *> legs = segmentsOn(harness, spliceNodeId);
+    if (legs.size() != 1 || stubSpliceNode(harness, *legs.front()) != spliceNodeId)
+        return {};
+    const QString far = legs.front()->nodeA == spliceNodeId ? legs.front()->nodeB : legs.front()->nodeA;
+    return segmentsOn(harness, far).size() > 1 ? legs.front()->id : QString();
+}
+
 std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QString &stubId,
                                                 double distanceMm)
 {
@@ -548,9 +557,11 @@ std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QS
                                           [&](const LayoutNode &n) { return n.id == far; });
         if (farNode == harness.layoutNodes.end())
             return std::nullopt;
-        // Exactly on a splice already in the loom: side by side with it.
+        // Exactly on a point inside the loom: side by side with the splices there, or in
+        // place of a bend or fork.
         if (std::abs(distanceMm - walked) < 1e-6) {
-            if (farNode->type == LayoutNodeType::Splice && !farNode->refId.isEmpty())
+            if ((farNode->type == LayoutNodeType::Splice && !farNode->refId.isEmpty())
+                || farNode->type == LayoutNodeType::Branch)
                 return LoomPosition{{}, true, 0, far};
             return std::nullopt;
         }
