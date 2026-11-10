@@ -130,6 +130,49 @@ private slots:
         QDir(Autosave::recoveryDirectory()).removeRecursively(); // no recovery prompt
     }
 
+    // A harness opened while the view is hidden is fitted once the view shows; switching
+    // sheets fits that sheet's items only; after the user zooms, a resize leaves the view.
+    void opensFittedToSheet()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        SchematicView view(&document, &selection);
+        view.resize(800, 600);
+        // ecu (0, 0), sensor (600, 0), sp, fl, note on the first sheet; lamp far off at
+        // (3000, 3000) on sheet "far".
+        Harness h = placedSample();
+        h.schematic.sheets = {SchematicSheet{kDefaultSheetId, u"Engine"_s, {}},
+                              SchematicSheet{u"far"_s, u"Far"_s, {}}};
+        h.schematic.placements[u"lamp"_s].position = QPointF(3000, 3000);
+        h.schematic.placements[u"lamp"_s].sheetId = u"far"_s;
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.show();
+        QTest::qWait(20);
+        const auto shown = [&] { return view.mapToScene(view.viewport()->rect()).boundingRect(); };
+        QVERIFY(shown().contains(QPointF(0, 0)));
+        QVERIFY(shown().contains(QPointF(600, 0)));
+        // Fitted to the first sheet (about 700 wide in 800 px), not out to the lamp at 3000:
+        // that would take a scale near 800 / 3100 = 0.26.
+        QVERIFY(view.transform().m11() > 0.5);
+        QVERIFY(!shown().contains(QPointF(3000, 3000)));
+
+        view.schematicScene()->setCurrentSheet(u"far"_s);
+        QTest::qWait(20);
+        QVERIFY(shown().contains(QPointF(3000, 3000)));
+        QVERIFY(!shown().contains(QPointF(0, 0)));
+
+        // A resize refits until the user zooms; after that it is left alone.
+        view.resize(900, 700);
+        QTest::qWait(20);
+        QVERIFY(shown().contains(QPointF(3000, 3000)));
+        view.zoomIn();
+        const QTransform zoomed = view.transform();
+        view.resize(700, 500);
+        QTest::qWait(20);
+        QCOMPARE(view.transform(), zoomed);
+    }
+
     // Adding connectors/splices repeatedly without moving the view must not stack them:
     // each new one steps 20, 20 (two grid cells) past the one already there.
     void addedItemsAreOffset()

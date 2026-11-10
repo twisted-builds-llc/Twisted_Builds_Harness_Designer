@@ -27,7 +27,12 @@ public:
 
     void zoomIn();
     void zoomOut();
+    // Fits the visible drawing in the view.
     void zoomToFit();
+    // Fits the drawing once the view is shown at its real size (now, if it is showing),
+    // and again whenever the view is resized, until the user zooms, pans or clicks in it.
+    // For a newly opened harness or sheet.
+    void fitWhenShown();
 
 protected:
     // How the inline editor was closed: Enter = Down, Shift+Enter = Up, Tab = Next,
@@ -53,8 +58,15 @@ protected:
     void wheelEvent(QWheelEvent *event) override;
     void changeEvent(QEvent *event) override;
     void scrollContentsBy(int dx, int dy) override;
+    bool event(QEvent *event) override;
+    bool viewportEvent(QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
+    void fitLater();
+
+    bool m_fitPending = false;
     bool m_panning = false;
     QPoint m_panLast;
     InlineEdit *m_editor = nullptr;
