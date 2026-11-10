@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+[Desktop Entry]
+Type=Application
+Name=Twisted Builds Harness Designer
+GenericName=Wiring Harness Designer
+Comment=Design wiring harnesses: schematic, layout, wire lengths and BOM
+Exec=twisted-harness-designer %f
+Icon=twisted-harness-designer
+Terminal=false
+Categories=Science;Engineering;Electronics;
+MimeType=application/x-twisted-harness;
+Keywords=harness;wiring;wire;loom;connector;
