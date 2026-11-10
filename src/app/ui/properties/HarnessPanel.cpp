@@ -23,6 +23,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     : QWidget(parent)
     , m_document(document)
     , m_name(new QLineEdit(this))
+    , m_partNumber(new QLineEdit(this))
     , m_revision(new QLineEdit(this))
     , m_author(new QLineEdit(this))
     , m_units(new QComboBox(this))
@@ -37,6 +38,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     fillUnitsCombo(m_units);
     auto *info = new QFormLayout;
     info->addRow(tr("&Name:"), m_name);
+    info->addRow(tr("&Part number:"), m_partNumber);
     info->addRow(tr("&Revision:"), m_revision);
     info->addRow(tr("&Author:"), m_author);
     info->addRow(tr("&Units:"), m_units);
@@ -97,7 +99,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     layout->addWidget(bom);
     layout->addStretch();
 
-    for (QLineEdit *edit : {m_name, m_revision, m_author})
+    for (QLineEdit *edit : {m_name, m_partNumber, m_revision, m_author})
         connect(edit, &QLineEdit::editingFinished, this, &HarnessPanel::commitInfo);
     connect(m_units, &QComboBox::activated, this, &HarnessPanel::commitInfo);
     m_description->onCommit = [this] { commitInfo(); };
@@ -118,8 +120,9 @@ void HarnessPanel::refresh()
     const HarnessInfo &info = h.info;
     const Settings &s = h.settings;
     const QSignalBlocker b1(m_name), b2(m_revision), b3(m_author), b4(m_units), b5(m_serviceLoop),
-        b6(m_wasteWire), b7(m_wasteSleeving), b8(m_packing), b9(m_sleevingMargin);
+        b6(m_wasteWire), b7(m_wasteSleeving), b8(m_packing), b9(m_sleevingMargin), b10(m_partNumber);
     m_name->setText(info.name);
+    m_partNumber->setText(info.partNumber);
     m_revision->setText(info.revision);
     m_author->setText(info.author);
     setComboUnits(m_units, info.units);
@@ -144,6 +147,7 @@ void HarnessPanel::commitInfo()
     HarnessModel *model = m_document->model();
     HarnessInfo info = model->harness().info;
     info.name = m_name->text();
+    info.partNumber = m_partNumber->text();
     info.revision = m_revision->text();
     info.author = m_author->text();
     info.units = comboUnits(m_units);

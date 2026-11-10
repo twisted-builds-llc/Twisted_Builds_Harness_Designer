@@ -15,6 +15,7 @@ add_library(tbh_app_lib STATIC
     layout/LayoutItems.h layout/LayoutItems.cpp
     layout/LayoutScene.h layout/LayoutScene.cpp
     layout/LayoutView.h layout/LayoutView.cpp
+    print/PdfExport.h print/PdfExport.cpp
     schematic/SchematicItems.h schematic/SchematicItems.cpp
     schematic/SchematicScene.h schematic/SchematicScene.cpp
     schematic/SchematicView.h schematic/SchematicView.cpp

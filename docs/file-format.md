@@ -71,6 +71,7 @@ Loading fails with a message if:
   "author": "",
   "description": "",
   "name": "Untitled harness",
+  "partNumber": "",
   "revision": "",
   "settings": {
     "lengthRoundingIncrementMm": 1,
@@ -85,6 +86,9 @@ Loading fails with a message if:
 }
 ```
 
+- `partNumber`: the harness part number, printed in the PDF title block. Added after schema 2
+  without a version bump: it is optional (absent = `""`), and older builds keep it on save
+  because unknown `harness.json` keys are preserved.
 - `units`: `in` | `mm` | `cm` (display unit only; default `in` when absent).
 - `stripAllowanceMm` keys: `pin`, `splice`, `flyingLead`, `eyelet`, `ringTerminal`, `bare`.
   A missing key means 0 mm.

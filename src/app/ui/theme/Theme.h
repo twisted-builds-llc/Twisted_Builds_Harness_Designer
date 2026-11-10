@@ -2,8 +2,12 @@
 #pragma once
 
 #include <QObject>
+#include <QPalette>
 
 namespace tbh::app {
+
+// The light palette, whatever the current theme (used for printing).
+QPalette lightThemePalette();
 
 // Applies the app's own light/dark palettes on the Fusion style. "System" follows the
 // OS color scheme and re-applies when it changes. Choice persists in QSettings.

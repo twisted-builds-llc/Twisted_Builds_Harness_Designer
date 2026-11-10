@@ -39,6 +39,10 @@ public:
     // Called by LayoutNodeItem when it moves.
     void nodeMoved(LayoutNodeItem *item);
 
+    // Recomputes labels and wire counts now; model changes normally do it on the next
+    // event loop pass. Used before rendering a scene that is not shown (PDF export).
+    void refreshCaptions();
+
 protected:
     void drawBackground(QPainter *painter, const QRectF &rect) override;
 
@@ -55,7 +59,6 @@ private:
     void updateLegs(LayoutNodeItem *node);
     // Labels and wire counts depend on the whole model; recompute once per event loop pass.
     void scheduleRefresh();
-    void refreshCaptions();
     void syncSelectionToModel();
     void syncSelectionFromModel();
 

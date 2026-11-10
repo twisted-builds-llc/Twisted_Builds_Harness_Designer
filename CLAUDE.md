@@ -44,6 +44,9 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   through forks along the path most of their wires take, all merged to `main`. **Next: more user hands-on testing, then M6 packaging** (GitHub Actions
   CI on PRs/manual only, AppImage, Windows installer + zip, macOS dmg, v0.1.0 tag). CI was
   deliberately deferred until packaging; do not add workflows that run on every push.
+- M7 printable build package merged to `main`: File > Export Build Package (PDF) writes layout,
+  schematic, cut list (sorted for cutting) and pinout sheets with a title block
+  (`src/app/print/PdfExport.*`, rows from `src/core/bom/BuildSheets.*`); harness `partNumber`.
 - Flying leads, eyelets, ring terminals and bare ends are `FreeEnd` entities (schema 2,
   `freeEnds.json`; v1 files migrate on open), placed on the schematic like splices
   (Place > Add Flying Lead F / Add Eyelet E) and wired from their leads. Merged to `main`.

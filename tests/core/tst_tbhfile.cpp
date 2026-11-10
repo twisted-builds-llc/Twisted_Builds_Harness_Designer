@@ -21,7 +21,7 @@ namespace {
 Harness sampleHarness()
 {
     Harness h;
-    h.info = {u"Test harness"_s, u"Line one\nLine two"_s, u"B"_s, u"Bench"_s, Units::Inches};
+    h.info = {u"Test harness"_s, u"Line one\nLine two"_s, u"TH-100"_s, u"B"_s, u"Bench"_s, Units::Inches};
     h.settings.packingFactor = 0.75;
     h.settings.serviceLoopPercent = 2.5;
     h.settings.stripAllowanceMm = {{EndType::Pin, 6.0}, {EndType::RingTerminal, 8.5}};

@@ -216,7 +216,8 @@ Wires reference a `conductorKind` that is `single` in v1. Leave room for `twiste
   - **Terminals / seals / cavity plugs / splices:** part numbers and quantities, derived from pin and
     wire-end data
   - Items lacking a part number are listed as "(no part number)" and flagged.
-- Export **CSV** in v1 (one file per section, or a combined file); PDF in a later milestone.
+- Export **CSV** in v1 (one file per section, or a combined file). A printable PDF build package
+  follows in M7.
 - BOM-only manual extras (e.g. tape, zip ties) can be added as free rows and are saved in `bom.json`.
 
 ## 8. Calculations (all live in `tbh_core/calc`, fully unit-tested)
@@ -330,6 +331,18 @@ demo description.
 **M5 - BOM and exports**
 - BOM generation (section 7.3), table UI, CSV export, cut list, manual BOM rows.
 - *Done when:* a complete harness exports a BOM whose wire/sleeving totals match unit-test fixtures.
+
+**M7 - Printable build package (PDF)** (built before M6 packaging so it ships in v0.1.0)
+- File > Export Build Package (PDF): one landscape PDF (Letter, Tabloid, A4 or A3) with
+  layout, schematic, wire cut list and connector pinout sheets. Black on white whatever the
+  app theme; every sheet framed with a title block (harness name, part number, revision,
+  drawn by = author, date, units, sheet N of M).
+- Cut list sorted for cutting (gauge thickest first, then color, then wire name in natural
+  order) with a checkbox column. Pinouts: every connector pin in order, splices with wires.
+  Rows come from `tbh_core/bom/BuildSheets`, with hand-checked tests.
+- Harness part number (`harness.json` `partNumber`), editable in the Harness properties.
+- *Done when:* the PDF opens with the expected sheet count for test fixtures, long tables
+  continue on further sheets, and the user has checked a printed copy.
 
 **M6 - Polish and packaging**
 - Themes finalized, shortcuts, autosave/recovery, help, accessibility pass, translations scaffolding.
