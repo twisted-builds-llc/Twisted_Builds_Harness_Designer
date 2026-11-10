@@ -52,6 +52,7 @@ void Highlighter::recompute()
     seed.connectors = s.connectors;
     seed.pins = s.pins;
     seed.splices = s.splices;
+    seed.freeEnds = s.freeEnds;
     seed.wires = s.wires;
     seed.layoutNodes = s.layoutNodes;
     seed.layoutSegments = s.layoutSegments;

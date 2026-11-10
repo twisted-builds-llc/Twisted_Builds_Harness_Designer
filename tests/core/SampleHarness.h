@@ -47,7 +47,7 @@ inline LayoutSegment segment(const QString &id, const QString &a, const QString 
                               |
                             seg3 120
                               |
-                          splice(n4) --seg4 80-- flying lead of w3 (n5)
+                          splice(n4) --seg4 80-- flying lead "fl", end B of w3 (n5)
 
    Settings: allowance pin 10, splice 5, flyingLead 0, ringTerminal 15;
    service loop 5 %; rounding increment 5 mm.                                   */
@@ -56,10 +56,11 @@ inline Harness sample()
     Harness h;
     h.connectors = {connector(u"ecu"_s, 4), connector(u"sensor"_s, 2), connector(u"lamp"_s, 1)};
     h.splices = {Splice{u"sp"_s, u"S1"_s, {}, {}}};
+    h.freeEnds = {FreeEnd{u"fl"_s, FreeEndKind::FlyingLead, {}, {}, {}}};
     h.wires = {
         wire(u"w1"_s, PinRef{u"ecu"_s, u"ecu1"_s}, PinRef{u"sensor"_s, u"sensor1"_s}),
         wire(u"w2"_s, PinRef{u"ecu"_s, u"ecu2"_s}, SpliceRef{u"sp"_s}),
-        wire(u"w3"_s, SpliceRef{u"sp"_s}, FreeEnd{FreeEndKind::FlyingLead, {}, {}}),
+        wire(u"w3"_s, SpliceRef{u"sp"_s}, FreeEndRef{u"fl"_s}),
         wire(u"w4"_s, PinRef{u"ecu"_s, u"ecu3"_s}, PinRef{u"sensor"_s, u"sensor2"_s}),
         wire(u"w5"_s, PinRef{u"ecu"_s, u"ecu4"_s}, PinRef{u"lamp"_s, u"lamp1"_s}),
     };
@@ -68,7 +69,7 @@ inline Harness sample()
                      node(u"n2"_s, LayoutNodeType::Branch, {}),
                      node(u"n3"_s, LayoutNodeType::Connector, u"sensor"_s),
                      node(u"n4"_s, LayoutNodeType::Splice, u"sp"_s),
-                     node(u"n5"_s, LayoutNodeType::FlyingLead, freeEndPlacementKey(u"w3"_s, true))};
+                     node(u"n5"_s, LayoutNodeType::FlyingLead, u"fl"_s)};
     h.layoutSegments = {segment(u"seg1"_s, u"n1"_s, u"n2"_s, 300), segment(u"seg2"_s, u"n2"_s, u"n3"_s, 450),
                         segment(u"seg3"_s, u"n2"_s, u"n4"_s, 120), segment(u"seg4"_s, u"n4"_s, u"n5"_s, 80)};
     h.settings.stripAllowanceMm = {{EndType::Pin, 10}, {EndType::Splice, 5}, {EndType::FlyingLead, 0},
@@ -103,7 +104,8 @@ inline Harness bomSample()
         w.stripeColor = red ? u"WHT"_s : QString();
         w.gauge = Gauge{red ? 18.0 : 20.0, GaugeSystem::Awg};
     }
-    std::get<FreeEnd>(h.wires[2].endB) = FreeEnd{FreeEndKind::RingTerminal, u"RING-6"_s, {}};
+    h.freeEnds[0].kind = FreeEndKind::RingTerminal;
+    h.freeEnds[0].terminalPartNumber = u"RING-6"_s;
     h.wires[0].name = u"5V, \"REF\""_s; // needs CSV quoting
 
     Connector &ecu = h.connectors[0];

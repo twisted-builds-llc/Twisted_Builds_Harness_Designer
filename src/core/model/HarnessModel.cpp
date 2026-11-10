@@ -15,6 +15,10 @@ std::vector<Wire> &HarnessModel::items<Wire>() { return m_harness.wires; }
 template<>
 std::vector<Splice> &HarnessModel::items<Splice>() { return m_harness.splices; }
 template<>
+std::vector<FreeEnd> &HarnessModel::items<FreeEnd>() { return m_harness.freeEnds; }
+template<>
+const std::vector<FreeEnd> &HarnessModel::items<FreeEnd>() const { return m_harness.freeEnds; }
+template<>
 std::vector<LayoutNode> &HarnessModel::items<LayoutNode>() { return m_harness.layoutNodes; }
 template<>
 std::vector<LayoutSegment> &HarnessModel::items<LayoutSegment>() { return m_harness.layoutSegments; }
@@ -131,9 +135,9 @@ std::vector<QString> HarnessModel::placementKeys(EntityKind kind, const QString 
 {
     switch (kind) {
     case EntityKind::Wire:
-        return {id, freeEndPlacementKey(id, false), freeEndPlacementKey(id, true)};
     case EntityKind::Connector:
     case EntityKind::Splice:
+    case EntityKind::FreeEnd:
         return {id};
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
@@ -176,6 +180,7 @@ void HarnessModel::setPlacement(const QString &key, const std::optional<Schemati
 TBH_INSTANTIATE(Connector)
 TBH_INSTANTIATE(Wire)
 TBH_INSTANTIATE(Splice)
+TBH_INSTANTIATE(FreeEnd)
 TBH_INSTANTIATE(LayoutNode)
 TBH_INSTANTIATE(LayoutSegment)
 TBH_INSTANTIATE(Note)

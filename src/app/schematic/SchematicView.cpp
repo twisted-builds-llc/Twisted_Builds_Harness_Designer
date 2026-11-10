@@ -85,6 +85,11 @@ SchematicView::DropTarget SchematicView::targetAt(const QPointF &scenePos) const
             target.end = SpliceRef{target.splice->id()};
             return target;
         }
+        if (item->type() == FreeEndItemType) {
+            target.freeEnd = static_cast<FreeEndItem *>(item);
+            target.end = FreeEndRef{target.freeEnd->id()};
+            return target;
+        }
     }
     return target;
 }
@@ -98,6 +103,8 @@ bool SchematicView::isLeadAt(const QPointF &scenePos) const
         }
         if (item->type() == SpliceItemType)
             return static_cast<SpliceItem *>(item)->isStubAt(item->mapFromScene(scenePos));
+        if (item->type() == FreeEndItemType)
+            return static_cast<FreeEndItem *>(item)->isStubAt(item->mapFromScene(scenePos));
     }
     return false;
 }
@@ -108,12 +115,17 @@ void SchematicView::setHover(const DropTarget &target)
         m_hoverConnector->setHoverRow(-1);
     if (m_hoverSplice && m_hoverSplice != target.splice)
         m_hoverSplice->setHighlighted(false);
+    if (m_hoverFreeEnd && m_hoverFreeEnd != target.freeEnd)
+        m_hoverFreeEnd->setHighlighted(false);
     m_hoverConnector = target.connector;
     m_hoverSplice = target.splice;
+    m_hoverFreeEnd = target.freeEnd;
     if (m_hoverConnector)
         m_hoverConnector->setHoverRow(target.row);
     if (m_hoverSplice)
         m_hoverSplice->setHighlighted(true);
+    if (m_hoverFreeEnd)
+        m_hoverFreeEnd->setHighlighted(true);
 }
 
 void SchematicView::mousePressEvent(QMouseEvent *event)
@@ -168,6 +180,10 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
                && (m_tool == Tool::Wire || static_cast<SpliceItem *>(item)->isStubAt(item->mapFromScene(scenePos)))) {
         beginWire(SpliceRef{static_cast<SpliceItem *>(item)->id()}, event->pos());
         return;
+    } else if (item && item->type() == FreeEndItemType
+               && (m_tool == Tool::Wire || static_cast<FreeEndItem *>(item)->isStubAt(item->mapFromScene(scenePos)))) {
+        beginWire(FreeEndRef{static_cast<FreeEndItem *>(item)->id()}, event->pos());
+        return;
     }
 
     CanvasView::mousePressEvent(event);
@@ -210,10 +226,13 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
         setHover(target);
         const Wire *wire = m_document->model()->find<Wire>(m_reattachWire);
         Anchor end{scenePos, 0};
+        const QPointF from = wire ? m_scene->endAnchor(*wire, !m_reattachEndB).point : scenePos;
         if (target.connector)
-            end = target.connector->pinAnchor(target.row, scenePos);
+            end = target.connector->pinAnchor(target.row, from);
         else if (target.splice)
             end = target.splice->anchor();
+        else if (target.freeEnd)
+            end = target.freeEnd->anchor(from);
         if (wire)
             m_preview->setPath(WireItem::routePath(m_scene->endAnchor(*wire, !m_reattachEndB), end));
         return;
@@ -243,8 +262,6 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
         viewport()->setCursor(cursor);
     }
     CanvasView::mouseMoveEvent(event);
-    if ((event->buttons() & Qt::LeftButton) && !draggedFreeEnd().isEmpty())
-        setHover(targetAt(mapToScene(event->pos())));
 }
 
 void SchematicView::mouseReleaseEvent(QMouseEvent *event)
@@ -287,8 +304,7 @@ void SchematicView::mouseReleaseEvent(QMouseEvent *event)
     CanvasView::mouseReleaseEvent(event);
     if (event->button() == Qt::LeftButton) {
         setHover({});
-        if (!dropFreeEnd(mapToScene(event->pos())))
-            commitMoves();
+        commitMoves();
     }
 }
 
@@ -380,6 +396,8 @@ Anchor SchematicView::startAnchor(const QPointF &towards) const
     } else if (const auto *splice = std::get_if<SpliceRef>(&m_wireStart)) {
         if (auto *item = m_scene->spliceItem(splice->spliceId))
             return item->anchor();
+    } else if (auto *item = m_scene->freeEndItem(std::get<FreeEndRef>(m_wireStart).freeEndId)) {
+        return item->anchor(towards);
     }
     return {};
 }
@@ -393,6 +411,8 @@ void SchematicView::updateWirePreview(const QPointF &scenePos)
         end = target.connector->pinAnchor(target.row, startAnchor(scenePos).point);
     else if (target.splice)
         end = target.splice->anchor();
+    else if (target.freeEnd)
+        end = target.freeEnd->anchor(startAnchor(scenePos).point);
     m_preview->setPath(WireItem::routePath(startAnchor(end.point), end));
 }
 
@@ -404,7 +424,22 @@ void SchematicView::finishWire(const QPointF &scenePos)
     if (target.end && *target.end == start)
         return; // dropped back on the start
 
-    HarnessModel *model = m_document->model();
+    Wire wire = newWire(start);
+    const QString id = wire.id;
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(tr("Add wire"));
+    // Dropped on empty space: the wire ends in a new flying lead there.
+    wire.endB = target.end ? *target.end : WireEnd(addFreeEndAt(FreeEndKind::FlyingLead, scenePos));
+    // addWire() also names the wire and copies circuit text to an empty pin at the other end.
+    stack->push(addWire(m_document->model(), std::move(wire), {}, tr("Add wire")).release());
+    stack->endMacro();
+    Selection selection;
+    selection.wires.insert(id);
+    m_selection->setSelection(selection);
+}
+
+Wire SchematicView::newWire(const WireEnd &start) const
+{
     const WireStyle &style = m_document->wireStyle();
     Wire wire;
     wire.id = newId();
@@ -413,21 +448,7 @@ void SchematicView::finishWire(const QPointF &scenePos)
     wire.stripeColor = style.stripeColor;
     wire.gauge = style.gauge;
     wire.wireTypeId = style.wireTypeId;
-    Placements placements;
-    if (target.end) {
-        wire.endB = *target.end;
-    } else {
-        wire.endB = FreeEnd{FreeEndKind::FlyingLead, {}, {}};
-        SchematicPlacement placement;
-        placement.position = SchematicScene::snapped(scenePos);
-        placements[freeEndPlacementKey(wire.id, true)] = placement;
-    }
-    // addWire() also names the wire and copies circuit text to an empty pin at the other end.
-    const QString id = wire.id;
-    m_document->undoStack()->push(addWire(model, std::move(wire), std::move(placements), tr("Add wire")).release());
-    Selection selection;
-    selection.wires.insert(id);
-    m_selection->setSelection(selection);
+    return wire;
 }
 
 void SchematicView::cancelWire()
@@ -445,16 +466,13 @@ void SchematicView::cancelWire()
 std::optional<bool> SchematicView::selectedWireEndAt(const QPoint &viewPos) const
 {
     const Selection &s = m_selection->selection();
-    if (s.wires.size() != 1 || !s.connectors.isEmpty() || !s.splices.isEmpty())
+    if (s.wires.size() != 1 || !s.connectors.isEmpty() || !s.splices.isEmpty() || !s.freeEnds.isEmpty())
         return std::nullopt;
     const Wire *wire = m_document->model()->find<Wire>(*s.wires.begin());
     if (!wire)
         return std::nullopt;
     constexpr int kGrabRadius = 8; // pixels
     for (bool endB : {false, true}) {
-        // Free ends are dragged as items (see dropFreeEnd).
-        if (std::holds_alternative<FreeEnd>(endB ? wire->endB : wire->endA))
-            continue;
         const QPoint anchor = mapFromScene(m_scene->endAnchor(*wire, endB).point);
         if ((anchor - viewPos).manhattanLength() <= kGrabRadius)
             return endB;
@@ -468,43 +486,20 @@ void SchematicView::finishReattach(const QPointF &scenePos)
     const bool endB = m_reattachEndB;
     cancelWire();
     const DropTarget target = targetAt(scenePos);
-    const WireEnd newEnd = target.end ? *target.end : WireEnd(FreeEnd{FreeEndKind::FlyingLead, {}, {}});
-    auto command = setWireEnd(m_document->model(), wireId, endB, newEnd, SchematicScene::snapped(scenePos));
-    if (command)
-        m_document->undoStack()->push(command.release());
+    QUndoStack *stack = m_document->undoStack();
+    if (target.end) {
+        if (auto command = setWireEnd(m_document->model(), wireId, endB, *target.end))
+            stack->push(command.release());
+    } else {
+        // Dropped on empty space: the end moves to a new flying lead there.
+        stack->beginMacro(tr("Re-attach wire"));
+        const FreeEndRef end = addFreeEndAt(FreeEndKind::FlyingLead, scenePos);
+        stack->push(setWireEnd(m_document->model(), wireId, endB, end).release());
+        stack->endMacro();
+    }
     Selection selection;
     selection.wires.insert(wireId);
     m_selection->setSelection(selection);
-}
-
-QString SchematicView::draggedFreeEnd() const
-{
-    if (m_pressPositions.size() != 1)
-        return {};
-    PlacedItem *item = m_scene->placedItem(m_pressPositions.begin()->first);
-    return item && item->type() == FreeEndItemType ? item->placementKey() : QString();
-}
-
-bool SchematicView::dropFreeEnd(const QPointF &scenePos)
-{
-    const QString key = draggedFreeEnd();
-    if (key.isEmpty())
-        return false;
-    const DropTarget target = targetAt(scenePos);
-    if (!target.end)
-        return false;
-    auto *item = static_cast<FreeEndItem *>(m_scene->placedItem(key));
-    const QString wireId = item->wireId();
-    const bool endB = item->isEndB();
-    const QPointF before = m_pressPositions.begin()->second;
-    m_pressPositions.clear();
-    auto command = setWireEnd(m_document->model(), wireId, endB, *target.end, {});
-    if (!command) {
-        item->setPos(before); // e.g. dropped on the wire's own other end
-        return true;
-    }
-    m_document->undoStack()->push(command.release());
-    return true;
 }
 
 // ---- moving -----------------------------------------------------------------------
@@ -746,20 +741,14 @@ void SchematicView::renameSelection()
         return;
     }
     case FreeEndItemType: {
-        auto *freeEnd = static_cast<FreeEndItem *>(item);
-        const QString wireId = freeEnd->wireId();
-        const bool endB = freeEnd->isEndB();
-        const Wire &wire = *model->find<Wire>(wireId);
-        editText(item->mapRectToScene(QRectF(12, -10, 140, 20)),
-                 std::get<FreeEnd>(endB ? wire.endB : wire.endA).label,
-                 [this, wireId, endB](const QString &value, Nav) {
+        const QString id = static_cast<FreeEndItem *>(item)->id();
+        editText(item->mapRectToScene(QRectF(-60, -30, 120, 18)), model->find<FreeEnd>(id)->label,
+                 [this, id](const QString &value, Nav) {
                      HarnessModel *m = m_document->model();
-                     Wire w = *m->find<Wire>(wireId);
-                     FreeEnd &end = std::get<FreeEnd>(endB ? w.endB : w.endA);
-                     if (end.label == value)
-                         return;
-                     end.label = value;
-                     m_document->undoStack()->push(new UpdateEntityCommand<Wire>(m, w, tr("Edit wire end")));
+                     FreeEnd f = *m->find<FreeEnd>(id);
+                     f.label = value;
+                     if (auto command = updateFreeEnd(m, f, tr("Rename free end")))
+                         m_document->undoStack()->push(command.release());
                  });
         return;
     }
@@ -817,6 +806,8 @@ QPointF SchematicView::unoccupiedPosition(QPointF position) const
         ids.insert(c.id);
     for (const Splice &s : h.splices)
         ids.insert(s.id);
+    for (const FreeEnd &f : h.freeEnds)
+        ids.insert(f.id);
     auto occupied = [&](const QPointF &p) {
         for (const auto &[key, placement] : h.schematic.placements) {
             if (ids.contains(key) && (placement.position - p).manhattanLength() < 1)
@@ -859,6 +850,35 @@ void SchematicView::addSplice()
         m_document->model(), std::move(splice), {{id, placement}}, tr("Add splice")));
     Selection selection;
     selection.splices.insert(id);
+    m_selection->setSelection(selection);
+}
+
+FreeEndRef SchematicView::addFreeEndAt(FreeEndKind kind, const QPointF &scenePos)
+{
+    FreeEnd end;
+    end.id = newId();
+    end.kind = kind;
+    SchematicPlacement placement;
+    placement.position = SchematicScene::snapped(scenePos);
+    const QString id = end.id;
+    m_document->undoStack()->push(new AddEntityCommand<FreeEnd>(m_document->model(), std::move(end),
+                                                                {{id, placement}}, tr("Add free end")));
+    return FreeEndRef{id};
+}
+
+void SchematicView::addFreeEnd(FreeEndKind kind)
+{
+    FreeEnd end;
+    end.id = newId();
+    end.kind = kind;
+    SchematicPlacement placement;
+    placement.position = unoccupiedPosition(viewCenterSnapped());
+    const QString id = end.id;
+    m_document->undoStack()->push(
+        new AddEntityCommand<FreeEnd>(m_document->model(), std::move(end), {{id, placement}},
+                                      kind == FreeEndKind::Eyelet ? tr("Add eyelet") : tr("Add flying lead")));
+    Selection selection;
+    selection.freeEnds.insert(id);
     m_selection->setSelection(selection);
 }
 
@@ -907,9 +927,9 @@ void SchematicView::selectAll()
 QByteArray SchematicView::selectionFragment() const
 {
     const Selection &s = m_selection->selection();
-    if (s.connectors.isEmpty() && s.splices.isEmpty())
+    if (s.connectors.isEmpty() && s.splices.isEmpty() && s.freeEnds.isEmpty())
         return {};
-    Harness fragment = extractFragment(m_document->model()->harness(), s.connectors, s.splices);
+    Harness fragment = extractFragment(m_document->model()->harness(), s.connectors, s.splices, s.freeEnds);
     return io::writeZip(io::serializeHarness(fragment), nullptr).value_or(QByteArray());
 }
 
@@ -917,7 +937,7 @@ void SchematicView::copySelection()
 {
     const QByteArray bytes = selectionFragment();
     if (bytes.isEmpty()) {
-        emit statusMessage(tr("Select connectors or splices to copy."));
+        emit statusMessage(tr("Select connectors, splices, flying leads or eyelets to copy."));
         return;
     }
     auto *mime = new QMimeData;
@@ -942,8 +962,10 @@ void SchematicView::pasteFragmentBytes(const QByteArray &bytes, QPointF offset)
     for (const QString &id : newIds) {
         if (m_document->model()->find<Connector>(id))
             selection.connectors.insert(id);
-        else
+        else if (m_document->model()->find<Splice>(id))
             selection.splices.insert(id);
+        else
+            selection.freeEnds.insert(id);
     }
     m_selection->setSelection(selection);
 }

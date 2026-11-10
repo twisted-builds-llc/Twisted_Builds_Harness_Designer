@@ -152,26 +152,34 @@ private:
     bool m_highlighted = false;
 };
 
-// The free end of a wire (flying lead, eyelet, ring terminal, bare end).
+// A free end (flying lead, eyelet, ring terminal, bare end): a small symbol of its kind
+// with a lead on each side. Wires attach at the tip of the lead facing them; dragging a
+// lead draws a wire, dragging the symbol moves it.
 class FreeEndItem : public PlacedItem
 {
 public:
-    FreeEndItem(const QString &wireId, bool endB, const FreeEnd &end);
+    static constexpr qreal kHalfWidth = 12;  // symbol
+    static constexpr qreal kStubLength = 14; // lead on each side, see isStubAt()
+
+    explicit FreeEndItem(const FreeEnd &end);
 
     int type() const override { return FreeEndItemType; }
-    const QString &wireId() const { return m_wireId; }
-    bool isEndB() const { return m_endB; }
-    void setEnd(const FreeEnd &end);
-    Anchor anchor() const { return {scenePos(), 0}; }
+    QString id() const { return m_end.id; }
+    void setFreeEnd(const FreeEnd &end);
+    void setHighlighted(bool on);
+    // Tip of the lead on the side facing `towards` (scene coords).
+    Anchor anchor(const QPointF &towards) const;
+    bool isStubAt(const QPointF &itemPos) const;
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
 
 private:
-    QString m_wireId;
-    bool m_endB;
+    static QRectF stubRect(bool right);
+
     FreeEnd m_end;
+    bool m_highlighted = false;
 };
 
 // A wire drawn as an orthogonal route between two anchors: out of each end, then along one

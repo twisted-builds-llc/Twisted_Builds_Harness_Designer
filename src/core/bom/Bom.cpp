@@ -170,15 +170,10 @@ Bom buildBom(const Harness &harness, const Library &library)
                 parts.add(PartCategory::Seal, p.sealPartNumber, {}, reference);
         }
     }
-    for (const Wire &w : harness.wires) {
-        for (const WireEnd *end : {&w.endA, &w.endB}) {
-            const auto *free = std::get_if<FreeEnd>(end);
-            if (!free)
-                continue;
-            const bool needsTerminal = free->kind == FreeEndKind::Eyelet || free->kind == FreeEndKind::RingTerminal;
-            if (needsTerminal || !free->terminalPartNumber.trimmed().isEmpty())
-                parts.add(PartCategory::Terminal, free->terminalPartNumber, {}, describeWireEnd(harness, *end));
-        }
+    for (const FreeEnd &f : harness.freeEnds) {
+        const bool needsTerminal = f.kind == FreeEndKind::Eyelet || f.kind == FreeEndKind::RingTerminal;
+        if (needsTerminal || !f.terminalPartNumber.trimmed().isEmpty())
+            parts.add(PartCategory::Terminal, f.terminalPartNumber, {}, describeFreeEnd(f));
     }
     for (const Splice &s : harness.splices)
         parts.add(PartCategory::Splice, s.partNumber, {}, s.label);

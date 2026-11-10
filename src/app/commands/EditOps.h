@@ -17,13 +17,15 @@
 namespace tbh::app {
 
 // Wires that removeItems() would delete: the given wires plus all wires attached to the
-// given connectors and splices.
+// given connectors, splices and free ends.
 std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString> &connectorIds,
-                                      const QSet<QString> &spliceIds, const QSet<QString> &wireIds);
+                                      const QSet<QString> &spliceIds, const QSet<QString> &freeEndIds,
+                                      const QSet<QString> &wireIds);
 
-// Also removes the notes in `noteIds`.
+// Also removes the notes in `noteIds`. Layout nodes of removed items stay, unassigned.
 std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QString> &connectorIds,
                                           const QSet<QString> &spliceIds,
+                                          const QSet<QString> &freeEndIds,
                                           const QSet<QString> &wireIds,
                                           const QSet<QString> &noteIds = {});
 
@@ -114,12 +116,15 @@ QString spliceOfStub(const Harness &harness, const QString &stubId);
 std::unique_ptr<QUndoCommand> setDistanceAlongRun(HarnessModel *model, const QString &nodeId,
                                                   const QString &fromSegmentId, double distanceMm);
 
-// Moves one end of a wire to `newEnd` (re-attach). A new free end is placed at
-// `freeEndPosition`. Layout references to an old free end are cleared and any manual
-// route is dropped. Empty circuit text is filled across the wire as in addWire().
-// Returns null if nothing changes or both ends would be the same pin.
+// Moves one end of a wire to `newEnd` (re-attach); any manual route is dropped. The old
+// end's item (e.g. a free end) stays. Empty circuit text is filled across the wire as in
+// addWire(). Returns null if nothing changes or both ends would be the same item.
 std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wireId, bool endB,
-                                         const WireEnd &newEnd, QPointF freeEndPosition);
+                                         const WireEnd &newEnd);
+
+// Replaces a free end with `updated`. A kind change also changes the type of its layout
+// node (eyelet or flying lead). Returns null if nothing changes.
+std::unique_ptr<QUndoCommand> updateFreeEnd(HarnessModel *model, const FreeEnd &updated, const QString &text);
 
 // Pins with `count` entries: existing pins are kept, new pins get nextPinLabel() labels.
 std::vector<Pin> resizedPins(const std::vector<Pin> &pins, int count);

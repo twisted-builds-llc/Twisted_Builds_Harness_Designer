@@ -74,9 +74,10 @@ Harness sampleHarness()
     Wire toRing;
     toRing.id = u"w3"_s;
     toRing.endA = SpliceRef{u"sp1"_s};
-    toRing.endB = FreeEnd{FreeEndKind::RingTerminal, u"RING-M6"_s, u"GND"_s};
+    toRing.endB = FreeEndRef{u"fe-ring"_s};
     toRing.baseColor = u"BLK"_s;
     h.wires = {pinToPin, toSplice, toRing};
+    h.freeEnds = {FreeEnd{u"fe-ring"_s, FreeEndKind::RingTerminal, u"GND"_s, u"RING-M6"_s, {}}};
 
     h.layoutNodes = {
         LayoutNode{u"n1"_s, LayoutNodeType::Connector, u"c-ecu"_s, QPointF(0, 0), {}},
@@ -97,7 +98,7 @@ Harness sampleHarness()
     h.bomExtras = {BomExtra{u"x1"_s, u"TAPE-19"_s, u"Cloth tape"_s, 2.5, u"roll"_s, {}, {}}};
     h.schematic.placements[u"c-ecu"_s] = SchematicPlacement{QPointF(10, 20), false, 40, {}};
     h.schematic.placements[u"sp1"_s] = SchematicPlacement{QPointF(-5.5, 7), true, 0, {}};
-    h.schematic.placements[freeEndPlacementKey(u"w3"_s, true)] = SchematicPlacement{QPointF(400, 0), false, 0, {}};
+    h.schematic.placements[u"fe-ring"_s] = SchematicPlacement{QPointF(400, 0), false, 0, {}};
     return h;
 }
 
@@ -345,8 +346,56 @@ private slots:
                     w[u"endB"] = QJsonObject{{u"type"_s, u"splice"_s}, {u"spliceId"_s, u"nope"_s}};
                 }).contains(u"nope"));
         QVERIFY(withWire([](QJsonObject &w) {
+                    w[u"endB"] = QJsonObject{{u"type"_s, u"free"_s}, {u"freeEndId"_s, u"nope"_s}};
+                }).contains(u"nope"));
+        QVERIFY(withWire([](QJsonObject &w) {
                     w[u"routeSegmentIds"] = QJsonArray{u"nope"_s};
                 }).contains(u"nope"));
+    }
+
+    // Schema 1 kept free ends inside wires.json; opening such a file moves each into
+    // freeEnds.json with its schematic placement and layout node.
+    void schemaV1FreeEndsAreMigrated()
+    {
+        const QString file = path(u"v1.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
+        io::ZipEntries e = readRaw(file);
+        QJsonObject manifest = QJsonDocument::fromJson(e.at(u"manifest.json"_s)).object();
+        manifest[u"schemaVersion"] = 1;
+        e[u"manifest.json"_s] = toBytes(manifest);
+        e.erase(u"freeEnds.json"_s);
+        QJsonArray wires = QJsonDocument::fromJson(e.at(u"wires.json"_s)).array();
+        QJsonObject w3 = wires[2].toObject();
+        w3[u"endB"] = QJsonObject{{u"type"_s, u"free"_s},
+                                  {u"kind"_s, u"ringTerminal"_s},
+                                  {u"terminalPartNumber"_s, u"RING-M6"_s},
+                                  {u"label"_s, u"GND"_s}};
+        wires[2] = w3;
+        e[u"wires.json"_s] = toBytes(wires);
+        QJsonObject schematic = QJsonDocument::fromJson(e.at(u"schematic.json"_s)).object();
+        QJsonObject placements = schematic[u"placements"].toObject();
+        placements[u"w3/b"] = placements.take(u"fe-ring");
+        schematic[u"placements"] = placements;
+        e[u"schematic.json"_s] = toBytes(schematic);
+        QJsonObject layout = QJsonDocument::fromJson(e.at(u"layout.json"_s)).object();
+        QJsonArray nodes = layout[u"nodes"].toArray();
+        nodes.append(QJsonObject{{u"id"_s, u"n5"_s}, {u"type"_s, u"eyelet"_s}, {u"refId"_s, u"w3/b"_s},
+                                 {u"position"_s, QJsonObject{{u"x"_s, 0}, {u"y"_s, 0}}}});
+        layout[u"nodes"] = nodes;
+        e[u"layout.json"_s] = toBytes(layout);
+        writeRaw(file, e);
+
+        QString error;
+        const auto loaded = io::readTbhFile(file, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QCOMPARE(loaded->freeEnds.size(), size_t(1));
+        const FreeEnd &ring = loaded->freeEnds[0];
+        QCOMPARE(ring.kind, FreeEndKind::RingTerminal);
+        QCOMPARE(ring.label, u"GND"_s);
+        QCOMPARE(ring.terminalPartNumber, u"RING-M6"_s);
+        QCOMPARE(std::get<FreeEndRef>(loaded->wires[2].endB).freeEndId, ring.id);
+        QCOMPARE(loaded->schematic.placements.at(ring.id).position, QPointF(400, 0));
+        QCOMPARE(loaded->layoutNodes.back().refId, ring.id);
     }
 
     void duplicateIdsAreRejected()
@@ -465,16 +514,15 @@ private slots:
 
     void layoutNodeReferences()
     {
-        // A flying-lead node may reference a wire's free end ("<wireId>/b").
+        // An eyelet node references a free end by id.
         Harness h = sampleHarness();
-        h.layoutNodes.push_back(
-            LayoutNode{u"n5"_s, LayoutNodeType::FlyingLead, freeEndPlacementKey(u"w3"_s, true), QPointF(), {}});
+        h.layoutNodes.push_back(LayoutNode{u"n5"_s, LayoutNodeType::Eyelet, u"fe-ring"_s, QPointF(), {}});
         QString error;
         QVERIFY2(io::deserializeHarness(io::serializeHarness(h), &error), qPrintable(error));
 
-        Harness pinEnd = h; // w1's end B is a pin, not a free end
-        pinEnd.layoutNodes.back().refId = freeEndPlacementKey(u"w1"_s, true);
-        QVERIFY(!io::deserializeHarness(io::serializeHarness(pinEnd), &error));
+        Harness notFreeEnd = h; // a splice id on an eyelet node
+        notFreeEnd.layoutNodes.back().refId = u"sp1"_s;
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(notFreeEnd), &error));
 
         Harness duplicate = h; // two nodes for one connector
         duplicate.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Connector, u"c-ecu"_s, QPointF(), {}});
@@ -518,7 +566,7 @@ private slots:
     {
         Harness h = sampleHarness();
         h.schematic.placements[u"gone"_s] = SchematicPlacement{};
-        h.schematic.placements[freeEndPlacementKey(u"w1"_s, false)] = SchematicPlacement{}; // pin end
+        h.schematic.placements[u"w1/a"_s] = SchematicPlacement{}; // old-style free-end key
         h.schematic.placements[u"gone-wire"_s] = SchematicPlacement{QPointF(100, 0), false, 0, {}};
         // A dragged wire route (keyed by an existing wire id) is kept.
         h.schematic.placements[u"w1"_s] = SchematicPlacement{QPointF(250, 0), false, 0, {}};

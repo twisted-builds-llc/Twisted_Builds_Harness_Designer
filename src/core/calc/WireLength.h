@@ -25,12 +25,12 @@ struct Route
     std::vector<QString> segmentIds; // in order from end A
 };
 
-// Layout node key of a wire end: connector id, splice id, or freeEndPlacementKey().
+// Layout node key of a wire end: connector, splice or free end id.
 // Layout nodes reference ends through LayoutNode::refId with the same key.
 QString endKey(const Wire &wire, bool endB);
 
 // Allowance category of a wire end.
-EndType endType(const WireEnd &end);
+EndType endType(const Harness &harness, const WireEnd &end);
 
 // Adjacency view of the layout, built once and queried per wire.
 class LayoutGraph

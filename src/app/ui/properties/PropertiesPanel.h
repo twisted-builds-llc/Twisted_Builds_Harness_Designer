@@ -9,6 +9,7 @@ namespace tbh::app {
 
 class ConnectorPanel;
 class Document;
+class FreeEndEditor;
 class HarnessPanel;
 class LayoutNodePanel;
 class SegmentPanel;
@@ -17,7 +18,7 @@ class SplicePanel;
 class WirePanel;
 
 // Shows the editor that fits the current selection: harness (nothing selected),
-// connector, splice, or wire(s).
+// connector, splice, free end, or wire(s).
 class PropertiesPanel : public QStackedWidget
 {
     Q_OBJECT
@@ -35,6 +36,7 @@ private:
     ConnectorPanel *m_connector;
     WirePanel *m_wires;
     SplicePanel *m_splice;
+    FreeEndEditor *m_freeEnd;
     SegmentPanel *m_segment;
     LayoutNodePanel *m_node;
     QLabel *m_mixed;

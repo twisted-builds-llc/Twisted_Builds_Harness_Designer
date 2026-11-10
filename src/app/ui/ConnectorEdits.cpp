@@ -78,14 +78,14 @@ bool deleteItems(QWidget *parent, Document *document, const Selection &selection
     HarnessModel *model = document->model();
     // Explicitly selected wires need no confirmation; wires removed as a side effect do.
     std::vector<QString> implicit;
-    for (const QString &id : wiresRemovedWith(model->harness(), selection.connectors, selection.splices, {})) {
+    for (const QString &id : wiresRemovedWith(model->harness(), selection.connectors, selection.splices, selection.freeEnds, {})) {
         if (!selection.wires.contains(id))
             implicit.push_back(id);
     }
     if (!confirmWireRemoval(parent, model->harness(), implicit, Tr::tr("Deleting the selection")))
         return false;
     document->undoStack()->push(
-        removeItems(model, selection.connectors, selection.splices, selection.wires, selection.notes).release());
+        removeItems(model, selection.connectors, selection.splices, selection.freeEnds, selection.wires, selection.notes).release());
     return true;
 }
 

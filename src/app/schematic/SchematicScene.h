@@ -32,14 +32,14 @@ public:
     ConnectorItem *connectorItem(const QString &id) const { return m_connectors.value(id); }
     SpliceItem *spliceItem(const QString &id) const { return m_splices.value(id); }
     WireItem *wireItem(const QString &id) const { return m_wires.value(id); }
-    FreeEndItem *freeEndItem(const QString &key) const { return m_freeEnds.value(key); }
+    FreeEndItem *freeEndItem(const QString &id) const { return m_freeEnds.value(id); }
     NoteItem *noteItem(const QString &id) const { return m_notes.value(id); }
     PlacedItem *placedItem(const QString &key) const;
 
     // Anchor of a wire end (scene coords), facing the wire's other end.
     Anchor endAnchor(const Wire &wire, bool endB) const;
     // Reference point of a wire end used to pick anchor sides.
-    QPointF endReference(const WireEnd &end, const QString &wireId, bool endB) const;
+    QPointF endReference(const WireEnd &end) const;
 
     // Highlights pin rows whose label or circuit text contains `text`.
     void setSearchText(const QString &text);
@@ -71,9 +71,9 @@ private:
 
     void addConnector(const Connector &connector);
     void addSplice(const Splice &splice);
+    void addFreeEnd(const FreeEnd &end);
     void addWire(const Wire &wire);
     void addNote(const Note &note); // schematic notes only
-    void syncFreeEnds(const Wire &wire);
     void applyPlacement(PlacedItem *item);
     void indexWire(const Wire &wire);
     void unindexWire(const QString &wireId);
@@ -92,9 +92,9 @@ private:
     QHash<QString, ConnectorItem *> m_connectors;
     QHash<QString, SpliceItem *> m_splices;
     QHash<QString, WireItem *> m_wires;
-    QHash<QString, FreeEndItem *> m_freeEnds;     // by placement key
+    QHash<QString, FreeEndItem *> m_freeEnds;
     QHash<QString, NoteItem *> m_notes;
-    QMultiHash<QString, QString> m_wiresByItem;   // connector/splice id or free-end key -> wire id
+    QMultiHash<QString, QString> m_wiresByItem;   // connector/splice/free end id -> wire id
 };
 
 } // namespace tbh::app

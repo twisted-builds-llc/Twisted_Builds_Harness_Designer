@@ -16,6 +16,7 @@ struct HighlightSeed
     QSet<QString> connectors;
     QSet<QString> pins;
     QSet<QString> splices;
+    QSet<QString> freeEnds;
     QSet<QString> wires;
     QSet<QString> layoutNodes;
     QSet<QString> layoutSegments;
@@ -27,14 +28,14 @@ struct HighlightSet
     QSet<QString> pins; // "connectorId/pinId" of related wire ends
     QSet<QString> splices;
     QSet<QString> wires;
-    QSet<QString> freeEnds; // freeEndPlacementKey()
+    QSet<QString> freeEnds;
     QSet<QString> layoutNodes;
     QSet<QString> layoutSegments;
 };
 
 QString pinKey(const QString &connectorId, const QString &pinId);
 
-// Related wires: those on seeded connectors/pins/splices, seeded wires, wires routed
+// Related wires: those on seeded connectors/pins/splices/free ends, seeded wires, wires routed
 // through seeded segments, and wires on what seeded layout nodes stand for (for a branch
 // point: wires through its segments). Then everything those wires touch: their end items
 // and pins, and the layout segments and nodes of their routes. Seeds are always included.

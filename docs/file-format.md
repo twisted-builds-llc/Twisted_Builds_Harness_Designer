@@ -1,6 +1,6 @@
 # `.tbh` file format
 
-Current schema version: **1**. The extension and entry names are defined in
+Current schema version: **2**. The extension and entry names are defined in
 `src/core/io/FileFormat.h`.
 
 A `.tbh` file is a zip container of UTF-8 JSON documents. JSON is written indented with object
@@ -17,6 +17,7 @@ Saving is atomic: the file is written to a temporary file next to the target, th
 | `connectors.json` | Array of connectors (with pins). Optional, default `[]`.    |
 | `wires.json`      | Array of wires. Optional, default `[]`.                     |
 | `splices.json`    | Array of splices. Optional, default `[]`.                   |
+| `freeEnds.json`   | Array of free ends (flying leads, eyelets...). Optional, default `[]`. |
 | `layout.json`     | Layout: `{ "nodes": [...], "segments": [...], "notes": [...] }`. |
 | `schematic.json`  | Schematic placements (positions, collapse, visible rows).   |
 | `library.json`    | Parts library entries this harness uses (embedded on save). |
@@ -57,7 +58,7 @@ Loading fails with a message if:
   "appVersion": "0.1.0",
   "createdAt": "2026-01-02T03:04:05.678Z",
   "modifiedAt": "2026-01-02T04:00:00.000Z",
-  "schemaVersion": 1
+  "schemaVersion": 2
 }
 ```
 
@@ -126,7 +127,7 @@ Loading fails with a message if:
     "baseColor": "RED",
     "conductorKind": "single",
     "endA": { "type": "pin", "connectorId": "c-ecu", "pinId": "ecu-p1" },
-    "endB": { "type": "free", "kind": "ringTerminal", "label": "GND", "terminalPartNumber": "" },
+    "endB": { "type": "free", "freeEndId": "fe1" },
     "gauge": { "system": "awg", "value": 20 },
     "id": "w1",
     "lengthOverrideMm": 1234.5,
@@ -139,7 +140,7 @@ Loading fails with a message if:
 ```
 
 - Wire end `type`: `pin` (`connectorId`, `pinId`), `splice` (`spliceId`) or `free`
-  (`kind`: `flyingLead` | `eyelet` | `ringTerminal` | `bare`, plus `terminalPartNumber`, `label`).
+  (`freeEndId`, an entry of `freeEnds.json`).
 - `gauge.system`: `awg` | `mm2`.
 - `stripeColor`: `""` means no stripe.
 - `lengthOverrideMm`: omitted when there is no manual override.
@@ -151,6 +152,17 @@ Loading fails with a message if:
 ```json
 [ { "id": "sp1", "label": "S1", "partNumber": "" } ]
 ```
+
+## `freeEnds.json`
+
+A wire end that is not on a connector or splice. Placed on the schematic on its own; one or
+more wires end on it.
+
+```json
+[ { "id": "fe1", "kind": "ringTerminal", "label": "GND", "terminalPartNumber": "RING-M6" } ]
+```
+
+- `kind`: `flyingLead` | `eyelet` | `ringTerminal` | `bare`.
 
 ## `layout.json`
 
@@ -172,8 +184,8 @@ Loading fails with a message if:
 ```
 
 - Node `type`: `connector` | `branch` | `splice` | `flyingLead` | `eyelet`. `refId` is the
-  connector id (`connector`), splice id (`splice`), or a wire free-end key `<wireId>/a` or
-  `<wireId>/b` (`flyingLead`, `eyelet`; eyelet is also used for ring terminals). `branch`
+  connector id (`connector`), splice id (`splice`), or free end id (`flyingLead`, `eyelet`;
+  eyelet is also used for ring terminals). `branch`
   nodes have no reference. Any node may have an empty `refId` (unassigned).
 - `sharedSpliceIds` (optional, `splice` nodes only): further splice ids at the same point in
   the loom, side by side with the node's own `refId` splice (splices the same distance from a
@@ -202,13 +214,13 @@ Presentation only: where items sit on the schematic canvas.
   "placements": {
     "c-ecu":   { "collapsed": false, "maxVisibleRows": 40, "x": 0, "y": 0 },
     "sp1":     { "collapsed": false, "maxVisibleRows": 0, "x": 420, "y": 160 },
-    "w3/b":    { "collapsed": false, "maxVisibleRows": 0, "x": 700, "y": 80 },
+    "fe1":     { "collapsed": false, "maxVisibleRows": 0, "x": 700, "y": 80 },
     "w4":      { "collapsed": false, "maxVisibleRows": 0, "x": 520, "y": 0 }
   }
 }
 ```
 
-- Keys are connector or splice ids, or `<wireId>/a` / `<wireId>/b` for a wire's free end.
+- Keys are connector, splice or free end ids.
 - A key that is a wire id holds a dragged wire route: `x` is the scene x of the wire's
   vertical run (`y`, `collapsed` and `maxVisibleRows` are unused). Wires without one route
   their vertical run halfway between the ends. Older versions drop these entries on load,
@@ -273,3 +285,11 @@ from the model every time.
 Bump `kSchemaVersion` and add a `migrate_vN_to_vN+1` step to `src/core/io/Migrations.cpp`
 for every change older readers cannot handle. Files with a newer schema than the build
 supports are refused, never silently downgraded.
+
+### History
+
+- **2**: free ends became entities in `freeEnds.json`. In schema 1 a wire end held the free
+  end itself (`{ "type": "free", "kind", "label", "terminalPartNumber" }`), and its schematic
+  placement and layout node used the key `<wireId>/a` or `<wireId>/b`. The 1 to 2 migration
+  gives each such end an id, moves it to `freeEnds.json`, and rewrites the wire end, the
+  placement key and the layout `refId`.

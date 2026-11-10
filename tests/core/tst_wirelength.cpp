@@ -66,7 +66,7 @@ private slots:
     void freeEndKindPicksAllowance()
     {
         Harness h = sample();
-        std::get<FreeEnd>(h.wires[2].endB).kind = FreeEndKind::RingTerminal;
+        h.freeEnds[0].kind = FreeEndKind::RingTerminal;
         const WireLength l = wireLength(h, LayoutGraph(h), h.wires[2]);
         // base 80; ends 5 + 15 = 20; 100 * 1.05 = 105; cut 105.
         QCOMPARE(l.totalMm, 105.0);

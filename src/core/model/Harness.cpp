@@ -49,11 +49,6 @@ double unitsToMm(double value, Units units)
     Q_UNREACHABLE_RETURN(value);
 }
 
-QString freeEndPlacementKey(const QString &wireId, bool endB)
-{
-    return wireId + (endB ? QStringLiteral("/b") : QStringLiteral("/a"));
-}
-
 std::optional<Units> unitsFromSymbol(const QString &symbol)
 {
     for (Units units : {Units::Inches, Units::Millimeters, Units::Centimeters}) {

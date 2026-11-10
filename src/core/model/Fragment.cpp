@@ -6,7 +6,7 @@
 namespace tbh {
 
 Harness extractFragment(const Harness &harness, const QSet<QString> &connectorIds,
-                        const QSet<QString> &spliceIds)
+                        const QSet<QString> &spliceIds, const QSet<QString> &freeEndIds)
 {
     Harness fragment;
     fragment.info = harness.info;
@@ -27,23 +27,40 @@ Harness extractFragment(const Harness &harness, const QSet<QString> &connectorId
             copyPlacement(s.id);
         }
     }
-    // A wire comes along when every end is free or on a copied item, and at least one is not free.
-    auto inside = [&](const WireEnd &end) {
+    // Free ends come along when selected, or when one of their wires has its other end on a
+    // copied connector or splice (so copying a connector keeps its flying leads).
+    auto onCopiedItem = [&](const WireEnd &end) {
         if (const auto *pin = std::get_if<PinRef>(&end))
             return connectorIds.contains(pin->connectorId);
         if (const auto *splice = std::get_if<SpliceRef>(&end))
             return spliceIds.contains(splice->spliceId);
-        return true;
+        return false;
     };
-    auto isFree = [](const WireEnd &end) { return std::holds_alternative<FreeEnd>(end); };
+    QSet<QString> freeEnds = freeEndIds;
     for (const Wire &w : harness.wires) {
-        if (inside(w.endA) && inside(w.endB) && !(isFree(w.endA) && isFree(w.endB))) {
+        if (const auto *a = std::get_if<FreeEndRef>(&w.endA); a && onCopiedItem(w.endB))
+            freeEnds.insert(a->freeEndId);
+        if (const auto *b = std::get_if<FreeEndRef>(&w.endB); b && onCopiedItem(w.endA))
+            freeEnds.insert(b->freeEndId);
+    }
+    for (const FreeEnd &f : harness.freeEnds) {
+        if (freeEnds.contains(f.id)) {
+            fragment.freeEnds.push_back(f);
+            copyPlacement(f.id);
+        }
+    }
+    // A wire comes along when both ends are on copied items.
+    auto inside = [&](const WireEnd &end) {
+        if (const auto *free = std::get_if<FreeEndRef>(&end))
+            return freeEnds.contains(free->freeEndId);
+        return onCopiedItem(end);
+    };
+    for (const Wire &w : harness.wires) {
+        if (inside(w.endA) && inside(w.endB)) {
             Wire copy = w;
             copy.routeSegmentIds.clear();
             fragment.wires.push_back(copy);
             copyPlacement(w.id);
-            copyPlacement(freeEndPlacementKey(w.id, false));
-            copyPlacement(freeEndPlacementKey(w.id, true));
         }
     }
     return fragment;
@@ -51,7 +68,7 @@ Harness extractFragment(const Harness &harness, const QSet<QString> &connectorId
 
 void assignNewIds(Harness &fragment)
 {
-    QHash<QString, QString> connectorMap, pinMap, spliceMap;
+    QHash<QString, QString> connectorMap, pinMap, spliceMap, freeEndMap;
     std::map<QString, SchematicPlacement> placements;
     auto movePlacement = [&](const QString &oldKey, const QString &newKey) {
         const auto it = fragment.schematic.placements.find(oldKey);
@@ -77,19 +94,26 @@ void assignNewIds(Harness &fragment)
         spliceMap.insert(s.id, newSpliceId);
         s.id = newSpliceId;
     }
+    for (FreeEnd &f : fragment.freeEnds) {
+        const QString newFreeEndId = newId();
+        movePlacement(f.id, newFreeEndId);
+        freeEndMap.insert(f.id, newFreeEndId);
+        f.id = newFreeEndId;
+    }
     auto remapEnd = [&](WireEnd &end) {
         if (auto *pin = std::get_if<PinRef>(&end)) {
             pin->pinId = pinMap.value(pin->connectorId + QLatin1Char('/') + pin->pinId);
             pin->connectorId = connectorMap.value(pin->connectorId);
         } else if (auto *splice = std::get_if<SpliceRef>(&end)) {
             splice->spliceId = spliceMap.value(splice->spliceId);
+        } else {
+            auto &free = std::get<FreeEndRef>(end);
+            free.freeEndId = freeEndMap.value(free.freeEndId);
         }
     };
     for (Wire &w : fragment.wires) {
         const QString newWireId = newId();
         movePlacement(w.id, newWireId);
-        movePlacement(freeEndPlacementKey(w.id, false), freeEndPlacementKey(newWireId, false));
-        movePlacement(freeEndPlacementKey(w.id, true), freeEndPlacementKey(newWireId, true));
         w.id = newWireId;
         remapEnd(w.endA);
         remapEnd(w.endB);

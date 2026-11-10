@@ -17,6 +17,7 @@ class QPushButton;
 namespace tbh::app {
 
 class Document;
+class FreeEndEditor;
 class GaugeEditor;
 class WireColorCombo;
 
@@ -37,14 +38,11 @@ private:
     {
         QGroupBox *box = nullptr;
         QLabel *description = nullptr;
-        QComboBox *kind = nullptr;
-        QLineEdit *terminal = nullptr;
-        QLineEdit *label = nullptr;
+        FreeEndEditor *freeEnd = nullptr; // shown when the end is a free end
     };
 
-    EndEditor makeEndEditor(const QString &title, bool endB);
+    EndEditor makeEndEditor(const QString &title);
     void refreshEnd(EndEditor &editor, const Wire &wire, bool endB);
-    void commitEnd(bool endB);
     // Applies `change` to every selected wire as one undo step.
     void apply(const std::function<void(Wire &)> &change, const QString &undoText);
     void rememberStyle();
@@ -68,6 +66,27 @@ private:
     QLabel *m_overrideUnits;
     EndEditor m_endA;
     EndEditor m_endB;
+};
+
+// Kind, terminal P/N and label of one free end (flying lead, eyelet...). Used on its own
+// when a free end is selected, and inside WirePanel for a wire's free ends.
+class FreeEndEditor : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit FreeEndEditor(Document *document, QWidget *parent = nullptr);
+    void setFreeEnd(const QString &id);
+    void refresh();
+
+private:
+    void commit();
+
+    Document *m_document;
+    QString m_id;
+    QComboBox *m_kind;
+    QLineEdit *m_terminal;
+    QLineEdit *m_label;
 };
 
 class SplicePanel : public QWidget

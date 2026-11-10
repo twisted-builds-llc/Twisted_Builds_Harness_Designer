@@ -393,13 +393,19 @@ void MainWindow::createMenus()
                                         "drag a selected wire's end to re-attach it (V)"),
                                      [view] { view->setTool(SchematicView::Tool::Select); });
     QAction *wireTool = toolAction(view, schematicTools, tr("Wire"), QKeySequence(Qt::Key_W),
-                                   tr("Draw wires from pins or splices (W)"),
+                                   tr("Draw wires from pins, splices, flying leads or eyelets (W)"),
                                    [view] { view->setTool(SchematicView::Tool::Wire); });
     selectTool->setChecked(true);
     QAction *addConnector = toolAction(view, nullptr, tr("Add Connector"), QKeySequence(Qt::Key_C),
                                        tr("Add a connector (C)"), [view] { view->addConnector(); });
     QAction *addSplice = toolAction(view, nullptr, tr("Add Splice"), QKeySequence(Qt::Key_S),
                                     tr("Add a splice (S)"), [view] { view->addSplice(); });
+    QAction *addFlyingLead = toolAction(view, nullptr, tr("Add Flying Lead"), QKeySequence(Qt::Key_F),
+                                        tr("Add a flying lead; drag from its lead to wire it (F)"),
+                                        [view] { view->addFreeEnd(FreeEndKind::FlyingLead); });
+    QAction *addEyelet = toolAction(view, nullptr, tr("Add Eyelet"), QKeySequence(Qt::Key_E),
+                                    tr("Add an eyelet; drag from its lead to wire it (E)"),
+                                    [view] { view->addFreeEnd(FreeEndKind::Eyelet); });
     auto *layoutTools = new QActionGroup(this);
     QAction *layoutSelect = toolAction(layout, layoutTools, tr("Select"), QKeySequence(Qt::Key_V),
                                        tr("Select and move layout points; double-click a segment to "
@@ -415,7 +421,7 @@ void MainWindow::createMenus()
     place->addSection(tr("Schematic"));
     QAction *addSchematicNote = toolAction(view, nullptr, tr("Add Note"), QKeySequence(Qt::Key_N),
                                            tr("Add a text note to the schematic (N)"), [view] { view->addNote(); });
-    place->addActions({addConnector, addSplice, addSchematicNote, selectTool, wireTool});
+    place->addActions({addConnector, addSplice, addFlyingLead, addEyelet, addSchematicNote, selectTool, wireTool});
     place->addSection(tr("Layout"));
     QAction *addNote = toolAction(layout, nullptr, tr("Add Note"), QKeySequence(Qt::Key_N),
                                   tr("Add a text note to the layout (N)"), [layout] { layout->addNote(); });
@@ -522,7 +528,7 @@ void MainWindow::createMenus()
     schematicBar->setMovable(false);
     schematicBar->addActions({selectTool, wireTool});
     schematicBar->addSeparator();
-    schematicBar->addActions({addConnector, addSplice});
+    schematicBar->addActions({addConnector, addSplice, addFlyingLead, addEyelet});
     schematicBar->addSeparator();
     schematicBar->addAction(fit);
     schematicBar->addSeparator();
@@ -605,7 +611,7 @@ void MainWindow::showSelectionStatus()
 {
     const Selection &s = m_selection->selection();
     const Harness &h = m_document->model()->harness();
-    if (s.wires.size() == 1 && s.connectors.isEmpty() && s.splices.isEmpty()) {
+    if (s.wires.size() == 1 && s.connectors.isEmpty() && s.splices.isEmpty() && s.freeEnds.isEmpty()) {
         if (const Wire *w = m_document->model()->find<Wire>(*s.wires.begin())) {
             const WireLengthText length =
                 describeWireLength(h, *w, calc::wireLength(h, calc::LayoutGraph(h), *w));
@@ -614,7 +620,7 @@ void MainWindow::showSelectionStatus()
         }
     } else if (!s.isEmpty()) {
         statusBar()->showMessage(tr("%n item(s) selected", nullptr,
-                                    int(s.wires.size() + s.connectors.size() + s.splices.size()
+                                    int(s.wires.size() + s.connectors.size() + s.splices.size() + s.freeEnds.size()
                                         + s.layoutNodes.size() + s.layoutSegments.size()
                                         + s.notes.size())));
     } else {
@@ -744,6 +750,7 @@ void MainWindow::refreshProjectTree()
         new QTreeWidgetItem(connectors, {tr("%1 - %n pin(s)", nullptr, int(c.pins.size())).arg(c.label)});
     new QTreeWidgetItem(root, {tr("Wires (%1)").arg(h.wires.size())});
     new QTreeWidgetItem(root, {tr("Splices (%1)").arg(h.splices.size())});
+    new QTreeWidgetItem(root, {tr("Flying leads and eyelets (%1)").arg(h.freeEnds.size())});
     new QTreeWidgetItem(root, {tr("Layout: %1 node(s), %2 segment(s)")
                                    .arg(h.layoutNodes.size())
                                    .arg(h.layoutSegments.size())});

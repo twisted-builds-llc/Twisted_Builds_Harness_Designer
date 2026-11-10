@@ -55,6 +55,48 @@ std::vector<QString> wiresOnSplice(const Harness &harness, const QString &splice
     });
 }
 
+std::vector<QString> wiresOnFreeEnd(const Harness &harness, const QString &freeEndId)
+{
+    return wiresWhere(harness, [&](const WireEnd &end) {
+        const auto *free = std::get_if<FreeEndRef>(&end);
+        return free && free->freeEndId == freeEndId;
+    });
+}
+
+const FreeEnd *findFreeEnd(const Harness &harness, const QString &id)
+{
+    const auto it = std::find_if(harness.freeEnds.begin(), harness.freeEnds.end(),
+                                 [&](const FreeEnd &f) { return f.id == id; });
+    return it == harness.freeEnds.end() ? nullptr : &*it;
+}
+
+QString freeEndKindName(FreeEndKind kind)
+{
+    switch (kind) {
+    case FreeEndKind::FlyingLead:
+        return Tr::tr("Flying lead");
+    case FreeEndKind::Eyelet:
+        return Tr::tr("Eyelet");
+    case FreeEndKind::RingTerminal:
+        return Tr::tr("Ring terminal");
+    case FreeEndKind::Bare:
+        return Tr::tr("Bare end");
+    }
+    return {};
+}
+
+QString describeFreeEnd(const FreeEnd &end)
+{
+    const QString kind = freeEndKindName(end.kind);
+    return end.label.isEmpty() ? kind : QStringLiteral("%1 %2").arg(kind, end.label);
+}
+
+LayoutNodeType layoutNodeTypeFor(FreeEndKind kind)
+{
+    return kind == FreeEndKind::Eyelet || kind == FreeEndKind::RingTerminal ? LayoutNodeType::Eyelet
+                                                                            : LayoutNodeType::FlyingLead;
+}
+
 namespace {
 
 Pin *findPin(Harness &harness, const WireEnd &end)
@@ -176,23 +218,10 @@ QString describeWireEnd(const Harness &harness, const WireEnd &end)
         }
         return Tr::tr("(missing splice)");
     }
-    const auto &free = std::get<FreeEnd>(end);
-    QString kind;
-    switch (free.kind) {
-    case FreeEndKind::FlyingLead:
-        kind = Tr::tr("Flying lead");
-        break;
-    case FreeEndKind::Eyelet:
-        kind = Tr::tr("Eyelet");
-        break;
-    case FreeEndKind::RingTerminal:
-        kind = Tr::tr("Ring terminal");
-        break;
-    case FreeEndKind::Bare:
-        kind = Tr::tr("Bare end");
-        break;
-    }
-    return free.label.isEmpty() ? kind : QStringLiteral("%1 %2").arg(kind, free.label);
+    const auto &freeRef = std::get<FreeEndRef>(end);
+    if (const FreeEnd *free = findFreeEnd(harness, freeRef.freeEndId))
+        return describeFreeEnd(*free);
+    return Tr::tr("(missing free end)");
 }
 
 QString describeWire(const Harness &harness, const Wire &wire)
@@ -209,18 +238,21 @@ std::vector<LayoutRef> layoutRefs(const Harness &harness)
         refs.push_back({c.id, LayoutNodeType::Connector, c.label});
     for (const Splice &s : harness.splices)
         refs.push_back({s.id, LayoutNodeType::Splice, s.label});
-    for (const Wire &w : harness.wires) {
-        for (bool endB : {false, true}) {
-            const WireEnd &end = endB ? w.endB : w.endA;
-            const auto *free = std::get_if<FreeEnd>(&end);
-            if (!free)
-                continue;
-            const bool eyelet = free->kind == FreeEndKind::Eyelet || free->kind == FreeEndKind::RingTerminal;
-            const QString wireName = w.name.isEmpty() ? describeWireEnd(harness, endB ? w.endA : w.endB) : w.name;
-            refs.push_back({freeEndPlacementKey(w.id, endB),
-                            eyelet ? LayoutNodeType::Eyelet : LayoutNodeType::FlyingLead,
-                            QStringLiteral("%1 (%2)").arg(describeWireEnd(harness, end), wireName)});
+    for (const FreeEnd &f : harness.freeEnds) {
+        // Unlabeled ends are told apart by the first wire on them.
+        QString label = describeFreeEnd(f);
+        if (f.label.isEmpty()) {
+            for (const Wire &w : harness.wires) {
+                const auto *a = std::get_if<FreeEndRef>(&w.endA);
+                const auto *b = std::get_if<FreeEndRef>(&w.endB);
+                if ((a && a->freeEndId == f.id) || (b && b->freeEndId == f.id)) {
+                    const QString wireName = w.name.isEmpty() ? describeWireEnd(harness, a ? w.endB : w.endA) : w.name;
+                    label = QStringLiteral("%1 (%2)").arg(label, wireName);
+                    break;
+                }
+            }
         }
+        refs.push_back({f.id, layoutNodeTypeFor(f.kind), label});
     }
     return refs;
 }

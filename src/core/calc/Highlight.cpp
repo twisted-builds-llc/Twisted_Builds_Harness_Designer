@@ -14,6 +14,7 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
     set.connectors = seed.connectors;
     set.pins = seed.pins;
     set.splices = seed.splices;
+    set.freeEnds = seed.freeEnds;
     set.wires = seed.wires;
     set.layoutNodes = seed.layoutNodes;
     set.layoutSegments = seed.layoutSegments;
@@ -51,7 +52,7 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
         }
         if (const auto *splice = std::get_if<SpliceRef>(&end))
             return seed.splices.contains(splice->spliceId);
-        return false;
+        return seed.freeEnds.contains(std::get<FreeEndRef>(end).freeEndId);
     };
 
     QHash<QString, QString> nodeByRef;
@@ -89,7 +90,7 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
             } else if (const auto *splice = std::get_if<SpliceRef>(&end)) {
                 set.splices.insert(splice->spliceId);
             } else {
-                set.freeEnds.insert(freeEndPlacementKey(w.id, endB));
+                set.freeEnds.insert(std::get<FreeEndRef>(end).freeEndId);
             }
             const QString node = nodeByRef.value(endKey(w, endB));
             if (!node.isEmpty())

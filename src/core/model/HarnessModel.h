@@ -7,7 +7,7 @@
 
 namespace tbh {
 
-enum class EntityKind { Connector, Wire, Splice, LayoutNode, LayoutSegment, Note, BomExtra };
+enum class EntityKind { Connector, Wire, Splice, FreeEnd, LayoutNode, LayoutSegment, Note, BomExtra };
 
 template<typename T>
 constexpr EntityKind entityKindOf();
@@ -17,6 +17,8 @@ template<>
 constexpr EntityKind entityKindOf<Wire>() { return EntityKind::Wire; }
 template<>
 constexpr EntityKind entityKindOf<Splice>() { return EntityKind::Splice; }
+template<>
+constexpr EntityKind entityKindOf<FreeEnd>() { return EntityKind::FreeEnd; }
 template<>
 constexpr EntityKind entityKindOf<LayoutNode>() { return EntityKind::LayoutNode; }
 template<>
@@ -51,7 +53,7 @@ public:
     void setInfo(const HarnessInfo &info);
     void setSettings(const Settings &settings);
 
-    // T is Connector, Wire, Splice, LayoutNode, LayoutSegment, Note or BomExtra.
+    // T is Connector, Wire, Splice, FreeEnd, LayoutNode, LayoutSegment, Note or BomExtra.
     template<typename T>
     const T *find(const QString &id) const;
     template<typename T>
@@ -66,8 +68,8 @@ public:
     template<typename T>
     void remove(const QString &id);
 
-    // Schematic placement keys owned by an entity: connector/splice id; wire id (route) and
-    // wire free-end keys; none for layout entities (their position is part of the entity).
+    // Schematic placement keys owned by an entity: connector/splice/free end id; wire id
+    // (route); none for layout entities (their position is part of the entity).
     static std::vector<QString> placementKeys(EntityKind kind, const QString &id);
 
     const SchematicPlacement *placement(const QString &key) const;

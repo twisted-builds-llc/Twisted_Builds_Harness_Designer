@@ -32,16 +32,19 @@ QString endKey(const Wire &wire, bool endB)
         return pin->connectorId;
     if (const auto *splice = std::get_if<SpliceRef>(&end))
         return splice->spliceId;
-    return freeEndPlacementKey(wire.id, endB);
+    return std::get<FreeEndRef>(end).freeEndId;
 }
 
-EndType endType(const WireEnd &end)
+EndType endType(const Harness &harness, const WireEnd &end)
 {
     if (std::holds_alternative<PinRef>(end))
         return EndType::Pin;
     if (std::holds_alternative<SpliceRef>(end))
         return EndType::Splice;
-    switch (std::get<FreeEnd>(end).kind) {
+    const FreeEnd *free = findFreeEnd(harness, std::get<FreeEndRef>(end).freeEndId);
+    if (!free)
+        return EndType::FlyingLead;
+    switch (free->kind) {
     case FreeEndKind::FlyingLead:
         return EndType::FlyingLead;
     case FreeEndKind::Eyelet:
@@ -163,7 +166,7 @@ WireLength wireLength(const Harness &harness, const LayoutGraph &graph, const Wi
     if (route.status == RouteStatus::Ok) {
         const Settings &s = harness.settings;
         auto allowance = [&](const WireEnd &end) {
-            const auto it = s.stripAllowanceMm.find(endType(end));
+            const auto it = s.stripAllowanceMm.find(endType(harness, end));
             return it == s.stripAllowanceMm.end() ? 0.0 : it->second;
         };
         for (const QString &id : route.segmentIds)

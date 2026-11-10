@@ -20,10 +20,10 @@ class SelectionModel;
 //
 // Mouse: drag a connector by its header; drag from a pin row or its lead (the short dash
 // on either side) to draw a wire (drop on a pin, a splice, or empty space for a flying
-// lead); drag a splice's lead to start a wire from it; drag a wire sideways to move its
+// lead); drag a splice's or free end's lead to start a wire from it; drag a wire sideways to move its
 // vertical run (keeps parallel wires apart); double-click text to edit it;
 // wheel zooms (over a scrolling connector it scrolls rows; Ctrl+wheel always zooms);
-// middle-drag pans. The Wire tool also starts wires from anywhere on a splice.
+// middle-drag pans. The Wire tool also starts wires from anywhere on a splice or free end.
 class SchematicView : public CanvasView
 {
     Q_OBJECT
@@ -41,6 +41,8 @@ public:
 
     void addConnector();
     void addSplice();
+    // Adds a free end (flying lead, eyelet...) at the view center, ready to be wired.
+    void addFreeEnd(FreeEndKind kind);
     // Opens a text editor at the view center; typing text and pressing Enter adds a note.
     void addNote();
     // Edits a note's text in place; clearing the text deletes the note.
@@ -77,6 +79,7 @@ private:
         ConnectorItem *connector = nullptr;
         int row = -1;
         SpliceItem *splice = nullptr;
+        FreeEndItem *freeEnd = nullptr;
     };
 
     DropTarget targetAt(const QPointF &scenePos) const;
@@ -87,14 +90,15 @@ private:
     void updateWirePreview(const QPointF &scenePos);
     void finishWire(const QPointF &scenePos);
     void cancelWire();
+    // A new wire from `start` in the current default wire style.
+    Wire newWire(const WireEnd &start) const;
     Anchor startAnchor(const QPointF &towards) const;
 
     // Re-attach: end of the single selected wire under `viewPos` (pin or splice end).
     std::optional<bool> selectedWireEndAt(const QPoint &viewPos) const;
     void finishReattach(const QPointF &scenePos);
-    // A free end being dragged (single selection), or empty.
-    QString draggedFreeEnd() const;
-    bool dropFreeEnd(const QPointF &scenePos);
+    // Pushes a new free end of `kind` at `scenePos` (snapped) and returns a reference to it.
+    FreeEndRef addFreeEndAt(FreeEndKind kind, const QPointF &scenePos);
 
     void finishRouteDrag();
     void cancelRouteDrag();
@@ -127,6 +131,7 @@ private:
     QGraphicsPathItem *m_preview = nullptr;
     ConnectorItem *m_hoverConnector = nullptr;
     SpliceItem *m_hoverSplice = nullptr;
+    FreeEndItem *m_hoverFreeEnd = nullptr;
     // Re-attaching an existing wire end.
     QString m_reattachWire;
     bool m_reattachEndB = false;

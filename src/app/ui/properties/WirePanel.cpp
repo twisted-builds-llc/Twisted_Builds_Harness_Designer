@@ -91,8 +91,8 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     form->addRow(m_lengthDetail);
     form->addRow(tr("Length override:"), row(m_lengthOverride, m_overrideUnits));
 
-    m_endA = makeEndEditor(tr("End A"), false);
-    m_endB = makeEndEditor(tr("End B"), true);
+    m_endA = makeEndEditor(tr("End A"));
+    m_endB = makeEndEditor(tr("End B"));
 
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);
@@ -155,7 +155,7 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
 
     HarnessModel *model = document->model();
     connect(model, &HarnessModel::entityChanged, this, [this](EntityKind kind, const QString &id) {
-        if (kind == EntityKind::Wire && m_ids.contains(id))
+        if ((kind == EntityKind::Wire && m_ids.contains(id)) || kind == EntityKind::FreeEnd)
             refresh();
     });
     connect(model, &HarnessModel::infoChanged, this, &WirePanel::refresh);
@@ -193,27 +193,16 @@ void WirePanel::refreshLength(const std::vector<Wire> &wires)
                                     : QString());
 }
 
-WirePanel::EndEditor WirePanel::makeEndEditor(const QString &title, bool endB)
+WirePanel::EndEditor WirePanel::makeEndEditor(const QString &title)
 {
     EndEditor e;
     e.box = new QGroupBox(title, this);
     e.description = new QLabel(e.box);
     e.description->setWordWrap(true);
-    e.kind = new QComboBox(e.box);
-    e.kind->addItem(tr("Flying lead"), int(FreeEndKind::FlyingLead));
-    e.kind->addItem(tr("Eyelet"), int(FreeEndKind::Eyelet));
-    e.kind->addItem(tr("Ring terminal"), int(FreeEndKind::RingTerminal));
-    e.kind->addItem(tr("Bare end"), int(FreeEndKind::Bare));
-    e.terminal = new QLineEdit(e.box);
-    e.label = new QLineEdit(e.box);
-    auto *form = new QFormLayout(e.box);
-    form->addRow(e.description);
-    form->addRow(tr("End type:"), e.kind);
-    form->addRow(tr("Terminal P/N:"), e.terminal);
-    form->addRow(tr("Label:"), e.label);
-    connect(e.kind, &QComboBox::activated, this, [this, endB] { commitEnd(endB); });
-    connect(e.terminal, &QLineEdit::editingFinished, this, [this, endB] { commitEnd(endB); });
-    connect(e.label, &QLineEdit::editingFinished, this, [this, endB] { commitEnd(endB); });
+    e.freeEnd = new FreeEndEditor(m_document, e.box);
+    auto *layout = new QVBoxLayout(e.box);
+    layout->addWidget(e.description);
+    layout->addWidget(e.freeEnd);
     return e;
 }
 
@@ -312,31 +301,11 @@ void WirePanel::refresh()
 void WirePanel::refreshEnd(EndEditor &e, const Wire &wire, bool endB)
 {
     const WireEnd &end = endB ? wire.endB : wire.endA;
-    const auto *free = std::get_if<FreeEnd>(&end);
-    const QSignalBlocker b1(e.kind), b2(e.terminal), b3(e.label);
+    const auto *free = std::get_if<FreeEndRef>(&end);
     e.description->setText(describeWireEnd(m_document->model()->harness(), end));
-    auto *form = static_cast<QFormLayout *>(e.box->layout());
-    for (QWidget *w : {static_cast<QWidget *>(e.kind), static_cast<QWidget *>(e.terminal),
-                       static_cast<QWidget *>(e.label)})
-        form->setRowVisible(w, free != nullptr);
-    if (free) {
-        e.kind->setCurrentIndex(e.kind->findData(int(free->kind)));
-        e.terminal->setText(free->terminalPartNumber);
-        e.label->setText(free->label);
-    }
-}
-
-void WirePanel::commitEnd(bool endB)
-{
-    const EndEditor &e = endB ? m_endB : m_endA;
-    const FreeEnd value{FreeEndKind(e.kind->currentData().toInt()), e.terminal->text(), e.label->text()};
-    apply(
-        [&](Wire &w) {
-            WireEnd &end = endB ? w.endB : w.endA;
-            if (std::holds_alternative<FreeEnd>(end))
-                end = value;
-        },
-        tr("Edit wire end"));
+    e.freeEnd->setVisible(free != nullptr);
+    if (free)
+        e.freeEnd->setFreeEnd(free->freeEndId);
 }
 
 void WirePanel::apply(const std::function<void(Wire &)> &change, const QString &undoText)
@@ -356,6 +325,63 @@ void WirePanel::rememberStyle()
         return;
     const Wire &w = wires.front();
     m_document->setWireStyle({w.baseColor, w.stripeColor, w.gauge, w.wireTypeId});
+}
+
+// ---- FreeEndEditor -----------------------------------------------------------------
+
+FreeEndEditor::FreeEndEditor(Document *document, QWidget *parent)
+    : QWidget(parent)
+    , m_document(document)
+    , m_kind(new QComboBox(this))
+    , m_terminal(new QLineEdit(this))
+    , m_label(new QLineEdit(this))
+{
+    m_kind->addItem(tr("Flying lead"), int(FreeEndKind::FlyingLead));
+    m_kind->addItem(tr("Eyelet"), int(FreeEndKind::Eyelet));
+    m_kind->addItem(tr("Ring terminal"), int(FreeEndKind::RingTerminal));
+    m_kind->addItem(tr("Bare end"), int(FreeEndKind::Bare));
+    auto *form = new QFormLayout(this);
+    form->setContentsMargins(0, 0, 0, 0);
+    form->addRow(tr("End type:"), m_kind);
+    form->addRow(tr("Terminal P/N:"), m_terminal);
+    form->addRow(tr("Label:"), m_label);
+    connect(m_kind, &QComboBox::activated, this, &FreeEndEditor::commit);
+    connect(m_terminal, &QLineEdit::editingFinished, this, &FreeEndEditor::commit);
+    connect(m_label, &QLineEdit::editingFinished, this, &FreeEndEditor::commit);
+    connect(document->model(), &HarnessModel::entityChanged, this, [this](EntityKind kind, const QString &id) {
+        if (kind == EntityKind::FreeEnd && id == m_id)
+            refresh();
+    });
+}
+
+void FreeEndEditor::setFreeEnd(const QString &id)
+{
+    m_id = id;
+    refresh();
+}
+
+void FreeEndEditor::refresh()
+{
+    const FreeEnd *f = m_document->model()->find<FreeEnd>(m_id);
+    if (!f)
+        return;
+    const QSignalBlocker b1(m_kind), b2(m_terminal), b3(m_label);
+    m_kind->setCurrentIndex(m_kind->findData(int(f->kind)));
+    m_terminal->setText(f->terminalPartNumber);
+    m_label->setText(f->label);
+}
+
+void FreeEndEditor::commit()
+{
+    const FreeEnd *current = m_document->model()->find<FreeEnd>(m_id);
+    if (!current)
+        return;
+    FreeEnd updated = *current;
+    updated.kind = FreeEndKind(m_kind->currentData().toInt());
+    updated.terminalPartNumber = m_terminal->text();
+    updated.label = m_label->text();
+    if (auto command = updateFreeEnd(m_document->model(), updated, tr("Edit free end")))
+        m_document->undoStack()->push(command.release());
 }
 
 // ---- SplicePanel -------------------------------------------------------------------

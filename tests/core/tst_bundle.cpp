@@ -193,7 +193,7 @@ private slots:
         HighlightSeed wireSeed;
         wireSeed.wires = {u"w3"_s};
         const HighlightSet w = relatedItems(h, g, wireSeed);
-        QCOMPARE(w.freeEnds, (QSet<QString>{freeEndPlacementKey(u"w3"_s, true)}));
+        QCOMPARE(w.freeEnds, (QSet<QString>{u"fl"_s}));
         QCOMPARE(w.layoutSegments, (QSet<QString>{u"seg4"_s}));
         QCOMPARE(w.layoutNodes, (QSet<QString>{u"n4"_s, u"n5"_s}));
 

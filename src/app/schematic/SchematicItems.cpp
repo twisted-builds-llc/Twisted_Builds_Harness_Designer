@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "schematic/SchematicItems.h"
 
+#include "model/Queries.h"
 #include "schematic/SchematicScene.h"
 #include "ui/WireColors.h"
 
@@ -486,30 +487,56 @@ void SpliceItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWid
 
 // ---- FreeEndItem --------------------------------------------------------------
 
-FreeEndItem::FreeEndItem(const QString &wireId, bool endB, const FreeEnd &end)
-    : PlacedItem(freeEndPlacementKey(wireId, endB))
-    , m_wireId(wireId)
-    , m_endB(endB)
+FreeEndItem::FreeEndItem(const FreeEnd &end)
+    : PlacedItem(end.id)
     , m_end(end)
 {
     setZValue(2);
 }
 
-void FreeEndItem::setEnd(const FreeEnd &end)
+void FreeEndItem::setFreeEnd(const FreeEnd &end)
 {
     m_end = end;
     update();
 }
 
+void FreeEndItem::setHighlighted(bool on)
+{
+    if (on == m_highlighted)
+        return;
+    m_highlighted = on;
+    update();
+}
+
+Anchor FreeEndItem::anchor(const QPointF &towards) const
+{
+    const bool right = mapFromScene(towards).x() >= 0;
+    const qreal x = kHalfWidth + kStubLength;
+    return {mapToScene(QPointF(right ? x : -x, 0)), right ? 1 : -1};
+}
+
+QRectF FreeEndItem::stubRect(bool right)
+{
+    return right ? QRectF(kHalfWidth, -5, kStubLength, 10) : QRectF(-kHalfWidth - kStubLength, -5, kStubLength, 10);
+}
+
+bool FreeEndItem::isStubAt(const QPointF &itemPos) const
+{
+    return stubRect(false).contains(itemPos) || stubRect(true).contains(itemPos);
+}
+
 QRectF FreeEndItem::boundingRect() const
 {
-    return QRectF(-12, -12, 140, 24);
+    return QRectF(-60, -30, 120, 30 + kHalfWidth + 4);
 }
 
 QPainterPath FreeEndItem::shape() const
 {
     QPainterPath path;
-    path.addEllipse(QPointF(0, 0), 10, 10);
+    path.addRect(QRectF(-kHalfWidth - 2, -kHalfWidth - 2, 2 * kHalfWidth + 4, 2 * kHalfWidth + 4));
+    path.addRect(QRectF(-40, -28, 80, 16)); // label
+    path.addRect(stubRect(false));
+    path.addRect(stubRect(true));
     return path;
 }
 
@@ -517,36 +544,60 @@ void FreeEndItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWi
 {
     const QPalette pal = paletteOf(this);
     const QColor text = pal.color(QPalette::Text);
-    if (isSelected()) {
+    const QColor copper(0xc8, 0x75, 0x33);
+    painter->setRenderHint(QPainter::Antialiasing);
+    if (isSelected() || m_highlighted) {
         painter->setPen(Qt::NoPen);
         painter->setBrush(pal.color(QPalette::Highlight));
-        painter->drawEllipse(QPointF(0, 0), 10, 10);
+        painter->drawRoundedRect(QRectF(-kHalfWidth - 3, -kHalfWidth - 3, 2 * kHalfWidth + 6, 2 * kHalfWidth + 6), 4, 4);
     }
-    painter->setPen(QPen(text, 2));
-    painter->setBrush(Qt::NoBrush);
+    // Leads on both sides: drag handles for drawing a wire.
+    painter->setPen(QPen(m_highlighted ? pal.color(QPalette::Highlight) : text, 2, Qt::SolidLine, Qt::FlatCap));
+    for (bool right : {false, true}) {
+        const QRectF r = stubRect(right);
+        painter->drawLine(QPointF(r.left(), 0), QPointF(r.right(), 0));
+    }
+
+    // The symbol, about 2 * kHalfWidth wide: insulation on the left, then what ends the wire.
+    const QRectF barrel(-kHalfWidth, -3.5, 9, 7);
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(text);
     switch (m_end.kind) {
     case FreeEndKind::FlyingLead:
-        painter->drawLine(QPointF(-5, -5), QPointF(5, 5));
-        painter->drawLine(QPointF(-5, 5), QPointF(5, -5));
-        break;
-    case FreeEndKind::RingTerminal:
-        painter->drawEllipse(QPointF(0, 0), 7, 7);
-        painter->drawEllipse(QPointF(0, 0), 2.5, 2.5);
-        break;
-    case FreeEndKind::Eyelet:
-        painter->drawEllipse(QPointF(0, 0), 5, 5);
+        // Insulated wire with its strands fanned out.
+        painter->drawRoundedRect(QRectF(-kHalfWidth, -4, 14, 8), 2, 2);
+        painter->setPen(QPen(copper, 1.5, Qt::SolidLine, Qt::RoundCap));
+        for (qreal y : {-5.0, 0.0, 5.0})
+            painter->drawLine(QPointF(2, y * 0.4), QPointF(kHalfWidth, y));
         break;
     case FreeEndKind::Bare:
-        painter->drawLine(QPointF(0, -6), QPointF(0, 6));
+        // Insulation stops; one stripped conductor.
+        painter->drawRoundedRect(QRectF(-kHalfWidth, -4, 12, 8), 2, 2);
+        painter->setPen(QPen(copper, 3, Qt::SolidLine, Qt::FlatCap));
+        painter->drawLine(QPointF(0, 0), QPointF(kHalfWidth, 0));
+        break;
+    case FreeEndKind::RingTerminal:
+        // Crimp barrel, then the ring.
+        painter->drawRect(barrel);
+        painter->setPen(QPen(text, 2.5));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(QPointF(kHalfWidth - 6.5, 0), 5.5, 5.5);
+        break;
+    case FreeEndKind::Eyelet:
+        // A washer-like ring with its hole.
+        painter->setPen(QPen(text, 3.5));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawEllipse(QPointF(0, 0), 7.5, 7.5);
         break;
     }
-    if (!m_end.label.isEmpty()) {
-        QFont font = painter->font();
-        font.setPixelSize(11);
-        painter->setFont(font);
-        painter->setPen(text);
-        painter->drawText(QRectF(12, -10, 116, 20), Qt::AlignLeft | Qt::AlignVCenter, m_end.label);
-    }
+
+    QFont font = painter->font();
+    font.setPixelSize(11);
+    font.setBold(true);
+    painter->setFont(font);
+    painter->setPen(text);
+    painter->drawText(QRectF(-60, -30, 120, 16), Qt::AlignCenter,
+                      m_end.label.isEmpty() ? freeEndKindName(m_end.kind) : m_end.label);
 }
 
 // ---- WireItem -----------------------------------------------------------------
