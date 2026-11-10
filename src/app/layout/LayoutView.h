@@ -51,6 +51,10 @@ public:
     void deleteSelection();
     void selectAll();
     void editSegmentLength(const QString &segmentId);
+    // A splice drawn as a stub off a point on a loom goes inside that loom, `distanceMm`
+    // from the point (loomPositionForStub()); the stub is removed. One undo step. False,
+    // with nothing changed, when the stub does not qualify.
+    bool placeSpliceAlongLoom(const QString &stubId, double distanceMm);
     // For a splice inside a bundle (on exactly two segments): types its distance from the
     // far end of its first segment; the bundle's total length stays the same.
     void editPositionAlongRun(const QString &nodeId);
@@ -86,8 +90,11 @@ private:
     void finishSegment(const QPoint &viewPos);
     void cancelSegment();
     void commitMoves();
-    // Segment under a lone splice node just dropped at `nodeId`'s position, or empty.
-    QString segmentUnderLoneSplice(const QString &nodeId) const;
+    // Segment under a splice node just dropped at `nodeId`'s position, or empty. The splice
+    // has no segments, or one stub segment (returned in `stubId`) whose other end is also an
+    // end of the returned segment, e.g. a splice drawn 2 in off the ECU dropped onto the
+    // ECU's bundle.
+    QString segmentUnderSplice(const QString &nodeId, QString *stubId) const;
 
     Document *m_document;
     SelectionModel *m_selection;

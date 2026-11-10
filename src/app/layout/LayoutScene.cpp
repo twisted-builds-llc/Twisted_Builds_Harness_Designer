@@ -205,8 +205,13 @@ void LayoutScene::refreshCaptions()
     QHash<QString, QString> labels;
     for (const LayoutRef &ref : layoutRefs(h))
         labels.insert(ref.refId, ref.label);
-    for (LayoutNodeItem *item : std::as_const(m_nodes))
-        item->setNode(item->node(), labels.value(item->node().refId));
+    for (LayoutNodeItem *item : std::as_const(m_nodes)) {
+        // Splices side by side at one point show together, e.g. "S1, S2".
+        QStringList names{labels.value(item->node().refId)};
+        for (const QString &id : item->node().sharedSpliceIds)
+            names.append(labels.value(id));
+        item->setNode(item->node(), names.join(tr(", ")));
+    }
 
     const calc::LayoutGraph graph(h);
     const auto usage = calc::wiresBySegment(h, graph);

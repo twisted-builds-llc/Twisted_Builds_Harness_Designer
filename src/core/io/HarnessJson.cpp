@@ -351,6 +351,12 @@ LayoutNode readLayoutNode(ObjectReader r)
     n.id = r.id();
     n.type = r.enumValue("type", kLayoutNodeTypes, LayoutNodeType::Branch);
     n.refId = r.string("refId");
+    const QJsonArray shared = r.array("sharedSpliceIds");
+    for (qsizetype i = 0; i < shared.size(); ++i) {
+        if (!shared[i].isString())
+            fail(Tr::tr("%1 must be a string.").arg(indexed(r.context() + QStringLiteral(".sharedSpliceIds"), i)));
+        n.sharedSpliceIds.push_back(shared[i].toString());
+    }
     ObjectReader pos(r.object("position"), r.context() + QStringLiteral(".position"));
     n.position = QPointF(pos.number("x", 0.0), pos.number("y", 0.0));
     n.extra = r.extra();
@@ -487,6 +493,15 @@ void checkIntegrity(const Harness &h)
     }
     QSet<QString> referenced;
     for (const LayoutNode &n : h.layoutNodes) {
+        if (!n.sharedSpliceIds.empty() && (n.type != LayoutNodeType::Splice || n.refId.isEmpty()))
+            fail(Tr::tr("Layout node \"%1\" shares splices but holds no splice itself.").arg(n.id));
+        for (const QString &id : n.sharedSpliceIds) {
+            if (!splices.contains(id))
+                fail(Tr::tr("Layout node \"%1\" references missing item \"%2\".").arg(n.id, id));
+            if (referenced.contains(id))
+                fail(Tr::tr("More than one layout node references \"%1\".").arg(id));
+            referenced.insert(id);
+        }
         if (n.refId.isEmpty())
             continue;
         bool ok = false;
@@ -611,6 +626,12 @@ QJsonObject writeLayoutNode(const LayoutNode &n)
     o[u"id"] = n.id;
     o[u"type"] = enumToString(kLayoutNodeTypes, n.type);
     o[u"refId"] = n.refId;
+    if (!n.sharedSpliceIds.empty()) {
+        QJsonArray shared;
+        for (const QString &id : n.sharedSpliceIds)
+            shared.append(id);
+        o[u"sharedSpliceIds"] = shared;
+    }
     o[u"position"] = QJsonObject{{u"x"_s, n.position.x()}, {u"y"_s, n.position.y()}};
     return o;
 }

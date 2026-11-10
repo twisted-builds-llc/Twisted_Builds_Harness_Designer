@@ -211,6 +211,12 @@ void LayoutView::editSegmentLength(const QString &segmentId)
                      emit statusMessage(tr("\"%1\" is not a length in %2.").arg(value, unitsSymbol(units)));
                      return;
                  }
+                 // A length typed on a splice's stub off a loom puts the splice in the loom.
+                 if (placeSpliceAlongLoom(segmentId, *mm))
+                     return;
+                 if (!spliceOfStub(model->harness(), segmentId).isEmpty())
+                     emit statusMessage(tr("The splice stays on its own branch: it goes inside the loom only from "
+                                           "a point with one loom, at a distance inside it."));
                  LayoutSegment updated = *current;
                  // Keep the stored value if the shown (rounded) text was not changed.
                  if (value == formatLength(current->lengthMm, units, false))
@@ -219,6 +225,55 @@ void LayoutView::editSegmentLength(const QString &segmentId)
                  m_document->undoStack()->push(
                      new UpdateEntityCommand<LayoutSegment>(model, updated, tr("Set segment length")));
              });
+}
+
+bool LayoutView::placeSpliceAlongLoom(const QString &stubId, double distanceMm)
+{
+    HarnessModel *model = m_document->model();
+    const auto position = loomPositionForStub(model->harness(), stubId, distanceMm);
+    const LayoutSegment *stub = model->find<LayoutSegment>(stubId);
+    if (!position || !stub)
+        return false;
+    const QString spliceNodeId = spliceOfStub(model->harness(), stubId);
+    if (!position->atNodeId.isEmpty()) {
+        // Side by side with the splices already at that point: this splice's own point and
+        // stub go away, and the point holds its splice too.
+        const LayoutNode *spliceNode = model->find<LayoutNode>(spliceNodeId);
+        LayoutNode joined = *model->find<LayoutNode>(position->atNodeId);
+        joined.sharedSpliceIds.push_back(spliceNode->refId);
+        joined.sharedSpliceIds.insert(joined.sharedSpliceIds.end(), spliceNode->sharedSpliceIds.begin(),
+                                      spliceNode->sharedSpliceIds.end());
+        QUndoStack *stack = m_document->undoStack();
+        stack->beginMacro(tr("Place splice in loom"));
+        stack->push(removeLayoutItems(model, {spliceNodeId}, {stubId}, {}).release());
+        stack->push(new UpdateEntityCommand<LayoutNode>(model, joined, {}));
+        stack->endMacro();
+        return true;
+    }
+    const LayoutSegment *loom = model->find<LayoutSegment>(position->segmentId);
+    LayoutSegmentItem *loomItem = m_scene->segmentItem(position->segmentId);
+    if (!loom || !loomItem)
+        return false;
+    // The drawing is not to scale: keep the splice clear of the loom's ends.
+    const double fromA = position->fromNodeA ? position->offsetMm / loom->lengthMm
+                                             : 1 - position->offsetMm / loom->lengthMm;
+    const SegmentSplit split = splitAt(loomItem->endA(), loomItem->endB(), loom->bend, std::clamp(fromA, 0.2, 0.8));
+    const QString loomId = loom->id;
+    const bool fromNodeA = position->fromNodeA;
+    const double offsetMm = position->offsetMm;
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(tr("Place splice in loom"));
+    LayoutNode moved = *model->find<LayoutNode>(spliceNodeId);
+    moved.position = split.point;
+    stack->push(new UpdateEntityCommand<LayoutNode>(model, moved, {}));
+    stack->push(removeLayoutItems(model, {}, {stubId}, {}).release());
+    QString newSegmentId;
+    stack->push(splitSegmentAt(model, loomId, spliceNodeId, split.fraction, split.bendA, split.bendB, &newSegmentId)
+                    .release());
+    if (auto distance = setDistanceAlongRun(model, spliceNodeId, fromNodeA ? loomId : newSegmentId, offsetMm))
+        stack->push(distance.release());
+    stack->endMacro();
+    return true;
 }
 
 LayoutSegmentItem *LayoutView::bendHandleAt(const QPoint &viewPos) const
@@ -423,21 +478,43 @@ void LayoutView::commitMoves()
     }
     QUndoStack *stack = m_document->undoStack();
     if (joins.empty() && moved.size() == 1) {
-        // A lone splice dropped onto a bundle goes inside it.
+        // A splice dropped onto a bundle goes inside it. A stub it was drawn on is replaced:
+        // the stub's length becomes the splice's distance along the bundle from the same end.
         const QString id = *moved.begin();
-        const QString segmentId = segmentUnderLoneSplice(id);
+        QString stubId;
+        const QString segmentId = segmentUnderSplice(id, &stubId);
         if (!segmentId.isEmpty()) {
             LayoutSegmentItem *segmentItem = m_scene->segmentItem(segmentId);
             const SegmentSplit split = splitNear(segmentItem->endA(), segmentItem->endB(),
                                                  segmentItem->segment().bend, m_scene->nodeItem(id)->pos());
+            const bool fromNodeA = [&] {
+                if (stubId.isEmpty())
+                    return true;
+                const LayoutSegment *stub = model->find<LayoutSegment>(stubId);
+                const QString far = stub->nodeA == id ? stub->nodeB : stub->nodeA;
+                return far == model->find<LayoutSegment>(segmentId)->nodeA;
+            }();
+            const double stubLengthMm = stubId.isEmpty() ? 0 : model->find<LayoutSegment>(stubId)->lengthMm;
             stack->beginMacro(tr("Place splice in bundle"));
             stack->push(macro.release());
             LayoutNode updated = *model->find<LayoutNode>(id);
             updated.position = split.point; // onto the line itself
             stack->push(new UpdateEntityCommand<LayoutNode>(model, updated, {}));
-            stack->push(splitSegmentAt(model, segmentId, id, split.fraction, split.bendA, split.bendB).release());
+            if (!stubId.isEmpty())
+                stack->push(removeLayoutItems(model, {}, {stubId}, {}).release());
+            QString newSegmentId;
+            stack->push(splitSegmentAt(model, segmentId, id, split.fraction, split.bendA, split.bendB,
+                                       &newSegmentId).release());
+            bool placed = false;
+            if (stubLengthMm > 0) {
+                const QString fromId = fromNodeA ? segmentId : newSegmentId;
+                if (auto distance = setDistanceAlongRun(model, id, fromId, stubLengthMm))
+                    stack->push(distance.release());
+                placed = model->find<LayoutSegment>(fromId)->lengthMm == stubLengthMm;
+            }
             stack->endMacro();
-            QTimer::singleShot(0, this, [this, id] { editPositionAlongRun(id); });
+            if (!placed)
+                QTimer::singleShot(0, this, [this, id] { editPositionAlongRun(id); });
             return;
         }
     }
@@ -454,20 +531,36 @@ void LayoutView::commitMoves()
     stack->endMacro();
 }
 
-QString LayoutView::segmentUnderLoneSplice(const QString &nodeId) const
+QString LayoutView::segmentUnderSplice(const QString &nodeId, QString *stubId) const
 {
     const Harness &h = m_document->model()->harness();
     const LayoutNode *node = m_document->model()->find<LayoutNode>(nodeId);
     LayoutNodeItem *item = m_scene->nodeItem(nodeId);
     if (!node || !item || node->type != LayoutNodeType::Splice)
         return {};
-    if (std::any_of(h.layoutSegments.begin(), h.layoutSegments.end(),
-                    [&](const LayoutSegment &s) { return s.nodeA == nodeId || s.nodeB == nodeId; }))
-        return {};
+    const LayoutSegment *stub = nullptr;
+    for (const LayoutSegment &s : h.layoutSegments) {
+        if (s.nodeA != nodeId && s.nodeB != nodeId)
+            continue;
+        if (stub)
+            return {}; // already inside a run, or a branch of its own
+        stub = &s;
+    }
+    const QString stubFar = stub ? (stub->nodeA == nodeId ? stub->nodeB : stub->nodeA) : QString();
     // The bundle's own shape (line plus caption) under the splice's center.
     for (QGraphicsItem *under : m_scene->items(item->pos())) {
-        if (under->type() == LayoutSegmentItemType)
-            return static_cast<LayoutSegmentItem *>(under)->id();
+        if (under->type() != LayoutSegmentItemType)
+            continue;
+        const auto *segmentItem = static_cast<LayoutSegmentItem *>(under);
+        if (!stub)
+            return segmentItem->id();
+        if (segmentItem->id() == stub->id)
+            continue;
+        const LayoutSegment &target = segmentItem->segment();
+        if (target.nodeA != stubFar && target.nodeB != stubFar)
+            return {};
+        *stubId = stub->id;
+        return segmentItem->id();
     }
     return {};
 }
@@ -485,6 +578,12 @@ void LayoutView::editPositionAlongRun(const QString &nodeId)
     }
     if (run.size() != 2)
         return;
+    // Measure from a connector end when there is one (e.g. "2 in from the ECU").
+    const auto farOf = [&](const LayoutSegment *s) {
+        return model->find<LayoutNode>(s->nodeA == nodeId ? s->nodeB : s->nodeA);
+    };
+    if (farOf(run[0])->type != LayoutNodeType::Connector && farOf(run[1])->type == LayoutNodeType::Connector)
+        std::swap(run[0], run[1]);
     const LayoutSegment &from = *run[0];
     LayoutSegmentItem *fromItem = m_scene->segmentItem(from.id);
     LayoutNodeItem *farItem = m_scene->nodeItem(from.nodeA == nodeId ? from.nodeB : from.nodeA);
@@ -607,8 +706,10 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     font.setBold(true);
     title->setFont(font);
     auto *hint = new QLabel(tr("Double-click to place. Then draw segments by dragging the short lead "
-                               "on the side of a point, and type each branch length. Drag a splice onto "
-                               "a bundle to put it inside; double-click it to set its distance."),
+                               "on the side of a point, and type each branch length. To put a splice inside "
+                               "a loom, draw a segment from the connector to the splice and type its "
+                               "distance, or drag the splice onto the loom; double-click it to change "
+                               "the distance."),
                             side);
     hint->setWordWrap(true);
     hint->setEnabled(false);
@@ -660,8 +761,11 @@ void LayoutEditor::refreshUnplaced()
 {
     const Harness &h = m_document->model()->harness();
     QSet<QString> placed;
-    for (const LayoutNode &n : h.layoutNodes)
+    for (const LayoutNode &n : h.layoutNodes) {
         placed.insert(n.refId);
+        for (const QString &id : n.sharedSpliceIds)
+            placed.insert(id);
+    }
     const QString current = m_unplaced->currentItem() ? m_unplaced->currentItem()->data(Qt::UserRole).toString()
                                                       : QString();
     m_unplaced->clear();

@@ -166,9 +166,17 @@ SegmentSplit splitNear(const QPointF &a, const QPointF &b, const std::optional<Q
     const int lo = kSteps / 20;
     nearest = std::clamp(nearest, lo, kSteps - lo);
     const qreal u = qreal(nearest) / kSteps;
-    SegmentSplit split;
-    split.point = at(u);
+    SegmentSplit split = splitAt(a, b, bend, u);
     split.fraction = lengthTo.back() > 1e-6 ? lengthTo[size_t(nearest)] / lengthTo.back() : u;
+    return split;
+}
+
+SegmentSplit splitAt(const QPointF &a, const QPointF &b, const std::optional<QPointF> &bend, qreal u)
+{
+    const QPointF c = bendControlPoint(a, b, bend);
+    SegmentSplit split;
+    split.point = (1 - u) * (1 - u) * a + 2 * (1 - u) * u * c + u * u * b;
+    split.fraction = u;
     if (bend) {
         // de Casteljau: the halves of a quadratic Bezier at u.
         split.bendA = bendFromControl(a, split.point, a + u * (c - a));
