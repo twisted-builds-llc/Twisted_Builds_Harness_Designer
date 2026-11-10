@@ -47,6 +47,14 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
 - M7 printable build package merged to `main`: File > Export Build Package (PDF) writes layout,
   schematic, cut list (sorted for cutting) and pinout sheets with a title block
   (`src/app/print/PdfExport.*`, rows from `src/core/bom/BuildSheets.*`); harness `partNumber`.
+- Schematic sheets (KiCad-style pages) on branch `schematic-sheets`, not merged: sheet tabs
+  above the schematic (`schematic/SheetTabBar.*`), `Schematic::sheets` plus a `sheetId` on
+  placements and schematic notes (empty = first sheet; no schema bump), off-sheet wire tags
+  (`WireItem::setOffSheet`), sheet edits in `EditOps` (`addSheet`/`removeSheet`/`moveSheet`/
+  `moveToSheet`), PDF prints all sheets side by side then one page per sheet. Items can be
+  shared across sheets (`SchematicPlacement::alsoOn`, paste onto another sheet reuses items by
+  id + label, Place > Add Existing Item to Sheet); wires remember their sheet
+  (`Schematic::wireSheetKey`, rules in `wireSheets()`). Awaiting the user's hands-on testing.
 - Flying leads, eyelets, ring terminals and bare ends are `FreeEnd` entities (schema 2,
   `freeEnds.json`; v1 files migrate on open), placed on the schematic like splices
   (Place > Add Flying Lead F / Add Eyelet E) and wired from their leads. Merged to `main`.

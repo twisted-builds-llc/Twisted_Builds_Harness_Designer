@@ -8,6 +8,7 @@
 #include <map>
 
 class QGraphicsPathItem;
+class QMenu;
 
 namespace tbh::app {
 
@@ -59,6 +60,21 @@ public:
     void setConnectorDisplay(const QString &connectorId, bool collapsed, int maxVisibleRows);
     // Highlights matches and moves to the next one. Returns the number of matches.
     int find(const QString &text);
+    // Moves the selected connectors, splices, free ends and notes to another sheet.
+    void moveSelectionToSheet(const QString &sheetId);
+    // Fills `menu` with one action per sheet (moves the selection there) and "New Sheet".
+    void addMoveToSheetActions(QMenu *menu);
+    // Also shows the selected connectors, splices, free ends and wires on another sheet: the
+    // same items (one in the layout and BOM), not copies. Wires need both ends there.
+    void showSelectionOnSheet(const QString &sheetId);
+    // Like addMoveToSheetActions(), for showSelectionOnSheet().
+    void addShowOnSheetActions(QMenu *menu);
+    // Shows an existing connector, splice or free end on the current sheet at the view center.
+    void showExistingItem(const QString &id);
+    // Fills `menu` with the items not on the current sheet (showExistingItem()).
+    void addExistingItemActions(QMenu *menu);
+    // Shows the sheet holding the far end of an off-sheet wire, with the wire selected.
+    void goToOtherSheet(const QString &wireId);
 
 signals:
     void statusMessage(const QString &message);
@@ -68,6 +84,7 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseDoubleClickEvent(QMouseEvent *event) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     bool wheelOverItem(QWheelEvent *event) override;
     bool nudgeSelection(const QPointF &delta) override;
@@ -105,6 +122,8 @@ private:
 
     void rememberPressPositions();
     void commitMoves();
+    // The item's placement with its position on the current sheet set to `position`.
+    SchematicPlacement placementAt(const QString &key, const QPointF &position) const;
     void toggleCollapsed(ConnectorItem *item);
 
     void editPinCell(const QString &connectorId, int row, int column);

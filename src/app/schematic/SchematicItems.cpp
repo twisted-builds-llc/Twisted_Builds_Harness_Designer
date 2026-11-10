@@ -6,6 +6,7 @@
 #include "ui/WireColors.h"
 
 #include <QApplication>
+#include <QFontMetricsF>
 #include <QPainter>
 #include <QPainterPathStroker>
 #include <QStyleOptionGraphicsItem>
@@ -669,16 +670,59 @@ void WireItem::setRoute(const Anchor &a, const Anchor &b, std::optional<qreal> r
     m_a = a;
     m_b = b;
     m_runX = runX;
+    m_tag.clear();
+    m_tagRect = {};
     prepareGeometryChange();
     m_path = routePath(a, b, runX);
+    updateShape();
+}
+
+namespace {
+
+constexpr qreal kOffSheetLead = 48; // lead from the anchor to the tag
+constexpr qreal kTagHeight = 18;
+constexpr qreal kTagPoint = 8;      // depth of the arrow point at the tag's far end
+
+// Pixel size, like the other items' text: scene units, whatever the paint device.
+QFont tagFont()
+{
+    QFont font;
+    font.setPixelSize(11);
+    return font;
+}
+
+} // namespace
+
+void WireItem::setOffSheet(const Anchor &a, const QString &tag)
+{
+    m_a = a;
+    m_b = {};
+    m_runX.reset();
+    m_tag = tag;
+    const int direction = a.direction == 0 ? 1 : a.direction;
+    const QPointF leadEnd = a.point + QPointF(direction * kOffSheetLead, 0);
+    const qreal width = QFontMetricsF(tagFont()).horizontalAdvance(tag) + 12 + kTagPoint;
+    m_tagRect = direction > 0 ? QRectF(leadEnd.x(), leadEnd.y() - kTagHeight / 2, width, kTagHeight)
+                              : QRectF(leadEnd.x() - width, leadEnd.y() - kTagHeight / 2, width, kTagHeight);
+    prepareGeometryChange();
+    m_path = QPainterPath(a.point);
+    m_path.lineTo(leadEnd);
+    updateShape();
+}
+
+void WireItem::updateShape()
+{
     QPainterPathStroker stroker;
     stroker.setWidth(10);
     m_shape = stroker.createStroke(m_path);
+    if (!m_tagRect.isNull())
+        m_shape.addRect(m_tagRect);
 }
 
 void WireItem::setRunX(qreal x)
 {
-    setRoute(m_a, m_b, x);
+    if (!isOffSheet())
+        setRoute(m_a, m_b, x);
 }
 
 qreal WireItem::runX() const
@@ -688,7 +732,7 @@ qreal WireItem::runX() const
 
 QRectF WireItem::boundingRect() const
 {
-    return m_path.boundingRect().adjusted(-6, -6, 6, 6);
+    return m_path.boundingRect().united(m_tagRect).adjusted(-6, -6, 6, 6);
 }
 
 QPainterPath WireItem::shape() const
@@ -719,6 +763,25 @@ void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
         // A tracer: one thin continuous stripe along the middle of the wire, as on real wire.
         painter->setPen(QPen(stripe, kPenWidth * 0.4, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
         painter->drawPath(m_path);
+    }
+    if (isOffSheet()) {
+        // A flag pointing away from the wire: the wire continues on another sheet.
+        const QRectF r = m_tagRect;
+        const bool right = r.left() >= m_a.point.x();
+        QPolygonF flag;
+        if (right)
+            flag << r.topLeft() << QPointF(r.right() - kTagPoint, r.top()) << QPointF(r.right(), r.center().y())
+                 << QPointF(r.right() - kTagPoint, r.bottom()) << r.bottomLeft();
+        else
+            flag << r.topRight() << QPointF(r.left() + kTagPoint, r.top()) << QPointF(r.left(), r.center().y())
+                 << QPointF(r.left() + kTagPoint, r.bottom()) << r.bottomRight();
+        painter->setPen(QPen(isSelected() ? pal.color(QPalette::Highlight) : pal.color(QPalette::Text), 1.2));
+        painter->setBrush(pal.color(QPalette::Base));
+        painter->drawPolygon(flag);
+        painter->setFont(tagFont());
+        painter->setPen(pal.color(QPalette::Text));
+        const QRectF text = right ? r.adjusted(6, 0, -kTagPoint, 0) : r.adjusted(kTagPoint, 0, -6, 0);
+        painter->drawText(text, Qt::AlignVCenter | Qt::AlignHCenter, m_tag);
     }
 }
 

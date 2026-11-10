@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "../core/SampleHarness.h"
 #include "Autosave.h"
 #include "calc/Highlight.h"
 #include "Document.h"
@@ -7,6 +8,7 @@
 #include "commands/EntityCommands.h"
 #include "io/HarnessJson.h"
 #include "io/TbhFile.h"
+#include "model/Queries.h"
 #include "model/Fragment.h"
 #include "schematic/SchematicScene.h"
 #include "schematic/SchematicView.h"
@@ -93,6 +95,19 @@ struct Fixture
         view.centerOn(QPointF(450, 300));
     }
 };
+
+// sample() with every item placed and one schematic note.
+Harness placedSample()
+{
+    Harness h = testing::sample();
+    h.schematic.placements[u"ecu"_s] = SchematicPlacement{QPointF(0, 0), false, 0, {}, {}};
+    h.schematic.placements[u"sensor"_s] = SchematicPlacement{QPointF(600, 0), false, 0, {}, {}};
+    h.schematic.placements[u"lamp"_s] = SchematicPlacement{QPointF(600, 300), false, 0, {}, {}};
+    h.schematic.placements[u"sp"_s] = SchematicPlacement{QPointF(400, 200), false, 0, {}, {}};
+    h.schematic.placements[u"fl"_s] = SchematicPlacement{QPointF(500, 260), false, 0, {}, {}};
+    h.notes.push_back(Note{u"note"_s, NoteCanvas::Schematic, u"Dash side"_s, QPointF(600, -60), {}, {}});
+    return h;
+}
 
 QString imageDir()
 {
@@ -557,6 +572,299 @@ private slots:
         QVERIFY(f.model()->harness() == before);
     }
 
+    // Sheet edits keep every item on the sheet it was on, including items with an empty
+    // sheet id (first sheet) when another sheet becomes first, and undo restores the file.
+    void sheetCommandsKeepItemsOnTheirSheets()
+    {
+        HarnessModel model;
+        model.reset(placedSample());
+        const Harness original = model.harness();
+        QUndoStack stack;
+        const Schematic &sch = model.harness().schematic;
+
+        QString dash;
+        stack.push(addSheet(&model, &dash).release());
+        QCOMPARE(sch.sheets.size(), size_t(2));
+        QCOMPARE(sheetDisplayName(sch, 1), u"Sheet 2"_s);
+        QVERIFY(!renameSheet(&model, dash, u"  "_s)); // still unnamed: no change
+        stack.push(renameSheet(&model, dash, u"  Dash "_s).release());
+        QCOMPARE(sheetDisplayName(sch, 1), u"Dash"_s);
+
+        stack.push(moveToSheet(&model, {u"sensor"_s, u"lamp"_s}, {u"note"_s}, kDefaultSheetId, dash).release());
+        QCOMPARE(sch.sheetOf(u"sensor"_s), dash);
+        QCOMPARE(sch.sheetOf(u"lamp"_s), dash);
+        QCOMPARE(model.find<Note>(u"note"_s)->sheetId, dash);
+        QCOMPARE(sch.sheetOf(u"ecu"_s), kDefaultSheetId);
+        QCOMPARE(model.placement(u"sensor"_s)->position, QPointF(600, 0)); // position kept
+        QVERIFY(!moveToSheet(&model, {u"sensor"_s}, {}, kDefaultSheetId, dash)); // not on sheet1 any more
+        QVERIFY(!moveToSheet(&model, {u"ecu"_s}, {}, kDefaultSheetId, u"nope"_s)); // no such sheet
+
+        // Dash becomes first: ecu, sp and fl (empty ids) must stay on sheet1.
+        stack.push(moveSheet(&model, dash, 0).release());
+        QCOMPARE(sch.sheets[0].id, dash);
+        QCOMPARE(sch.sheetOf(u"ecu"_s), kDefaultSheetId);
+        QCOMPARE(model.placement(u"ecu"_s)->sheetId, kDefaultSheetId);
+        QCOMPARE(sch.sheetOf(u"sensor"_s), dash);
+        QVERIFY(!moveSheet(&model, dash, -5)); // clamped to 0: no change
+
+        // Deleting the first sheet moves its items to the next one.
+        stack.push(removeSheet(&model, dash).release());
+        QCOMPARE(sch.sheets.size(), size_t(1));
+        QCOMPARE(sch.sheetOf(u"sensor"_s), kDefaultSheetId);
+        QCOMPARE(model.find<Note>(u"note"_s)->sheetId, kDefaultSheetId);
+        QVERIFY(!removeSheet(&model, kDefaultSheetId)); // the last sheet stays
+
+        // The result still loads, and undo returns to the original harness.
+        QString error;
+        QVERIFY2(io::deserializeHarness(io::serializeHarness(model.harness()), &error), qPrintable(error));
+        while (stack.canUndo())
+            stack.undo();
+        QVERIFY(model.harness() == original);
+    }
+
+    void sceneShowsCurrentSheetWithOffSheetTags()
+    {
+        Fixture f;
+        f.reset(placedSample());
+        QString dash;
+        f.document.undoStack()->push(addSheet(f.model(), &dash).release());
+        f.document.undoStack()->push(moveToSheet(f.model(), {u"sensor"_s, u"lamp"_s}, {u"note"_s}, kDefaultSheetId, dash).release());
+        SchematicScene *scene = f.scene();
+        QCOMPARE(scene->currentSheet(), kDefaultSheetId);
+        QVERIFY(scene->connectorItem(u"ecu"_s)->isVisible());
+        QVERIFY(!scene->connectorItem(u"sensor"_s)->isVisible());
+        QVERIFY(!scene->noteItem(u"note"_s)->isVisible());
+        // w1 ecu-sensor crosses sheets; w2 ecu-splice and w3 splice-flying lead stay here.
+        WireItem *w1 = scene->wireItem(u"w1"_s);
+        QVERIFY(w1->isVisible() && w1->isOffSheet());
+        QVERIFY(!w1->tagRect().isNull());
+        QVERIFY(!scene->wireItem(u"w2"_s)->isOffSheet());
+        QVERIFY(scene->wireItem(u"w3"_s)->isVisible());
+        // The tag leads right from ecu's right-hand pin lead.
+        QVERIFY(w1->tagRect().left() > scene->connectorItem(u"ecu"_s)->sceneBoundingRect().right());
+        if (!imageDir().isEmpty()) {
+            f.view.resetTransform();
+            f.view.scale(1.5, 1.5);
+            f.view.centerOn(QPointF(300, 100));
+            f.view.grab().save(imageDir() + u"/schematic-off-sheet.png"_s);
+        }
+
+        scene->setCurrentSheet(dash);
+        QVERIFY(!scene->connectorItem(u"ecu"_s)->isVisible());
+        QVERIFY(scene->connectorItem(u"sensor"_s)->isVisible());
+        QVERIFY(scene->noteItem(u"note"_s)->isVisible());
+        QVERIFY(w1->isVisible() && w1->isOffSheet());
+        QVERIFY(!scene->wireItem(u"w3"_s)->isVisible()); // both ends on sheet 1
+
+        // Double-click target: the far end's sheet, wire selected.
+        f.view.goToOtherSheet(u"w1"_s);
+        QCOMPARE(scene->currentSheet(), kDefaultSheetId);
+        QVERIFY(f.selection.selection().wires.contains(u"w1"_s));
+
+        // Selecting something on another sheet (e.g. from the layout) shows that sheet.
+        Selection s;
+        s.connectors.insert(u"lamp"_s);
+        f.selection.setSelection(s);
+        QCOMPARE(scene->currentSheet(), dash);
+        QVERIFY(scene->connectorItem(u"lamp"_s)->isSelected());
+
+        // New items go on the sheet shown.
+        f.view.addSplice();
+        const QString added = f.model()->harness().splices.back().id;
+        QCOMPARE(f.model()->harness().schematic.sheetOf(added), dash);
+
+        // Renaming a sheet updates tags; removing it shows the remaining one.
+        f.document.undoStack()->push(renameSheet(f.model(), kDefaultSheetId, u"Engine"_s).release());
+        f.document.undoStack()->push(removeSheet(f.model(), dash).release());
+        QCOMPARE(scene->currentSheet(), kDefaultSheetId);
+        QVERIFY(scene->connectorItem(u"sensor"_s)->isVisible());
+        QVERIFY(!w1->isOffSheet());
+    }
+
+    void moveSelectionToSheetFollowsTheItems()
+    {
+        Fixture f;
+        f.reset(placedSample());
+        QString dash;
+        f.document.undoStack()->push(addSheet(f.model(), &dash).release());
+        Selection s;
+        s.connectors.insert(u"sensor"_s);
+        f.selection.setSelection(s);
+        f.view.moveSelectionToSheet(dash);
+        QCOMPARE(f.scene()->currentSheet(), dash);
+        QVERIFY(f.selection.selection().connectors.contains(u"sensor"_s));
+        QVERIFY(f.scene()->connectorItem(u"sensor"_s)->isSelected());
+        f.document.undoStack()->undo();
+        QCOMPARE(f.model()->harness().schematic.sheetOf(u"sensor"_s), kDefaultSheetId);
+    }
+
+    // Pasting onto a sheet the copied items are not on shows the same items there (one ECU,
+    // one splice in the layout and BOM). Pasting where they are already shown copies them.
+    void pasteOnAnotherSheetReusesItems()
+    {
+        HarnessModel model;
+        Harness h = placedSample();
+        h.schematic.sheets.push_back(SchematicSheet{u"coils"_s, {}, {}});
+        model.reset(h);
+        QUndoStack stack;
+        const Harness fragment = extractFragment(model.harness(), {u"ecu"_s}, {u"sp"_s});
+        QSet<QString> ids;
+        stack.push(pasteFragment(&model, fragment, QPointF(40, 40), &ids, u"coils"_s).release());
+        const Harness &after = model.harness();
+        // fl comes along: copying a splice copies the flying leads wired to it.
+        QCOMPARE(ids, (QSet<QString>{u"ecu"_s, u"sp"_s, u"fl"_s}));
+        QCOMPARE(after.connectors.size(), size_t(3));
+        QCOMPARE(after.splices.size(), size_t(1));
+        QCOMPARE(after.freeEnds.size(), size_t(1));
+        QCOMPARE(after.wires.size(), size_t(5)); // w2 ecu-sp exists already: not copied
+        QCOMPARE(after.schematic.sheetsOf(u"ecu"_s), (std::vector<QString>{kDefaultSheetId, u"coils"_s}));
+        QCOMPARE(after.schematic.positionOn(u"ecu"_s, u"coils"_s), std::optional(QPointF(40, 40)));
+        QCOMPARE(after.schematic.positionOn(u"ecu"_s, kDefaultSheetId), std::optional(QPointF(0, 0)));
+        // w2 keeps being drawn on sheet1, the first sheet both ends share.
+        QCOMPARE(wireSheets(after, testing::wireById(after, u"w2"_s)).sheets, std::vector<QString>{kDefaultSheetId});
+
+        // Same paste again: now on coils already, so a copy.
+        ids.clear();
+        stack.push(pasteFragment(&model, fragment, QPointF(80, 80), &ids, u"coils"_s).release());
+        QCOMPARE(model.harness().connectors.size(), size_t(4));
+        QCOMPARE(model.harness().wires.size(), size_t(7)); // copies of w2 and w3 between the copies
+        const QString copiedWire = model.harness().wires.back().id;
+        QCOMPARE(wireSheets(model.harness(), model.harness().wires.back()).sheets, std::vector<QString>{u"coils"_s});
+        QVERIFY(model.placement(Schematic::wireSheetKey(copiedWire)));
+
+        stack.undo();
+        stack.undo();
+        QVERIFY(model.harness() == h);
+    }
+
+    // The ECU and a ground splice on two sheets: each wire stays on the sheet it was drawn on,
+    // and deleting a shared item on one sheet only removes it from that sheet.
+    void sharedItemsKeepWiresOnTheirSheets()
+    {
+        Fixture f;
+        Harness h = placedSample();
+        h.schematic.sheets.push_back(SchematicSheet{u"coils"_s, u"Coils"_s, {}});
+        // ecu and sp on both sheets; lamp only on coils.
+        h.schematic.placements[u"ecu"_s].alsoOn[u"coils"_s] = QPointF(0, 0);
+        h.schematic.placements[u"sp"_s].alsoOn[u"coils"_s] = QPointF(400, 200);
+        h.schematic.placements[u"lamp"_s].sheetId = u"coils"_s;
+        f.reset(h);
+        SchematicScene *scene = f.scene();
+        // Draw a new wire ecu pin 4 -> splice on coils by hand: it records coils.
+        scene->setCurrentSheet(u"coils"_s);
+        Wire w;
+        w.id = u"wnew"_s;
+        w.endA = PinRef{u"ecu"_s, u"ecu4"_s};
+        w.endB = SpliceRef{u"sp"_s};
+        SchematicPlacement drawn;
+        drawn.sheetId = u"coils"_s;
+        f.document.undoStack()->push(
+            addWire(f.model(), w, {{Schematic::wireSheetKey(u"wnew"_s), drawn}}, u"Add wire"_s).release());
+        QVERIFY(scene->wireItem(u"wnew"_s)->isVisible());
+        QVERIFY(!scene->wireItem(u"w2"_s)->isVisible()); // ecu-sp drawn on sheet1
+        QVERIFY(scene->wireItem(u"w5"_s)->isVisible());  // ecu-lamp: lamp only here
+        QVERIFY(!scene->wireItem(u"w5"_s)->isOffSheet());
+        QVERIFY(!scene->wireItem(u"w1"_s)->isVisible()); // sensor not on coils
+        scene->setCurrentSheet(kDefaultSheetId);
+        QVERIFY(!scene->wireItem(u"wnew"_s)->isVisible());
+        QVERIFY(scene->wireItem(u"w2"_s)->isVisible());
+        QVERIFY(!scene->wireItem(u"w5"_s)->isVisible()); // drawn in full on coils
+        QVERIFY(scene->connectorItem(u"ecu"_s)->isVisible());
+
+        // Delete the ECU on coils: it leaves coils, the connector and its wires stay.
+        scene->setCurrentSheet(u"coils"_s);
+        Selection s;
+        s.connectors.insert(u"ecu"_s);
+        f.selection.setSelection(s);
+        f.view.deleteSelection();
+        const Harness &after = f.model()->harness();
+        QVERIFY(f.model()->find<Connector>(u"ecu"_s));
+        QCOMPARE(after.wires.size(), size_t(6));
+        QCOMPARE(after.schematic.sheetsOf(u"ecu"_s), (std::vector<QString>{kDefaultSheetId}));
+        // wnew's ends now only share sheet1, so it is drawn there instead of on coils.
+        QVERIFY(!scene->wireItem(u"wnew"_s)->isVisible());
+        QCOMPARE(wireSheets(after, testing::wireById(after, u"wnew"_s)).sheets, std::vector<QString>{kDefaultSheetId});
+        f.document.undoStack()->undo();
+        QCOMPARE(f.model()->harness().schematic.sheetsOf(u"ecu"_s).size(), size_t(2));
+
+        // Moving an item on one sheet keeps its position on the other.
+        scene->setCurrentSheet(u"coils"_s);
+        SchematicPlacement moved = *f.model()->placement(u"ecu"_s);
+        moved.setPositionOn(kDefaultSheetId, u"coils"_s, QPointF(-300, 0));
+        f.document.undoStack()->push(new SetPlacementsCommand(f.model(), {{u"ecu"_s, moved}}, u"Move"_s));
+        QCOMPARE(scene->connectorItem(u"ecu"_s)->pos(), QPointF(-300, 0));
+        scene->setCurrentSheet(kDefaultSheetId);
+        QCOMPARE(scene->connectorItem(u"ecu"_s)->pos(), QPointF(0, 0));
+
+        // Add Existing Item: the sensor joins coils.
+        scene->setCurrentSheet(u"coils"_s);
+        f.view.showExistingItem(u"sensor"_s);
+        QVERIFY(scene->connectorItem(u"sensor"_s)->isVisible());
+        QCOMPARE(f.model()->harness().schematic.sheetsOf(u"sensor"_s).size(), size_t(2));
+    }
+
+    // Copy the ECU, S1 and the wire between them, paste onto an Ignition sheet: the same
+    // three show there, the wire is still one wire, and Delete on Ignition only hides it there.
+    void copiedWireShowsOnAnotherSheet()
+    {
+        Fixture f;
+        f.reset(placedSample());
+        QString ignition;
+        f.document.undoStack()->push(addSheet(f.model(), &ignition).release());
+        Selection s;
+        s.connectors.insert(u"ecu"_s);
+        s.splices.insert(u"sp"_s);
+        s.wires.insert(u"w2"_s); // ecu pin 2 - S1
+        f.selection.setSelection(s);
+        f.view.copySelection();
+        f.scene()->setCurrentSheet(ignition);
+        f.view.paste();
+        const Harness &h = f.model()->harness();
+        QCOMPARE(h.connectors.size(), size_t(3));
+        QCOMPARE(h.wires.size(), size_t(5));
+        const WireSheets w2 = wireSheets(h, testing::wireById(h, u"w2"_s));
+        QCOMPARE(w2.sheets, (std::vector<QString>{kDefaultSheetId, ignition}));
+        QVERIFY(f.scene()->wireItem(u"w2"_s)->isVisible());
+        QVERIFY(!f.scene()->wireItem(u"w2"_s)->isOffSheet());
+        // w3 (S1 - flying lead) was not selected: the flying lead came along, its wire did not.
+        QVERIFY(!wireSheets(h, testing::wireById(h, u"w3"_s)).drawnOn(ignition));
+        QVERIFY(!f.scene()->wireItem(u"w3"_s)->isVisible());
+
+        // A dragged route on Ignition does not move the wire on sheet1.
+        SchematicPlacement route;
+        route.sheetId = ignition;
+        route.position = QPointF(250, 0);
+        f.document.undoStack()->push(new SetPlacementsCommand(f.model(), {{u"w2"_s, route}}, u"Move wire"_s));
+        QCOMPARE(f.scene()->wireItem(u"w2"_s)->runX(), 250.0);
+        f.scene()->setCurrentSheet(kDefaultSheetId);
+        QVERIFY(f.scene()->wireItem(u"w2"_s)->runX() != 250.0);
+
+        // Delete the wire on Ignition: it stays, on sheet1 only.
+        f.scene()->setCurrentSheet(ignition);
+        Selection wire;
+        wire.wires.insert(u"w2"_s);
+        f.selection.setSelection(wire);
+        f.view.deleteSelection();
+        QVERIFY(f.model()->find<Wire>(u"w2"_s));
+        QCOMPARE(wireSheets(f.model()->harness(), *f.model()->find<Wire>(u"w2"_s)).sheets,
+                 std::vector<QString>{kDefaultSheetId});
+        QVERIFY(!f.scene()->wireItem(u"w2"_s)->isVisible());
+        // ...and Also Show on Sheet brings it back.
+        f.scene()->setCurrentSheet(kDefaultSheetId);
+        f.selection.setSelection(wire);
+        f.view.showSelectionOnSheet(ignition);
+        QVERIFY(wireSheets(f.model()->harness(), *f.model()->find<Wire>(u"w2"_s)).drawnOn(ignition));
+        // Deleting it on its last sheet deletes the wire.
+        f.scene()->setCurrentSheet(ignition);
+        f.document.undoStack()->push(
+            removeFromSheet(f.model(), {}, {u"w2"_s}, ignition).release());
+        f.selection.setSelection(wire);
+        f.scene()->setCurrentSheet(kDefaultSheetId);
+        f.selection.setSelection(wire);
+        f.view.deleteSelection();
+        QVERIFY(!f.model()->find<Wire>(u"w2"_s));
+    }
+
     void placementCommandsMoveItems()
     {
         Fixture f;
@@ -790,6 +1098,21 @@ private slots:
         view->centerOn(QPointF(450, 300));
         QTest::qWait(20);
         window.grab().save(imageDir() + u"/window-connector.png"_s);
+
+        // Sheet tabs: two sheets, light theme, a wire crossing between them.
+        Harness sheets = placedSample();
+        sheets.schematic.sheets = {SchematicSheet{kDefaultSheetId, u"Engine"_s, {}}, SchematicSheet{u"dash"_s, u"Dash"_s, {}}};
+        sheets.schematic.placements[u"sensor"_s].sheetId = u"dash"_s;
+        sheets.schematic.placements[u"lamp"_s].sheetId = u"dash"_s;
+        QVERIFY(io::writeTbhFile(file, sheets, nullptr));
+        theme.setMode(Theme::Mode::Light);
+        QVERIFY(window.openFile(file));
+        selection->setSelection({});
+        view->resetTransform();
+        view->scale(1.5, 1.5);
+        view->centerOn(QPointF(300, 150));
+        QTest::qWait(20);
+        window.grab().save(imageDir() + u"/window-sheets.png"_s);
         theme.setMode(Theme::Mode::System);
     }
 };

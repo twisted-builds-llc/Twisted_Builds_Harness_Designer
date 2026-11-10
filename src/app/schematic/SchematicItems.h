@@ -205,6 +205,13 @@ public:
     // Scene x of the vertical run as drawn.
     qreal runX() const;
 
+    // Off-sheet: the other end is on another sheet. The wire is drawn as a lead out of `a`
+    // to a tag reading `tag` (e.g. "J3 : 2 (Dash)"); setRoute() turns it back to normal.
+    void setOffSheet(const Anchor &a, const QString &tag);
+    bool isOffSheet() const { return !m_tag.isEmpty(); }
+    // Scene rect of the off-sheet tag (null when not off-sheet).
+    QRectF tagRect() const { return m_tagRect; }
+
     // Orthogonal route between anchors with rounded bends; also used for the rubber-band
     // wire while drawing.
     static QPainterPath routePath(const Anchor &a, const Anchor &b, std::optional<qreal> runX = {});
@@ -223,6 +230,9 @@ private:
     std::optional<qreal> m_runX;
     QPainterPath m_path;
     QPainterPath m_shape;
+    QString m_tag;
+    QRectF m_tagRect;
+    void updateShape();
 };
 
 } // namespace tbh::app

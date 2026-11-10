@@ -2,11 +2,13 @@
 #include "schematic/SchematicScene.h"
 
 #include "SelectionModel.h"
+#include "model/Queries.h"
 #include "ui/CanvasView.h"
 
 #include <QPainter>
 #include <QPalette>
 
+#include <algorithm>
 #include <cmath>
 
 namespace tbh::app {
@@ -25,6 +27,7 @@ SchematicScene::SchematicScene(HarnessModel *model, SelectionModel *selection, Q
     connect(model, &HarnessModel::entityChanged, this, &SchematicScene::onChanged);
     connect(model, &HarnessModel::entityRemoved, this, &SchematicScene::onRemoved);
     connect(model, &HarnessModel::placementChanged, this, &SchematicScene::onPlacementChanged);
+    connect(model, &HarnessModel::sheetsChanged, this, &SchematicScene::onSheetsChanged);
     connect(this, &QGraphicsScene::selectionChanged, this, &SchematicScene::syncSelectionToModel);
     connect(selection, &SelectionModel::selectionChanged, this, &SchematicScene::syncSelectionFromModel);
     rebuild();
@@ -65,8 +68,11 @@ void SchematicScene::rebuild()
     m_freeEnds.clear();
     m_notes.clear();
     m_wiresByItem.clear();
+    m_autoPlaced.clear();
 
     const Harness &h = m_model->harness();
+    const QString previousSheet = m_sheet;
+    m_sheet = h.schematic.resolvedSheetId(m_sheet);
     for (const Connector &c : h.connectors)
         addConnector(c);
     for (const Splice &s : h.splices)
@@ -81,6 +87,62 @@ void SchematicScene::rebuild()
     for (const Wire &w : h.wires)
         updateWire(w.id);
     syncSelectionFromModel();
+    if (m_sheet != previousSheet)
+        emit currentSheetChanged(m_sheet);
+}
+
+QString SchematicScene::sheetOf(const QString &key) const
+{
+    return m_model->harness().schematic.sheetOf(key);
+}
+
+bool SchematicScene::isEndOnCurrentSheet(const Wire &wire, bool endB) const
+{
+    const WireSheets sheets = wireSheets(m_model->harness(), wire);
+    return sheets.drawnOn(m_sheet) || (endB ? sheets.tagSheetB : sheets.tagSheetA) == m_sheet;
+}
+
+bool SchematicScene::isOnCurrentSheet(const QString &key) const
+{
+    return m_model->harness().schematic.isOnSheet(key, m_sheet);
+}
+
+void SchematicScene::setCurrentSheet(const QString &sheetId)
+{
+    const QString resolved = m_model->harness().schematic.resolvedSheetId(sheetId);
+    if (resolved == m_sheet)
+        return;
+    m_sheet = resolved;
+    applySheet();
+    emit currentSheetChanged(m_sheet);
+}
+
+void SchematicScene::onSheetsChanged()
+{
+    const QString resolved = m_model->harness().schematic.resolvedSheetId(m_sheet);
+    const bool changed = resolved != m_sheet;
+    m_sheet = resolved;
+    applySheet(); // also refreshes the sheet names in off-sheet tags
+    if (changed)
+        emit currentSheetChanged(m_sheet);
+}
+
+void SchematicScene::applySheet()
+{
+    // Items shown on several sheets sit at their position on this one.
+    auto apply = [this](PlacedItem *item) { applyPlacement(item); };
+    std::for_each(m_connectors.cbegin(), m_connectors.cend(), apply);
+    std::for_each(m_splices.cbegin(), m_splices.cend(), apply);
+    std::for_each(m_freeEnds.cbegin(), m_freeEnds.cend(), apply);
+    for (NoteItem *note : std::as_const(m_notes))
+        applyNoteSheet(note);
+    for (const Wire &w : m_model->harness().wires)
+        updateWire(w.id);
+}
+
+void SchematicScene::applyNoteSheet(NoteItem *item)
+{
+    item->setVisible(m_model->harness().schematic.resolvedSheetId(item->note().sheetId) == m_sheet);
 }
 
 void SchematicScene::addConnector(const Connector &connector)
@@ -99,6 +161,7 @@ void SchematicScene::addNote(const Note &note)
     auto *item = new NoteItem(note, [this](const QPointF &p) { return m_snap ? snapped(p) : p; });
     addItem(item);
     m_notes.insert(note.id, item);
+    applyNoteSheet(item);
 }
 
 void SchematicScene::addSplice(const Splice &splice)
@@ -131,23 +194,38 @@ void SchematicScene::applyPlacement(PlacedItem *item)
 {
     const bool wasBuilding = m_building;
     m_building = true; // wires are updated by the caller
+    const Schematic &schematic = m_model->harness().schematic;
     if (const SchematicPlacement *p = m_model->placement(item->placementKey())) {
-        item->setPos(p->position);
+        item->setPos(schematic.positionOn(item->placementKey(), m_sheet).value_or(p->position));
         if (auto *connector = dynamic_cast<ConnectorItem *>(item))
             connector->setDisplay(p->collapsed, p->maxVisibleRows);
-    } else {
-        item->setPos(nextFreePosition());
+    } else if (!m_autoPlaced.contains(item->placementKey())) {
+        // Laid out once; switching sheets must not move it again.
+        item->setPos(nextFreePosition(sheetOf(item->placementKey())));
+        m_autoPlaced.insert(item->placementKey());
     }
+    item->setVisible(isOnCurrentSheet(item->placementKey()));
     m_building = wasBuilding;
 }
 
-QPointF SchematicScene::nextFreePosition() const
+QPointF SchematicScene::nextFreePosition(const QString &sheetId) const
 {
     qreal right = 0;
     qreal top = 0;
     bool any = false;
+    const Schematic &schematic = m_model->harness().schematic;
+    // Scene rect the item has on `sheetId` (its item position is the one on the current sheet).
+    auto rectOn = [&](const PlacedItem *item) -> std::optional<QRectF> {
+        if (!schematic.isOnSheet(item->placementKey(), sheetId))
+            return std::nullopt;
+        const QPointF pos = schematic.positionOn(item->placementKey(), sheetId).value_or(item->pos());
+        return item->boundingRect().translated(pos);
+    };
     for (auto *c : m_connectors) {
-        const QRectF r = c->sceneBoundingRect();
+        const auto rect = rectOn(c);
+        if (!rect)
+            continue;
+        const QRectF r = *rect;
         right = any ? std::max(right, r.right()) : r.right();
         top = any ? std::min(top, r.top()) : r.top();
         any = true;
@@ -155,7 +233,10 @@ QPointF SchematicScene::nextFreePosition() const
     for (const auto &items : {QList<PlacedItem *>(m_splices.cbegin(), m_splices.cend()),
                               QList<PlacedItem *>(m_freeEnds.cbegin(), m_freeEnds.cend())}) {
         for (PlacedItem *item : items) {
-            const QRectF r = item->sceneBoundingRect();
+            const auto rect = rectOn(item);
+            if (!rect)
+                continue;
+            const QRectF r = *rect;
             right = any ? std::max(right, r.right()) : r.right();
             any = true;
         }
@@ -213,14 +294,17 @@ Anchor SchematicScene::endAnchor(const Wire &wire, bool endB) const
 {
     const WireEnd &end = endB ? wire.endB : wire.endA;
     const WireEnd &other = endB ? wire.endA : wire.endB;
+    // The other end's position means nothing on another sheet: face right, towards the tag.
+    const bool sameSheet = wireSheets(m_model->harness(), wire).drawnOn(m_sheet);
+    const QPointF towards = sameSheet ? endReference(other) : endReference(end) + QPointF(1e5, 0);
     if (const auto *pin = std::get_if<PinRef>(&end)) {
         if (auto *item = m_connectors.value(pin->connectorId))
-            return item->pinAnchor(item->rowOfPin(pin->pinId), endReference(other));
+            return item->pinAnchor(item->rowOfPin(pin->pinId), towards);
     } else if (const auto *splice = std::get_if<SpliceRef>(&end)) {
         if (auto *item = m_splices.value(splice->spliceId))
             return item->anchor();
     } else if (auto *item = m_freeEnds.value(std::get<FreeEndRef>(end).freeEndId)) {
-        return item->anchor(endReference(other));
+        return item->anchor(towards);
     }
     return {};
 }
@@ -231,9 +315,25 @@ void SchematicScene::updateWire(const QString &wireId)
     const Wire *wire = m_model->find<Wire>(wireId);
     if (!item || !wire)
         return;
-    const SchematicPlacement *route = m_model->placement(wireId);
-    item->setRoute(endAnchor(*wire, false), endAnchor(*wire, true),
-                   route ? std::optional(route->position.x()) : std::nullopt);
+    const Harness &h = m_model->harness();
+    const WireSheets sheets = wireSheets(h, *wire);
+    if (sheets.drawnOn(m_sheet)) {
+        item->setVisible(true);
+        // A dragged route is kept per sheet, like item positions.
+        const std::optional<QPointF> route = h.schematic.positionOn(wireId, m_sheet);
+        item->setRoute(endAnchor(*wire, false), endAnchor(*wire, true),
+                       route ? std::optional(route->x()) : std::nullopt);
+        return;
+    }
+    const bool aHere = sheets.sheets.empty() && sheets.tagSheetA == m_sheet;
+    const bool bHere = sheets.sheets.empty() && sheets.tagSheetB == m_sheet && !aHere;
+    item->setVisible(aHere || bHere);
+    if (aHere || bHere) {
+        const WireEnd &far = aHere ? wire->endB : wire->endA;
+        const int farSheet = h.schematic.sheetIndex(aHere ? sheets.tagSheetB : sheets.tagSheetA);
+        item->setOffSheet(endAnchor(*wire, !aHere), QStringLiteral("%1 (%2)").arg(
+                                                         describeWireEnd(h, far), sheetDisplayName(h.schematic, farSheet)));
+    }
 }
 
 void SchematicScene::updateWiresOf(const QString &key)
@@ -285,8 +385,10 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
     case EntityKind::BomExtra:
         break;
     case EntityKind::Note:
-        if (NoteItem *item = m_notes.value(id))
+        if (NoteItem *item = m_notes.value(id)) {
             item->setNote(*m_model->find<Note>(id));
+            applyNoteSheet(item);
+        }
         break;
     case EntityKind::Connector:
         if (auto *item = m_connectors.value(id)) {
@@ -295,12 +397,16 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
         }
         break;
     case EntityKind::Splice:
-        if (auto *item = m_splices.value(id))
+        if (auto *item = m_splices.value(id)) {
             item->setSplice(*m_model->find<Splice>(id));
+            updateWiresOf(id); // off-sheet tags name it
+        }
         break;
     case EntityKind::FreeEnd:
-        if (auto *item = m_freeEnds.value(id))
+        if (auto *item = m_freeEnds.value(id)) {
             item->setFreeEnd(*m_model->find<FreeEnd>(id));
+            updateWiresOf(id);
+        }
         break;
     case EntityKind::Wire:
         if (auto *item = m_wires.value(id)) {
@@ -347,6 +453,8 @@ void SchematicScene::onPlacementChanged(const QString &key)
         updateWiresOf(key);
     } else if (m_wires.contains(key)) {
         updateWire(key); // a dragged wire route
+    } else if (const QString suffix = Schematic::wireSheetKey({}); key.endsWith(suffix)) {
+        updateWire(key.chopped(suffix.size())); // the sheet the wire is drawn on
     }
 }
 
@@ -387,6 +495,7 @@ void SchematicScene::syncSelectionFromModel()
         return;
     m_syncingSelection = true;
     const Selection &s = m_selection->selection();
+    followSelectionSheet(s);
     for (auto it = m_connectors.cbegin(); it != m_connectors.cend(); ++it)
         it.value()->setSelected(s.connectors.contains(it.key()));
     for (auto it = m_splices.cbegin(); it != m_splices.cend(); ++it)
@@ -398,6 +507,46 @@ void SchematicScene::syncSelectionFromModel()
     for (auto it = m_notes.cbegin(); it != m_notes.cend(); ++it)
         it.value()->setSelected(s.notes.contains(it.key()));
     m_syncingSelection = false;
+}
+
+void SchematicScene::followSelectionSheet(const Selection &s)
+{
+    // Sheets of the selected items, in model order; stay if any of them is shown here.
+    const Harness &h = m_model->harness();
+    std::vector<QString> sheets;
+    auto addItem = [&](const QString &key) {
+        const std::vector<QString> on = h.schematic.sheetsOf(key);
+        sheets.insert(sheets.end(), on.begin(), on.end());
+    };
+    for (const Connector &c : h.connectors) {
+        if (s.connectors.contains(c.id))
+            addItem(c.id);
+    }
+    for (const Splice &sp : h.splices) {
+        if (s.splices.contains(sp.id))
+            addItem(sp.id);
+    }
+    for (const FreeEnd &f : h.freeEnds) {
+        if (s.freeEnds.contains(f.id))
+            addItem(f.id);
+    }
+    for (const Wire &w : h.wires) {
+        if (s.wires.contains(w.id)) {
+            const WireSheets on = wireSheets(h, w);
+            sheets.insert(sheets.end(), on.sheets.begin(), on.sheets.end());
+            for (const QString &sheet : {on.tagSheetA, on.tagSheetB}) {
+                if (!sheet.isEmpty())
+                    sheets.push_back(sheet);
+            }
+        }
+    }
+    for (const Note &n : h.notes) {
+        if (n.canvas == NoteCanvas::Schematic && s.notes.contains(n.id))
+            sheets.push_back(h.schematic.resolvedSheetId(n.sheetId));
+    }
+    if (sheets.empty() || std::find(sheets.begin(), sheets.end(), m_sheet) != sheets.end())
+        return;
+    setCurrentSheet(sheets.front());
 }
 
 void SchematicScene::setHighlight(const std::optional<calc::HighlightSet> &set)
