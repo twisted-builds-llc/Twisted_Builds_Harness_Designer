@@ -211,6 +211,11 @@ void LayoutScene::refreshCaptions()
         for (const QString &id : item->node().sharedSpliceIds)
             names.append(labels.value(id));
         item->setNode(item->node(), names.join(tr(", ")));
+        // A splice partway along a run shows the run's full length, which the two segment
+        // captions beside it only show in pieces.
+        const auto run = calc::spliceRunLengthMm(h, item->id());
+        item->setSubLabel(run ? tr("%1 total\nbranch length").arg(formatLengthWords(*run, h.info.units))
+                              : QString());
     }
 
     const calc::LayoutGraph graph(h);

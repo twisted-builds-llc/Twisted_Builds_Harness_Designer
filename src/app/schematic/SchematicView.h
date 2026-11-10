@@ -109,6 +109,7 @@ private:
 
     QString uniqueLabel(const QString &prefix, bool splice) const;
     QPointF viewCenterSnapped() const;
+    QPointF unoccupiedPosition(QPointF position) const;
     QByteArray selectionFragment() const;
     void pasteFragmentBytes(const QByteArray &bytes, QPointF offset);
     std::vector<PlacedItem *> selectedPlacedItems() const;

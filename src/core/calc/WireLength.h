@@ -7,6 +7,8 @@
 
 #include <QHash>
 
+#include <optional>
+
 namespace tbh::calc {
 
 enum class RouteStatus {
@@ -91,6 +93,12 @@ QString routeStatusReason(const Harness &harness, const Wire &wire, RouteStatus 
 
 // Segment id -> ids of the routed wires passing through it.
 QHash<QString, std::vector<QString>> wiresBySegment(const Harness &harness, const LayoutGraph &graph);
+
+// Length of the run a splice point sits in: the splice node must have exactly two segments;
+// the run extends both ways through further two-segment splice nodes and ends at any other
+// node (connector, branch, ...). Returns the summed segment lengths, or nullopt if the node is
+// not such a splice or a segment in the run has no length.
+std::optional<double> spliceRunLengthMm(const Harness &harness, const QString &spliceNodeId);
 
 struct Problem
 {

@@ -17,6 +17,8 @@
 #include "ui/theme/Theme.h"
 
 #include <QLabel>
+#include <QListWidget>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QTabWidget>
 #include <QLineEdit>
@@ -118,6 +120,45 @@ private slots:
         QCoreApplication::setApplicationName(u"tst_layout"_s);
         QSettings().clear();
         QDir(Autosave::recoveryDirectory()).removeRecursively(); // no recovery prompt
+    }
+
+    // Place All puts every unplaced item into the layout in one undo step, each offset from
+    // the last (cascade step 30, 30 within a run of 8) so none hide under another.
+    void placeAllUnplaced()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        Harness h = sample();
+        h.layoutNodes.clear();
+        h.layoutSegments.clear();
+        document.model()->reset(h);
+        LayoutEditor editor(&document, &selection);
+        editor.resize(1200, 800);
+        editor.show();
+        QTest::qWait(1);
+        auto *list = editor.findChild<QListWidget *>();
+        QVERIFY(list);
+        // Sample has 3 connectors, 1 splice and 1 free end: 5 refs, at most 8, so one run.
+        const int expected = int(layoutRefs(document.model()->harness()).size());
+        QCOMPARE(expected, 5);
+        QCOMPARE(list->count(), expected);
+        QPushButton *placeAll = nullptr;
+        for (auto *b : editor.findChildren<QPushButton *>()) {
+            if (b->text() == u"Place All"_s)
+                placeAll = b;
+        }
+        QVERIFY(placeAll);
+        placeAll->click();
+        QTest::qWait(1);
+        const Harness &after = document.model()->harness();
+        QCOMPARE(int(after.layoutNodes.size()), expected);
+        QCOMPARE(list->count(), 0);
+        QCOMPARE(int(selection.selection().layoutNodes.size()), expected);
+        for (size_t i = 1; i < after.layoutNodes.size(); ++i)
+            QCOMPARE(after.layoutNodes[i].position - after.layoutNodes[i - 1].position, QPointF(30, 30));
+        verifyLoadable(after);
+        document.undoStack()->undo();
+        QCOMPARE(document.model()->harness().layoutNodes.size(), size_t(0));
     }
 
     void explainedLength()
@@ -254,6 +295,28 @@ private slots:
         model.insert(LayoutSegment{u"s9"_s, u"n2"_s, u"n9"_s, 50, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
         QCOMPARE(branch->legCount(), 4);
         QCOMPARE(scene.nodeItem(u"n9"_s)->legCount(), 1);
+    }
+
+    void spliceShowsRunTotal()
+    {
+        HarnessModel model;
+        SelectionModel selection(&model);
+        LayoutScene scene(&model, &selection);
+        model.reset(sample());
+        // Splice n4 sits between branch n2 and flying lead n5: s3 120 + s4 80 = 200 mm.
+        // Unit spelled out, two lines: "200 millimeters total" / "branch length".
+        const QString total = LayoutScene::tr("%1 total\nbranch length").arg(formatLengthWords(200, Units::Millimeters));
+        QCOMPARE(formatLengthWords(200, Units::Millimeters), u"200 millimeters"_s);
+        QCOMPARE(formatLengthWords(254, Units::Inches), u"10 inches"_s); // 254 / 25.4
+        QCOMPARE(formatLengthWords(25.4, Units::Inches), u"1 inch"_s);
+        QTRY_COMPARE(scene.nodeItem(u"n4"_s)->subLabel(), total);
+        QVERIFY(scene.nodeItem(u"n1"_s)->subLabel().isEmpty()); // connectors have none
+        // Removing s4 leaves the splice at the end of a stub: no run, no total.
+        QUndoStack stack;
+        stack.push(removeLayoutItems(&model, {}, {u"s4"_s}).release());
+        QTRY_VERIFY(scene.nodeItem(u"n4"_s)->subLabel().isEmpty());
+        stack.undo();
+        QTRY_COMPARE(scene.nodeItem(u"n4"_s)->subLabel(), total);
     }
 
     void branchPathShapes()
@@ -684,9 +747,14 @@ private slots:
         QTest::qWait(1);
         HarnessModel *model = document.model();
 
-        // Off the stub's far end: nothing to walk (the walk stops at forks), so 400 mm
-        // past n2 is refused and the stub keeps its length.
-        QVERIFY(!loomPositionForStub(model->harness(), u"stub"_s, 400));
+        // Past the fork at n2 the walk follows w4 (sp2 -> sensor) into s2: 400 - 300 = 100 mm
+        // into s2 from n2. 800 mm is past the sensor (300 + 450 = 750): refused.
+        const auto beyondFork = loomPositionForStub(model->harness(), u"stub"_s, 400);
+        QVERIFY(beyondFork);
+        QCOMPARE(beyondFork->segmentId, u"s2"_s);
+        QVERIFY(beyondFork->fromNodeA);
+        QCOMPARE(beyondFork->offsetMm, 100.0);
+        QVERIFY(!loomPositionForStub(model->harness(), u"stub"_s, 800));
 
         // Typing 50 mm on the stub: sp2 sits in s1 50 mm from the ECU.
         view.editSegmentLength(u"stub"_s);
@@ -751,6 +819,58 @@ private slots:
         // One undo step takes sp2 back out to its stub.
         model->reset(h);
         QVERIFY(view.placeSpliceAlongLoom(u"stub"_s, 50));
+        document.undoStack()->undo();
+        QVERIFY(model->harness() == h);
+    }
+
+    void stubOffForkFollowsSpliceWires()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        // Splice sp2 (node n6) drawn as a stub off the branch n2, which has three looms:
+        // s1 (to the ECU, 300 mm), s2 (to the sensor, 450 mm), s3 (to splice n4, 120 mm).
+        // w4 ecu:3 -> sp2 and w5 sp2 -> sensor:2 route through the stub and n2.
+        Harness h = sample();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.wires.push_back(wire(u"w4"_s, PinRef{u"ecu"_s, u"ecu3"_s}, SpliceRef{u"sp2"_s}));
+        h.wires.push_back(wire(u"w5"_s, SpliceRef{u"sp2"_s}, PinRef{u"sensor"_s, u"sensor2"_s}));
+        h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(300, -100), {}});
+        h.layoutSegments.push_back(
+            LayoutSegment{u"stub"_s, u"n2"_s, u"n6"_s, 0, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+
+        // s1 carries one of sp2's wires (w4), s2 one (w5): a tie, so no loom is chosen.
+        document.model()->reset(h);
+        QVERIFY(!loomPositionForStub(document.model()->harness(), u"stub"_s, 50));
+
+        // w6 sp2 -> sensor:1 makes s2 carry two: 50 mm into s2 from n2 (s2 runs n2 -> n3).
+        h.wires.push_back(wire(u"w6"_s, SpliceRef{u"sp2"_s}, PinRef{u"sensor"_s, u"sensor1"_s}));
+        document.model()->reset(h);
+        QTest::qWait(1);
+        HarnessModel *model = document.model();
+        const auto position = loomPositionForStub(model->harness(), u"stub"_s, 50);
+        QVERIFY(position);
+        QCOMPARE(position->segmentId, u"s2"_s);
+        QVERIFY(position->fromNodeA);
+        QCOMPARE(position->offsetMm, 50.0);
+
+        // Placing it: s2 becomes n2 - n6 (50 mm) and n6 - n3 takes the rest, 450 - 50 = 400.
+        QVERIFY(view.placeSpliceAlongLoom(u"stub"_s, 50));
+        QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
+        QCOMPARE(model->find<LayoutSegment>(u"s2"_s)->nodeB, u"n6"_s);
+        QCOMPARE(model->find<LayoutSegment>(u"s2"_s)->lengthMm, 50.0);
+        const LayoutSegment &rest = model->harness().layoutSegments.back();
+        QCOMPARE(rest.nodeA, u"n6"_s);
+        QCOMPARE(rest.nodeB, u"n3"_s);
+        QCOMPARE(rest.lengthMm, 400.0);
+        verifyLoadable(model->harness());
+        // w5 sp2 -> sensor: 400 mm of route (n6 - n3).
+        const calc::LayoutGraph graph(model->harness());
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w5"_s)).baseMm, 400.0);
+        // w4 ecu -> sp2: 300 + 50 = 350 mm.
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"w4"_s)).baseMm, 350.0);
         document.undoStack()->undo();
         QVERIFY(model->harness() == h);
     }

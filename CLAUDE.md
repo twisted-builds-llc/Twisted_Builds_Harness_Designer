@@ -37,7 +37,12 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   translations scaffolding). Hands-on testing fixes on `main`: splices inside the loom
   (type a splice stub's length to place it that far from the connector, or drag it onto the
   loom), several splices side by side at one loom point (`LayoutNode::sharedSpliceIds`),
-  Show Bundle Diameters on by default. **Next: more user hands-on testing, then M6 packaging** (GitHub Actions
+  Show Bundle Diameters on by default. Split view (View > Split Schematic and Layout, Ctrl+\,
+  side by side or stacked; off by default), Place All for unplaced items, a splice partway
+  along a run labeled with the run's total length on two lines ("N inches total" /
+  "branch length", `calc::spliceRunLengthMm`), and splice stubs placed by distance that walk
+  through forks along the path most of their wires take, all on branch `split-view`
+  (pushed, not yet merged to `main`). **Next: more user hands-on testing, then M6 packaging** (GitHub Actions
   CI on PRs/manual only, AppImage, Windows installer + zip, macOS dmg, v0.1.0 tag). CI was
   deliberately deferred until packaging; do not add workflows that run on every push.
 - Still open (not in any finished milestone): connector/terminal/seal autofill library (5.7),

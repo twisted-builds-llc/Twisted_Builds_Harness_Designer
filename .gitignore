@@ -4,3 +4,4 @@ CMakeLists.txt.user*
 *.autosave
 .qtcreator/
 /dales-screenshots-for-claude/
+/test_harness/

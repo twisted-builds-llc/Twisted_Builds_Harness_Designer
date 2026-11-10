@@ -114,6 +114,28 @@ private slots:
         QDir(Autosave::recoveryDirectory()).removeRecursively(); // no recovery prompt
     }
 
+    // Adding connectors/splices repeatedly without moving the view must not stack them:
+    // each new one steps 20, 20 (two grid cells) past the one already there.
+    void addedItemsAreOffset()
+    {
+        Fixture f;
+        f.reset(Harness{});
+        f.view.addConnector();
+        f.view.addConnector();
+        f.view.addConnector();
+        const Harness &h = f.model()->harness();
+        QCOMPARE(h.connectors.size(), size_t(3));
+        const QPointF p0 = f.model()->placement(h.connectors[0].id)->position;
+        QCOMPARE(f.model()->placement(h.connectors[1].id)->position, p0 + QPointF(20, 20));
+        QCOMPARE(f.model()->placement(h.connectors[2].id)->position, p0 + QPointF(40, 40));
+        f.view.addSplice();
+        f.view.addSplice();
+        const QPointF s0 = f.model()->placement(h.splices[0].id)->position;
+        QCOMPARE(f.model()->placement(h.splices[1].id)->position, s0 + QPointF(20, 20));
+        f.document.undoStack()->undo(); // one undo removes one splice
+        QCOMPARE(h.splices.size(), size_t(1));
+    }
+
     void wireBendsAreRounded()
     {
         /* Route (0,0) -> (40,0) -> (40,100) -> (100,100), radius 12.

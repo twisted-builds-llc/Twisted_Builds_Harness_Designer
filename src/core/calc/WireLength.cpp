@@ -195,6 +195,44 @@ QHash<QString, std::vector<QString>> wiresBySegment(const Harness &harness, cons
     return result;
 }
 
+std::optional<double> spliceRunLengthMm(const Harness &harness, const QString &spliceNodeId)
+{
+    QHash<QString, std::vector<const LayoutSegment *>> segmentsAt;
+    for (const LayoutSegment &s : harness.layoutSegments) {
+        segmentsAt[s.nodeA].push_back(&s);
+        segmentsAt[s.nodeB].push_back(&s);
+    }
+    QHash<QString, const LayoutNode *> nodes;
+    for (const LayoutNode &n : harness.layoutNodes)
+        nodes.insert(n.id, &n);
+    const auto isPassThroughSplice = [&](const QString &id) {
+        const LayoutNode *n = nodes.value(id);
+        return n && n->type == LayoutNodeType::Splice && segmentsAt.value(id).size() == 2;
+    };
+    if (!isPassThroughSplice(spliceNodeId))
+        return std::nullopt;
+
+    double total = 0;
+    QSet<const LayoutSegment *> visited; // a loop of splices would otherwise never end
+    for (const LayoutSegment *start : segmentsAt.value(spliceNodeId)) {
+        const LayoutSegment *s = start;
+        QString from = spliceNodeId;
+        while (s && !visited.contains(s)) {
+            visited.insert(s);
+            if (s->lengthMm <= 0)
+                return std::nullopt;
+            total += s->lengthMm;
+            const QString next = s->nodeA == from ? s->nodeB : s->nodeA;
+            if (!isPassThroughSplice(next))
+                break;
+            const auto &pair = segmentsAt.value(next);
+            s = pair[0] == s ? pair[1] : pair[0];
+            from = next;
+        }
+    }
+    return total;
+}
+
 QString routeStatusReason(const Harness &harness, const Wire &wire, RouteStatus status)
 {
     switch (status) {

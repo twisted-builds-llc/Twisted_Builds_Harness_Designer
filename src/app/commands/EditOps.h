@@ -86,10 +86,11 @@ std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString 
                                              QString *newSegmentId = nullptr);
 
 // Where along the loom a splice drawn as a stub lands. `stubId` runs from a splice node
-// that has no other segment to a node X that has exactly one other segment (the loom).
-// Walking the loom from X, through points on exactly two segments (bends, splices already
-// inside), the splice falls `distanceMm` from X: in `segmentId`, `offsetMm` from its end
-// nearer X (`fromNodeA` says which), or exactly on splice point `atNodeId`, where it sits
+// that has no other segment to a node X. The splice falls `distanceMm` from X, walking the
+// loom out of X: where several segments leave a point (X itself, or a fork further on), the
+// walk follows the one most of the splice's wires are routed through (none or a tie: no
+// position). The walk passes bends, forks and splices already inside, not connectors.
+// It lands in `segmentId`, `offsetMm` from its end nearer X (`fromNodeA` says which), or exactly on splice point `atNodeId`, where it sits
 // side by side with the splices there (segmentId then empty). Empty when the stub does not
 // qualify or the distance is not inside the walkable loom.
 struct LoomPosition

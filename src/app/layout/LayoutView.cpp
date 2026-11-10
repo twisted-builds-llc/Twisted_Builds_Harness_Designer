@@ -106,7 +106,11 @@ void LayoutView::setHoveredLead(LayoutNodeItem *node)
 QPointF LayoutView::nextPlacePosition()
 {
     const QPointF center = mapToScene(viewport()->rect().center());
-    const QPointF offset(30 * (m_placeCount % 8), 30 * (m_placeCount % 8));
+    // Cascade diagonally in runs of 8, starting each run further right, so many items placed
+    // at once stay visible.
+    const int step = m_placeCount % 8;
+    const int run = (m_placeCount / 8) % 6;
+    const QPointF offset(30 * step + 120 * run, 30 * step);
     ++m_placeCount;
     return snapToCanvasGrid(center + offset);
 }
@@ -122,14 +126,20 @@ void LayoutView::addBranchPoint()
     m_selection->setSelection(s);
 }
 
-void LayoutView::placeRef(const LayoutRef &ref)
+void LayoutView::placeRefs(const std::vector<LayoutRef> &refs)
 {
-    LayoutNode node{newId(), ref.nodeType, ref.refId, nextPlacePosition(), {}};
-    const QString id = node.id;
-    m_document->undoStack()->push(
-        new AddEntityCommand<LayoutNode>(m_document->model(), std::move(node), {}, tr("Place in layout")));
+    if (refs.empty())
+        return;
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(tr("Place in layout"));
     Selection s;
-    s.layoutNodes.insert(id);
+    for (const LayoutRef &ref : refs) {
+        LayoutNode node{newId(), ref.nodeType, ref.refId, nextPlacePosition(), {}};
+        s.layoutNodes.insert(node.id);
+        stack->push(new AddEntityCommand<LayoutNode>(m_document->model(), std::move(node), {},
+                                                     tr("Place in layout")));
+    }
+    stack->endMacro();
     m_selection->setSelection(s);
 }
 
@@ -215,8 +225,8 @@ void LayoutView::editSegmentLength(const QString &segmentId)
                  if (placeSpliceAlongLoom(segmentId, *mm))
                      return;
                  if (!spliceOfStub(model->harness(), segmentId).isEmpty())
-                     emit statusMessage(tr("The splice stays on its own branch: it goes inside the loom only from "
-                                           "a point with one loom, at a distance inside it."));
+                     emit statusMessage(tr("The splice stays on its own branch: it goes inside a loom only at a "
+                                           "distance inside the loom most of its wires run through."));
                  LayoutSegment updated = *current;
                  // Keep the stored value if the shown (rounded) text was not changed.
                  if (value == formatLength(current->lengthMm, units, false))
@@ -705,7 +715,7 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     QFont font = title->font();
     font.setBold(true);
     title->setFont(font);
-    auto *hint = new QLabel(tr("Double-click to place. Then draw segments by dragging the short lead "
+    auto *hint = new QLabel(tr("Double-click to place, or select several and press Place. Then draw segments by dragging the short lead "
                                "on the side of a point, and type each branch length. To put a splice inside "
                                "a loom, draw a segment from the connector to the splice and type its "
                                "distance, or drag the splice onto the loom; double-click it to change "
@@ -714,6 +724,8 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     hint->setWordWrap(true);
     hint->setEnabled(false);
     auto *place = new QPushButton(tr("Place"), side);
+    auto *placeAll = new QPushButton(tr("Place All"), side);
+    placeAll->setToolTip(tr("Place every item in the list, slightly offset from each other"));
     auto *branch = new QPushButton(tr("Add Branch Point"), side);
     auto *note = new QPushButton(tr("Add Note"), side);
     auto *sideLayout = new QVBoxLayout(side);
@@ -721,6 +733,7 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     sideLayout->addWidget(title);
     sideLayout->addWidget(m_unplaced, 1);
     sideLayout->addWidget(place);
+    sideLayout->addWidget(placeAll);
     sideLayout->addWidget(branch);
     sideLayout->addWidget(note);
     sideLayout->addWidget(hint);
@@ -735,8 +748,11 @@ LayoutEditor::LayoutEditor(Document *document, SelectionModel *selection, QWidge
     layout->addWidget(splitter);
 
     m_unplaced->setAccessibleName(tr("Items not in the layout yet"));
-    connect(m_unplaced, &QListWidget::itemActivated, this, &LayoutEditor::placeCurrent);
-    connect(place, &QPushButton::clicked, this, &LayoutEditor::placeCurrent);
+    m_unplaced->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    connect(m_unplaced, &QListWidget::itemActivated, this,
+            [this](QListWidgetItem *item) { placeItems({item}); });
+    connect(place, &QPushButton::clicked, this, &LayoutEditor::placeSelected);
+    connect(placeAll, &QPushButton::clicked, this, &LayoutEditor::placeAll);
     connect(branch, &QPushButton::clicked, m_view, &LayoutView::addBranchPoint);
     connect(note, &QPushButton::clicked, m_view, &LayoutView::addNote);
 
@@ -791,18 +807,33 @@ void LayoutEditor::refreshUnplaced()
     }
 }
 
-void LayoutEditor::placeCurrent()
+void LayoutEditor::placeSelected()
 {
-    QListWidgetItem *item = m_unplaced->currentItem();
-    if (!item)
-        return;
-    const QString refId = item->data(Qt::UserRole).toString();
+    QList<QListWidgetItem *> items = m_unplaced->selectedItems();
+    if (items.isEmpty() && m_unplaced->currentItem())
+        items.append(m_unplaced->currentItem());
+    placeItems(items);
+}
+
+void LayoutEditor::placeAll()
+{
+    QList<QListWidgetItem *> items;
+    for (int i = 0; i < m_unplaced->count(); ++i)
+        items.append(m_unplaced->item(i));
+    placeItems(items);
+}
+
+void LayoutEditor::placeItems(const QList<QListWidgetItem *> &items)
+{
+    QSet<QString> wanted;
+    for (const QListWidgetItem *item : items)
+        wanted.insert(item->data(Qt::UserRole).toString());
+    std::vector<LayoutRef> refs; // model order, so the cascade follows the list
     for (const LayoutRef &ref : layoutRefs(m_document->model()->harness())) {
-        if (ref.refId == refId) {
-            m_view->placeRef(ref);
-            return;
-        }
+        if (wanted.contains(ref.refId))
+            refs.push_back(ref);
     }
+    m_view->placeRefs(refs);
 }
 
 } // namespace tbh::app

@@ -24,6 +24,7 @@ class Document : public QObject
 
 public:
     explicit Document(QObject *parent = nullptr);
+    ~Document() override;
 
     HarnessModel *model() { return &m_model; }
     QUndoStack *undoStack() { return &m_undoStack; }

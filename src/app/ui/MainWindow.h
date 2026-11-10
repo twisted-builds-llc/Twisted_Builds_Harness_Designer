@@ -9,6 +9,9 @@
 class QLineEdit;
 class QTabWidget;
 class QMenu;
+class QSplitter;
+class QToolBar;
+class QToolButton;
 class QTreeWidget;
 
 namespace tbh::app {
@@ -34,6 +37,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
     void createMenus();
@@ -58,8 +62,21 @@ private:
     // Offers unsaved work from sessions that ended unexpectedly. `quietIfNone` skips the
     // "nothing to recover" message (used at startup).
     void offerRecovery(bool quietIfNone);
-    bool layoutTabActive() const;
+    // The editor menu actions and zoom act on: the current tab, or in split view the canvas
+    // that last had focus.
+    bool layoutActive() const;
     CanvasView *currentCanvas() const;
+    // Shows the schematic or layout editor (`m_schematic` or `m_layout`) in either view mode.
+    void showEditor(QWidget *editor);
+    // Puts the schematic and layout side by side (or stacked) in one tab, or back in their own tabs.
+    void setSplitView(bool on);
+    void setSplitStacked(bool stacked);
+    // Gives the schematic and layout half of the split each.
+    void equalizeSplit();
+    // Outlines the toolbar and split view buttons. The colors come from the palette when
+    // applied, so this runs again when the theme changes.
+    void styleButtons();
+    void syncToolbars();
 
     Theme *m_theme;
     Document *m_document;
@@ -70,6 +87,12 @@ private:
     Highlighter *m_highlighter = nullptr;
     Autosave *m_autosave = nullptr;
     QTabWidget *m_tabs = nullptr;
+    QSplitter *m_splitter = nullptr;
+    QAction *m_splitAction = nullptr;
+    QToolButton *m_splitButton = nullptr;
+    CanvasView *m_lastCanvas = nullptr;
+    QToolBar *m_schematicBar = nullptr;
+    QToolBar *m_layoutBar = nullptr;
     QLineEdit *m_find = nullptr;
     QMenu *m_recentMenu = nullptr;
     QMenu *m_viewMenu = nullptr;

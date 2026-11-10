@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "commands/EditOps.h"
 
+#include "calc/WireLength.h"
 #include "commands/EntityCommands.h"
 #include "model/Fragment.h"
 #include "model/PinLabels.h"
@@ -388,16 +389,59 @@ std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QS
     const QString splice = stubSpliceNode(harness, *stub);
     if (splice.isEmpty())
         return std::nullopt;
+    // The splice's own wires (those of every splice sitting at its point) decide which loom
+    // to follow where several leave a point.
+    const auto spliceNode = std::find_if(harness.layoutNodes.begin(), harness.layoutNodes.end(),
+                                         [&](const LayoutNode &n) { return n.id == splice; });
+    QSet<QString> spliceWires;
+    std::vector<QString> spliceIds{spliceNode->refId};
+    spliceIds.insert(spliceIds.end(), spliceNode->sharedSpliceIds.begin(), spliceNode->sharedSpliceIds.end());
+    for (const QString &id : spliceIds) {
+        for (const QString &wireId : wiresOnSplice(harness, id))
+            spliceWires.insert(wireId);
+    }
+    std::optional<QHash<QString, std::vector<QString>>> usage; // built only at a fork
+    auto spliceWiresIn = [&](const LayoutSegment *segment) {
+        if (!usage)
+            usage = calc::wiresBySegment(harness, calc::LayoutGraph(harness));
+        const std::vector<QString> through = usage->value(segment->id);
+        return std::count_if(through.begin(), through.end(),
+                             [&](const QString &wireId) { return spliceWires.contains(wireId); });
+    };
+
     QString at = stub->nodeA == splice ? stub->nodeB : stub->nodeA; // X
     const LayoutSegment *came = &*stub;
     double walked = 0;
     QSet<QString> visited{splice};
     while (!visited.contains(at)) {
         visited.insert(at);
-        const auto legs = segmentsOn(harness, at);
-        if (legs.size() != 2)
-            return std::nullopt; // X needs exactly one loom; the walk stops at ends and forks
-        const LayoutSegment *next = legs[0] == came ? legs[1] : legs[0];
+        std::vector<const LayoutSegment *> onward;
+        for (const LayoutSegment *leg : segmentsOn(harness, at)) {
+            if (leg != came)
+                onward.push_back(leg);
+        }
+        if (onward.empty())
+            return std::nullopt; // the loom ends here
+        const LayoutSegment *next = onward.front();
+        if (onward.size() > 1) {
+            // A fork: follow the loom most of the splice's wires run through; a tie (or none)
+            // leaves the choice open, so nothing is placed.
+            long best = 0;
+            next = nullptr;
+            bool tie = false;
+            for (const LayoutSegment *leg : onward) {
+                const long count = spliceWiresIn(leg);
+                if (count > best) {
+                    best = count;
+                    next = leg;
+                    tie = false;
+                } else if (count == best) {
+                    tie = true;
+                }
+            }
+            if (!next || tie)
+                return std::nullopt;
+        }
         if (next->lengthMm <= 0)
             return std::nullopt;
         if (distanceMm < walked + next->lengthMm) {
