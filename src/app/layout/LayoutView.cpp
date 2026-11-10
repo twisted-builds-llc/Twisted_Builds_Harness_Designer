@@ -245,21 +245,8 @@ bool LayoutView::placeSpliceAlongLoom(const QString &stubId, double distanceMm)
     if (!position || !stub)
         return false;
     const QString spliceNodeId = spliceOfStub(model->harness(), stubId);
-    if (!position->atNodeId.isEmpty()) {
-        // Side by side with the splices already at that point: this splice's own point and
-        // stub go away, and the point holds its splice too.
-        const LayoutNode *spliceNode = model->find<LayoutNode>(spliceNodeId);
-        LayoutNode joined = *model->find<LayoutNode>(position->atNodeId);
-        joined.sharedSpliceIds.push_back(spliceNode->refId);
-        joined.sharedSpliceIds.insert(joined.sharedSpliceIds.end(), spliceNode->sharedSpliceIds.begin(),
-                                      spliceNode->sharedSpliceIds.end());
-        QUndoStack *stack = m_document->undoStack();
-        stack->beginMacro(tr("Place splice in loom"));
-        stack->push(removeLayoutItems(model, {spliceNodeId}, {stubId}, {}).release());
-        stack->push(new UpdateEntityCommand<LayoutNode>(model, joined, {}));
-        stack->endMacro();
-        return true;
-    }
+    if (!position->atNodeId.isEmpty())
+        return placeSpliceOnPoint(spliceNodeId, position->atNodeId);
     const LayoutSegment *loom = model->find<LayoutSegment>(position->segmentId);
     LayoutSegmentItem *loomItem = m_scene->segmentItem(position->segmentId);
     if (!loom || !loomItem)
@@ -282,6 +269,55 @@ bool LayoutView::placeSpliceAlongLoom(const QString &stubId, double distanceMm)
                     .release());
     if (auto distance = setDistanceAlongRun(model, spliceNodeId, fromNodeA ? loomId : newSegmentId, offsetMm))
         stack->push(distance.release());
+    stack->endMacro();
+    return true;
+}
+
+bool LayoutView::placeSpliceOnPoint(const QString &spliceNodeId, const QString &pointId,
+                                    std::unique_ptr<QUndoCommand> *before)
+{
+    HarnessModel *model = m_document->model();
+    const Harness &h = model->harness();
+    const LayoutNode *spliceNode = model->find<LayoutNode>(spliceNodeId);
+    const LayoutNode *point = model->find<LayoutNode>(pointId);
+    if (!spliceNode || !point || spliceNodeId == pointId || spliceNode->type != LayoutNodeType::Splice)
+        return false;
+    const bool ontoSplice = point->type == LayoutNodeType::Splice && !point->refId.isEmpty();
+    if (!ontoSplice && point->type != LayoutNodeType::Branch)
+        return false;
+    const auto legs = std::count_if(h.layoutSegments.begin(), h.layoutSegments.end(), [&](const LayoutSegment &s) {
+        return s.nodeA == spliceNodeId || s.nodeB == spliceNodeId;
+    });
+    const QString stubId = stubOfSplice(h, spliceNodeId);
+    if (legs > 1 || (legs == 1 && stubId.isEmpty()))
+        return false;
+
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(tr("Place splice in loom"));
+    if (before && *before)
+        stack->push(before->release());
+    if (ontoSplice) {
+        // Side by side with the splices already at that point: this splice's own point and
+        // stub go away, and the point holds its splice too.
+        LayoutNode joined = *model->find<LayoutNode>(pointId);
+        const LayoutNode leaving = *model->find<LayoutNode>(spliceNodeId);
+        joined.sharedSpliceIds.push_back(leaving.refId);
+        joined.sharedSpliceIds.insert(joined.sharedSpliceIds.end(), leaving.sharedSpliceIds.begin(),
+                                      leaving.sharedSpliceIds.end());
+        stack->push(removeLayoutItems(model, {spliceNodeId}, {}, {}).release());
+        stack->push(new UpdateEntityCommand<LayoutNode>(model, joined, {}));
+    } else {
+        // In place of the bend or fork: the stub goes (unless it runs to this very point,
+        // when joining removes it), the splice moves there and takes the point's segments.
+        const LayoutSegment *stub = model->find<LayoutSegment>(stubId);
+        if (stub && stub->nodeA != pointId && stub->nodeB != pointId)
+            stack->push(removeLayoutItems(model, {}, {stubId}, {}).release());
+        LayoutNode moved = *model->find<LayoutNode>(spliceNodeId);
+        moved.position = model->find<LayoutNode>(pointId)->position;
+        stack->push(new UpdateEntityCommand<LayoutNode>(model, moved, {}));
+        if (auto join = mergeBranchInto(model, pointId, spliceNodeId))
+            stack->push(join.release());
+    }
     stack->endMacro();
     return true;
 }
@@ -405,6 +441,14 @@ void LayoutView::finishSegment(const QPoint &viewPos)
     if (!target && QLineF(startPos, scenePos).length() < 15)
         return; // a click, not a drag
 
+    // Released over a bundle: a splice's lead puts the splice itself inside the bundle;
+    // any other lead ends on a new point inside the bundle (a branch off it), not on a
+    // point that only lies on top of it.
+    const QString onSegment = target ? QString() : segmentAt(scenePos, {from});
+    if (!onSegment.isEmpty() && placeSpliceInSegment(from, onSegment, scenePos))
+        return;
+
+    QUndoStack *stack = m_document->undoStack();
     auto macro = std::make_unique<QUndoCommand>(tr("Add segment"));
     QString to;
     if (target) {
@@ -417,7 +461,22 @@ void LayoutView::finishSegment(const QPoint &viewPos)
     LayoutSegment segment{newId(), from, to, 0.0, {}, {}, SleevingCoverage::Full, std::nullopt, {}};
     const QString segmentId = segment.id;
     new AddEntityCommand<LayoutSegment>(model, std::move(segment), {}, {}, macro.get());
-    m_document->undoStack()->push(macro.release());
+    if (onSegment.isEmpty()) {
+        stack->push(macro.release());
+    } else {
+        // Into the bundle first (the point goes onto its line), then the new segment.
+        LayoutSegmentItem *loomItem = m_scene->segmentItem(onSegment);
+        const SegmentSplit split = splitNear(loomItem->endA(), loomItem->endB(), loomItem->segment().bend, scenePos);
+        stack->beginMacro(tr("Add segment"));
+        LayoutNode branch{newId(), LayoutNodeType::Branch, {}, split.point, {}};
+        const QString branchId = branch.id;
+        stack->push(new AddEntityCommand<LayoutNode>(model, std::move(branch), {}, {}));
+        stack->push(splitSegmentAt(model, onSegment, branchId, split.fraction, split.bendA, split.bendB).release());
+        LayoutSegment drawn{segmentId, from, branchId, 0.0, {}, {}, SleevingCoverage::Full, std::nullopt, {}};
+        stack->push(new AddEntityCommand<LayoutSegment>(model, std::move(drawn), {}, {}));
+        stack->endMacro();
+        macro.reset();
+    }
     Selection s;
     s.layoutSegments.insert(segmentId);
     m_selection->setSelection(s);
@@ -475,11 +534,14 @@ void LayoutView::commitMoves()
     m_notePressPositions.clear();
     if (macro->childCount() == 0)
         return;
-    // A point dropped onto another joins it: the branch point of the two goes away.
+    // A point dropped onto another joins it: the branch point of the two goes away. A
+    // splice dropped onto a point in the loom goes there (placeSpliceOnPoint()).
     std::vector<std::pair<QString, QString>> joins; // branch id, into id
     if (moved.size() == 1) {
         const QString id = *moved.begin();
         if (LayoutNodeItem *other = nodeNear(m_scene->nodeItem(id)->pos(), moved, 0.4, 5)) {
+            if (placeSpliceOnPoint(id, other->id(), &macro))
+                return;
             if (model->find<LayoutNode>(id)->type == LayoutNodeType::Branch)
                 joins.emplace_back(id, other->id());
             else if (other->node().type == LayoutNodeType::Branch)
@@ -488,45 +550,12 @@ void LayoutView::commitMoves()
     }
     QUndoStack *stack = m_document->undoStack();
     if (joins.empty() && moved.size() == 1) {
-        // A splice dropped onto a bundle goes inside it. A stub it was drawn on is replaced:
-        // the stub's length becomes the splice's distance along the bundle from the same end.
+        // A splice dropped onto a bundle goes inside it.
         const QString id = *moved.begin();
-        QString stubId;
-        const QString segmentId = segmentUnderSplice(id, &stubId);
-        if (!segmentId.isEmpty()) {
-            LayoutSegmentItem *segmentItem = m_scene->segmentItem(segmentId);
-            const SegmentSplit split = splitNear(segmentItem->endA(), segmentItem->endB(),
-                                                 segmentItem->segment().bend, m_scene->nodeItem(id)->pos());
-            const bool fromNodeA = [&] {
-                if (stubId.isEmpty())
-                    return true;
-                const LayoutSegment *stub = model->find<LayoutSegment>(stubId);
-                const QString far = stub->nodeA == id ? stub->nodeB : stub->nodeA;
-                return far == model->find<LayoutSegment>(segmentId)->nodeA;
-            }();
-            const double stubLengthMm = stubId.isEmpty() ? 0 : model->find<LayoutSegment>(stubId)->lengthMm;
-            stack->beginMacro(tr("Place splice in bundle"));
-            stack->push(macro.release());
-            LayoutNode updated = *model->find<LayoutNode>(id);
-            updated.position = split.point; // onto the line itself
-            stack->push(new UpdateEntityCommand<LayoutNode>(model, updated, {}));
-            if (!stubId.isEmpty())
-                stack->push(removeLayoutItems(model, {}, {stubId}, {}).release());
-            QString newSegmentId;
-            stack->push(splitSegmentAt(model, segmentId, id, split.fraction, split.bendA, split.bendB,
-                                       &newSegmentId).release());
-            bool placed = false;
-            if (stubLengthMm > 0) {
-                const QString fromId = fromNodeA ? segmentId : newSegmentId;
-                if (auto distance = setDistanceAlongRun(model, id, fromId, stubLengthMm))
-                    stack->push(distance.release());
-                placed = model->find<LayoutSegment>(fromId)->lengthMm == stubLengthMm;
-            }
-            stack->endMacro();
-            if (!placed)
-                QTimer::singleShot(0, this, [this, id] { editPositionAlongRun(id); });
+        const QPointF pos = m_scene->nodeItem(id)->pos();
+        const QString segmentId = segmentAt(pos, {id, stubOfSplice(model->harness(), id)});
+        if (!segmentId.isEmpty() && placeSpliceInSegment(id, segmentId, pos, &macro))
             return;
-        }
     }
     if (joins.empty()) {
         stack->push(macro.release());
@@ -541,38 +570,67 @@ void LayoutView::commitMoves()
     stack->endMacro();
 }
 
-QString LayoutView::segmentUnderSplice(const QString &nodeId, QString *stubId) const
+QString LayoutView::segmentAt(const QPointF &scenePos, const QSet<QString> &skip) const
 {
-    const Harness &h = m_document->model()->harness();
-    const LayoutNode *node = m_document->model()->find<LayoutNode>(nodeId);
-    LayoutNodeItem *item = m_scene->nodeItem(nodeId);
-    if (!node || !item || node->type != LayoutNodeType::Splice)
-        return {};
-    const LayoutSegment *stub = nullptr;
-    for (const LayoutSegment &s : h.layoutSegments) {
-        if (s.nodeA != nodeId && s.nodeB != nodeId)
-            continue;
-        if (stub)
-            return {}; // already inside a run, or a branch of its own
-        stub = &s;
-    }
-    const QString stubFar = stub ? (stub->nodeA == nodeId ? stub->nodeB : stub->nodeA) : QString();
-    // The bundle's own shape (line plus caption) under the splice's center.
-    for (QGraphicsItem *under : m_scene->items(item->pos())) {
+    // The bundle's own shape (line plus caption) under the point.
+    for (QGraphicsItem *under : m_scene->items(scenePos)) {
         if (under->type() != LayoutSegmentItemType)
             continue;
-        const auto *segmentItem = static_cast<LayoutSegmentItem *>(under);
-        if (!stub)
-            return segmentItem->id();
-        if (segmentItem->id() == stub->id)
-            continue;
-        const LayoutSegment &target = segmentItem->segment();
-        if (target.nodeA != stubFar && target.nodeB != stubFar)
-            return {};
-        *stubId = stub->id;
-        return segmentItem->id();
+        const LayoutSegment &segment = static_cast<LayoutSegmentItem *>(under)->segment();
+        if (!skip.contains(segment.id) && !skip.contains(segment.nodeA) && !skip.contains(segment.nodeB))
+            return segment.id;
     }
     return {};
+}
+
+bool LayoutView::placeSpliceInSegment(const QString &spliceNodeId, const QString &segmentId,
+                                      const QPointF &scenePos, std::unique_ptr<QUndoCommand> *before)
+{
+    HarnessModel *model = m_document->model();
+    const Harness &h = model->harness();
+    const LayoutNode *node = model->find<LayoutNode>(spliceNodeId);
+    const LayoutSegment *target = model->find<LayoutSegment>(segmentId);
+    LayoutSegmentItem *segmentItem = m_scene->segmentItem(segmentId);
+    if (!node || !target || !segmentItem || node->type != LayoutNodeType::Splice
+        || target->nodeA == spliceNodeId || target->nodeB == spliceNodeId)
+        return false;
+    const QString stubId = stubOfSplice(h, spliceNodeId);
+    const bool hasSegments = std::any_of(h.layoutSegments.begin(), h.layoutSegments.end(), [&](const LayoutSegment &s) {
+        return s.nodeA == spliceNodeId || s.nodeB == spliceNodeId;
+    });
+    if (hasSegments && stubId.isEmpty())
+        return false; // already inside a run, or a branch of its own
+
+    const SegmentSplit split = splitNear(segmentItem->endA(), segmentItem->endB(), target->bend, scenePos);
+    // The stub's length is a distance along the bundle only when the bundle starts where the
+    // stub did; otherwise the distance is asked for.
+    const LayoutSegment *stub = model->find<LayoutSegment>(stubId);
+    const QString far = !stub ? QString() : stub->nodeA == spliceNodeId ? stub->nodeB : stub->nodeA;
+    const bool fromNodeA = far == target->nodeA;
+    const double stubLengthMm = stub && (fromNodeA || far == target->nodeB) ? stub->lengthMm : 0;
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(tr("Place splice in bundle"));
+    if (before && *before)
+        stack->push(before->release());
+    LayoutNode updated = *model->find<LayoutNode>(spliceNodeId);
+    updated.position = split.point; // onto the line itself
+    stack->push(new UpdateEntityCommand<LayoutNode>(model, updated, {}));
+    if (!stubId.isEmpty())
+        stack->push(removeLayoutItems(model, {}, {stubId}, {}).release());
+    QString newSegmentId;
+    stack->push(splitSegmentAt(model, segmentId, spliceNodeId, split.fraction, split.bendA, split.bendB, &newSegmentId)
+                    .release());
+    bool placed = false;
+    if (stubLengthMm > 0) {
+        const QString fromId = fromNodeA ? segmentId : newSegmentId;
+        if (auto distance = setDistanceAlongRun(model, spliceNodeId, fromId, stubLengthMm))
+            stack->push(distance.release());
+        placed = model->find<LayoutSegment>(fromId)->lengthMm == stubLengthMm;
+    }
+    stack->endMacro();
+    if (!placed)
+        QTimer::singleShot(0, this, [this, spliceNodeId] { editPositionAlongRun(spliceNodeId); });
+    return true;
 }
 
 void LayoutView::editPositionAlongRun(const QString &nodeId)

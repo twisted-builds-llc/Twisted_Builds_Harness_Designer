@@ -97,9 +97,10 @@ std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString 
 // loom out of X: where several segments leave a point (X itself, or a fork further on), the
 // walk follows the one most of the splice's wires are routed through (none or a tie: no
 // position). The walk passes bends, forks and splices already inside, not connectors.
-// It lands in `segmentId`, `offsetMm` from its end nearer X (`fromNodeA` says which), or exactly on splice point `atNodeId`, where it sits
-// side by side with the splices there (segmentId then empty). Empty when the stub does not
-// qualify or the distance is not inside the walkable loom.
+// It lands in `segmentId`, `offsetMm` from its end nearer X (`fromNodeA` says which), or
+// exactly on point `atNodeId` (segmentId then empty): a splice point, where it sits side by
+// side with the splices there, or a bend or fork, which it takes the place of. Empty when
+// the stub does not qualify or the distance is not inside the walkable loom.
 struct LoomPosition
 {
     QString segmentId;
@@ -112,6 +113,10 @@ std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QS
 // The splice node whose only segment is `stubId`, or empty (whether or not the loom fits a
 // distance).
 QString spliceOfStub(const Harness &harness, const QString &stubId);
+// The stub splice node `spliceNodeId` is drawn on: its only segment, when the other end of
+// that segment is a point on a loom (it has other segments too). Empty otherwise, e.g. for
+// a splice at the end of a branch of its own.
+QString stubOfSplice(const Harness &harness, const QString &spliceNodeId);
 
 // Moves node `nodeId` along the run through it without changing the run's total length:
 // the node must have exactly two segments; `fromSegmentId` (one of them) is set to
