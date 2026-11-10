@@ -66,15 +66,15 @@ Harness sample()
     h.info.units = Units::Millimeters;
     h.connectors = {connector(u"ecu"_s, 4), connector(u"sensor"_s, 2), connector(u"lamp"_s, 1)};
     h.splices = {Splice{u"sp"_s, u"S1"_s, {}, {}}};
+    h.freeEnds = {FreeEnd{u"fl"_s, FreeEndKind::FlyingLead, {}, {}, {}}};
     h.wires = {wire(u"w1"_s, PinRef{u"ecu"_s, u"ecu1"_s}, PinRef{u"sensor"_s, u"sensor1"_s}),
                wire(u"w2"_s, PinRef{u"ecu"_s, u"ecu2"_s}, SpliceRef{u"sp"_s}),
-               wire(u"w3"_s, SpliceRef{u"sp"_s}, FreeEnd{FreeEndKind::FlyingLead, {}, {}})};
+               wire(u"w3"_s, SpliceRef{u"sp"_s}, FreeEndRef{u"fl"_s})};
     h.layoutNodes = {LayoutNode{u"n1"_s, LayoutNodeType::Connector, u"ecu"_s, QPointF(0, 0), {}},
                      LayoutNode{u"n2"_s, LayoutNodeType::Branch, {}, QPointF(300, 0), {}},
                      LayoutNode{u"n3"_s, LayoutNodeType::Connector, u"sensor"_s, QPointF(600, 0), {}},
                      LayoutNode{u"n4"_s, LayoutNodeType::Splice, u"sp"_s, QPointF(300, 200), {}},
-                     LayoutNode{u"n5"_s, LayoutNodeType::FlyingLead, freeEndPlacementKey(u"w3"_s, true),
-                                QPointF(500, 200), {}}};
+                     LayoutNode{u"n5"_s, LayoutNodeType::FlyingLead, u"fl"_s, QPointF(500, 200), {}}};
     h.layoutSegments = {
         LayoutSegment{u"s1"_s, u"n1"_s, u"n2"_s, 300, {}, {}, SleevingCoverage::Full, std::nullopt, {}},
         LayoutSegment{u"s2"_s, u"n2"_s, u"n3"_s, 450, {}, {}, SleevingCoverage::Full, std::nullopt, {}},
@@ -87,6 +87,7 @@ Harness sample()
     h.schematic.placements[u"sensor"_s] = SchematicPlacement{QPointF(600, 0), false, 0, {}};
     h.schematic.placements[u"lamp"_s] = SchematicPlacement{QPointF(600, 200), false, 0, {}};
     h.schematic.placements[u"sp"_s] = SchematicPlacement{QPointF(400, 300), false, 0, {}};
+    h.schematic.placements[u"fl"_s] = SchematicPlacement{QPointF(600, 300), false, 0, {}};
     return h;
 }
 
@@ -808,7 +809,7 @@ private slots:
         const calc::LayoutGraph joinedGraph(model->harness());
         QCOMPARE(calc::wireLength(model->harness(), joinedGraph, *model->find<Wire>(u"w5"_s)).baseMm, 700.0);
         // Deleting sp2 leaves sp3 holding the point.
-        document.undoStack()->push(removeItems(model, {}, {u"sp2"_s}, {}).release());
+        document.undoStack()->push(removeItems(model, {}, {u"sp2"_s}, {}, {}).release());
         QCOMPARE(model->find<LayoutNode>(u"n6"_s)->refId, u"sp3"_s);
         QVERIFY(model->find<LayoutNode>(u"n6"_s)->sharedSpliceIds.empty());
         verifyLoadable(model->harness());
@@ -924,10 +925,19 @@ private slots:
         const Harness h = sample();
         model.reset(h);
         QUndoStack stack;
-        stack.push(removeItems(&model, {u"sensor"_s}, {u"sp"_s}, {}).release());
-        // Nodes keep their place but lose the reference; w3's free-end node too (w3 is deleted).
+        stack.push(removeItems(&model, {u"sensor"_s}, {u"sp"_s}, {}, {}).release());
+        // Nodes keep their place but lose the reference. Flying lead fl stays (only its wire
+        // w3 goes with the splice), so its node keeps it.
         QVERIFY(model.find<LayoutNode>(u"n3"_s)->refId.isEmpty());
         QVERIFY(model.find<LayoutNode>(u"n4"_s)->refId.isEmpty());
+        QCOMPARE(model.find<LayoutNode>(u"n5"_s)->refId, u"fl"_s);
+        verifyLoadable(model.harness());
+        stack.undo();
+        QVERIFY(model.harness() == h);
+        // Deleting the flying lead deletes its wire and clears its node.
+        stack.push(removeItems(&model, {}, {}, {u"fl"_s}, {}).release());
+        QVERIFY(!model.find<FreeEnd>(u"fl"_s));
+        QVERIFY(!model.find<Wire>(u"w3"_s));
         QVERIFY(model.find<LayoutNode>(u"n5"_s)->refId.isEmpty());
         verifyLoadable(model.harness());
         stack.undo();
@@ -942,20 +952,20 @@ private slots:
         QUndoStack stack;
 
         // Pin -> another pin.
-        stack.push(setWireEnd(&model, u"w1"_s, true, PinRef{u"lamp"_s, u"lamp1"_s}, {}).release());
+        stack.push(setWireEnd(&model, u"w1"_s, true, PinRef{u"lamp"_s, u"lamp1"_s}).release());
         QCOMPARE(std::get<PinRef>(model.find<Wire>(u"w1"_s)->endB).connectorId, u"lamp"_s);
-        // Pin -> flying lead, placed where dropped.
-        stack.push(setWireEnd(&model, u"w1"_s, true, FreeEnd{}, QPointF(70, 80)).release());
-        QVERIFY(std::holds_alternative<FreeEnd>(model.find<Wire>(u"w1"_s)->endB));
-        QCOMPARE(model.placement(freeEndPlacementKey(u"w1"_s, true))->position, QPointF(70, 80));
-        // Free end (with a layout node) -> pin: placement and layout reference go away.
-        stack.push(setWireEnd(&model, u"w3"_s, true, PinRef{u"lamp"_s, u"lamp1"_s}, {}).release());
-        QVERIFY(!model.placement(freeEndPlacementKey(u"w3"_s, true)));
-        QVERIFY(model.find<LayoutNode>(u"n5"_s)->refId.isEmpty());
+        // Pin -> flying lead fl (which now takes two wires).
+        stack.push(setWireEnd(&model, u"w1"_s, true, FreeEndRef{u"fl"_s}).release());
+        QCOMPARE(std::get<FreeEndRef>(model.find<Wire>(u"w1"_s)->endB).freeEndId, u"fl"_s);
+        // Flying lead -> pin: the flying lead, its placement and its layout node stay.
+        stack.push(setWireEnd(&model, u"w3"_s, true, PinRef{u"lamp"_s, u"lamp1"_s}).release());
+        QVERIFY(model.find<FreeEnd>(u"fl"_s));
+        QVERIFY(model.placement(u"fl"_s));
+        QCOMPARE(model.find<LayoutNode>(u"n5"_s)->refId, u"fl"_s);
         verifyLoadable(model.harness());
         // No-ops: onto the same pin, or onto the wire's other end.
-        QVERIFY(!setWireEnd(&model, u"w2"_s, false, PinRef{u"ecu"_s, u"ecu2"_s}, {}));
-        QVERIFY(!setWireEnd(&model, u"w2"_s, false, SpliceRef{u"sp"_s}, {}));
+        QVERIFY(!setWireEnd(&model, u"w2"_s, false, PinRef{u"ecu"_s, u"ecu2"_s}));
+        QVERIFY(!setWireEnd(&model, u"w2"_s, false, SpliceRef{u"sp"_s}));
 
         stack.undo();
         stack.undo();
@@ -988,19 +998,21 @@ private slots:
         QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, target);
         QCOMPARE(std::get<PinRef>(document.model()->find<Wire>(u"w1"_s)->endB).pinId, u"lamp1"_s);
 
-        // Drag the flying lead of w3 onto sensor:2 to attach it.
-        Selection none;
-        selection.setSelection(none);
-        FreeEndItem *freeEnd = view.schematicScene()->freeEndItem(freeEndPlacementKey(u"w3"_s, true));
-        QVERIFY(freeEnd);
+        // Drag w3's end off flying lead fl onto sensor:2; fl stays.
+        Selection w3Only;
+        w3Only.wires.insert(u"w3"_s);
+        selection.setSelection(w3Only);
+        QVERIFY(view.schematicScene()->freeEndItem(u"fl"_s));
         ConnectorItem *sensor = view.schematicScene()->connectorItem(u"sensor"_s);
-        const QPoint from = view.mapFromScene(freeEnd->scenePos());
+        const QPoint from =
+            view.mapFromScene(view.schematicScene()->endAnchor(*document.model()->find<Wire>(u"w3"_s), true).point);
         const QPoint onPin = view.mapFromScene(sensor->mapToScene(sensor->circuitCellRect(1).center()));
         QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
         QTest::mouseMove(view.viewport(), from + QPoint(20, 0));
         QTest::mouseMove(view.viewport(), onPin);
         QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, onPin);
         QCOMPARE(std::get<PinRef>(document.model()->find<Wire>(u"w3"_s)->endB).pinId, u"sensor2"_s);
+        QVERIFY(document.model()->find<FreeEnd>(u"fl"_s));
         verifyLoadable(document.model()->harness());
     }
 

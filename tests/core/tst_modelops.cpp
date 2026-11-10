@@ -30,19 +30,20 @@ Wire wire(const QString &id, WireEnd a, WireEnd b)
     return w;
 }
 
-// J1 (2 pins) and J2 (1 pin), splice S1; w1 J1.1-J2.1, w2 J1.2-S1, w3 S1-flying lead.
+// J1 (2 pins) and J2 (1 pin), splice S1, flying lead F1; w1 J1.1-J2.1, w2 J1.2-S1, w3 S1-F1.
 Harness sample()
 {
     Harness h;
     h.connectors = {connector(u"j1"_s, u"J1"_s, 2), connector(u"j2"_s, u"J2"_s, 1)};
     h.splices = {Splice{u"s1"_s, u"S1"_s, {}, {}}};
+    h.freeEnds = {FreeEnd{u"f1"_s, FreeEndKind::FlyingLead, u"L"_s, {}, {}}};
     h.wires = {wire(u"w1"_s, PinRef{u"j1"_s, u"j1-p1"_s}, PinRef{u"j2"_s, u"j2-p1"_s}),
                wire(u"w2"_s, PinRef{u"j1"_s, u"j1-p2"_s}, SpliceRef{u"s1"_s}),
-               wire(u"w3"_s, SpliceRef{u"s1"_s}, FreeEnd{FreeEndKind::FlyingLead, {}, u"L"_s})};
+               wire(u"w3"_s, SpliceRef{u"s1"_s}, FreeEndRef{u"f1"_s})};
     h.wires[0].name = u"5V"_s;
     h.schematic.placements[u"j1"_s] = SchematicPlacement{QPointF(1, 2), false, 0, {}};
     h.schematic.placements[u"s1"_s] = SchematicPlacement{QPointF(3, 4), false, 0, {}};
-    h.schematic.placements[freeEndPlacementKey(u"w3"_s, true)] = SchematicPlacement{QPointF(5, 6), false, 0, {}};
+    h.schematic.placements[u"f1"_s] = SchematicPlacement{QPointF(5, 6), false, 0, {}};
     return h;
 }
 
@@ -96,11 +97,13 @@ private slots:
         QCOMPARE(changed.count(), 1);
         QCOMPARE(model.find<Connector>(u"j3"_s)->label, u"J3b"_s);
 
-        // Removing a wire drops its free-end placement.
+        // Removing a wire keeps the free end it ended on; removing the free end drops its placement.
         model.remove<Wire>(u"w3"_s);
         QCOMPARE(removed.count(), 1);
         QVERIFY(!model.find<Wire>(u"w3"_s));
-        QVERIFY(!model.placement(freeEndPlacementKey(u"w3"_s, true)));
+        QVERIFY(model.placement(u"f1"_s));
+        model.remove<FreeEnd>(u"f1"_s);
+        QVERIFY(!model.placement(u"f1"_s));
 
         model.remove<Splice>(u"s1"_s);
         QVERIFY(!model.placement(u"s1"_s));
@@ -117,10 +120,12 @@ private slots:
     void fragmentIncludesInternalWiresOnly()
     {
         const Harness h = sample();
-        // J1 + S1: w2 (J1-S1) and w3 (S1-free) come along, w1 (to J2) does not.
+        // J1 + S1: w2 (J1-S1) and w3 (S1-F1) come along, w1 (to J2) does not. F1 comes along
+        // because its wire w3 starts on the copied splice.
         const Harness f = extractFragment(h, {u"j1"_s}, {u"s1"_s});
         QCOMPARE(f.connectors.size(), size_t(1));
         QCOMPARE(f.splices.size(), size_t(1));
+        QCOMPARE(f.freeEnds.size(), size_t(1));
         QCOMPARE(f.wires.size(), size_t(2));
         QCOMPARE(f.wires[0].id, u"w2"_s);
         QCOMPARE(f.wires[1].id, u"w3"_s);
@@ -142,7 +147,9 @@ private slots:
         QCOMPARE(std::get<SpliceRef>(f.wires[1].endB).spliceId, f.splices[0].id);
         QVERIFY(f.schematic.placements.count(f.connectors[0].id));
         QVERIFY(f.schematic.placements.count(f.splices[0].id));
-        QVERIFY(f.schematic.placements.count(freeEndPlacementKey(f.wires[2].id, true)));
+        QCOMPARE(std::get<FreeEndRef>(f.wires[2].endB).freeEndId, f.freeEnds[0].id);
+        QVERIFY(f.freeEnds[0].id != u"f1"_s);
+        QVERIFY(f.schematic.placements.count(f.freeEnds[0].id));
         QCOMPARE(f.schematic.placements.size(), size_t(3));
     }
 

@@ -18,6 +18,7 @@ PropertiesPanel::PropertiesPanel(Document *document, SelectionModel *selection, 
     , m_connector(new ConnectorPanel(document, this))
     , m_wires(new WirePanel(document, this))
     , m_splice(new SplicePanel(document, this))
+    , m_freeEnd(new FreeEndEditor(document, this))
     , m_segment(new SegmentPanel(document, this))
     , m_node(new LayoutNodePanel(document, this))
     , m_mixed(new QLabel(this))
@@ -26,6 +27,7 @@ PropertiesPanel::PropertiesPanel(Document *document, SelectionModel *selection, 
     m_mixed->setEnabled(false);
     for (QWidget *page : {static_cast<QWidget *>(m_harness), static_cast<QWidget *>(m_connector),
                           static_cast<QWidget *>(m_wires), static_cast<QWidget *>(m_splice),
+                          static_cast<QWidget *>(m_freeEnd),
                           static_cast<QWidget *>(m_segment), static_cast<QWidget *>(m_node),
                           static_cast<QWidget *>(m_mixed)})
         addWidget(page);
@@ -36,7 +38,7 @@ PropertiesPanel::PropertiesPanel(Document *document, SelectionModel *selection, 
 void PropertiesPanel::update()
 {
     const Selection &s = m_selection->selection();
-    const qsizetype items = s.connectors.size() + s.splices.size();
+    const qsizetype items = s.connectors.size() + s.splices.size() + s.freeEnds.size();
     const qsizetype layoutItems = s.layoutNodes.size() + s.layoutSegments.size();
     const qsizetype total = items + s.wires.size() + layoutItems;
     if (s.isEmpty()) {
@@ -56,6 +58,9 @@ void PropertiesPanel::update()
     } else if (s.splices.size() == 1 && items == 1 && s.wires.isEmpty()) {
         m_splice->setSplice(*s.splices.begin());
         setCurrentWidget(m_splice);
+    } else if (s.freeEnds.size() == 1 && items == 1 && s.wires.isEmpty()) {
+        m_freeEnd->setFreeEnd(*s.freeEnds.begin());
+        setCurrentWidget(m_freeEnd);
     } else if (items == 0) {
         m_wires->setWires(s.wires);
         setCurrentWidget(m_wires);

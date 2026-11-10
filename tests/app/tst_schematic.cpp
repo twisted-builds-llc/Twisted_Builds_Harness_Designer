@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Autosave.h"
+#include "calc/Highlight.h"
 #include "Document.h"
 #include "SelectionModel.h"
 #include "commands/EditOps.h"
@@ -136,6 +137,66 @@ private slots:
         QCOMPARE(h.splices.size(), size_t(1));
     }
 
+    // Add Flying Lead / Add Eyelet place a free end with no wire, selected. Dragging from
+    // its lead to a pin draws a wire; dragging from a pin onto it draws another one.
+    void addedFreeEndIsWiredByDraggingItsLead()
+    {
+        Fixture f;
+        Harness h;
+        h.connectors = {makeConnector(u"A"_s, 3)};
+        h.schematic.placements[h.connectors[0].id] = SchematicPlacement{QPointF(0, 0), false, 0, {}};
+        f.reset(h);
+
+        f.view.addFreeEnd(FreeEndKind::Eyelet);
+        f.view.addFreeEnd(FreeEndKind::FlyingLead);
+        const Harness &model = f.model()->harness();
+        QCOMPARE(model.freeEnds.size(), size_t(2));
+        QVERIFY(model.wires.empty());
+        QCOMPARE(model.freeEnds[0].kind, FreeEndKind::Eyelet);
+        QCOMPARE(model.freeEnds[1].kind, FreeEndKind::FlyingLead);
+        const QString eyeletId = model.freeEnds[0].id;
+        QCOMPARE(f.selection.selection().freeEnds, QSet<QString>{model.freeEnds[1].id});
+        // Added at the same view center: the second steps 20, 20 past the first.
+        QCOMPARE(f.model()->placement(model.freeEnds[1].id)->position,
+                 f.model()->placement(eyeletId)->position + QPointF(20, 20));
+
+        // Move the eyelet to (500, 100), then drag from its left lead onto pin 2's circuit cell.
+        f.document.undoStack()->push(new SetPlacementsCommand(
+            f.model(), {{eyeletId, SchematicPlacement{QPointF(500, 100), false, 0, {}}}}, u"Move"_s));
+        FreeEndItem *eyelet = f.scene()->freeEndItem(eyeletId);
+        QCOMPARE(eyelet->pos(), QPointF(500, 100));
+        // Middle of the left lead: x = -(kHalfWidth + kStubLength / 2) = -(12 + 7) = -19.
+        const QPoint lead = f.toView(eyelet->mapToScene(QPointF(-19, 0)));
+        ConnectorItem *a = f.scene()->connectorItem(h.connectors[0].id);
+        const QPoint pin = f.toView(a->mapToScene(a->circuitCellRect(1).center()));
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, lead);
+        QTest::mouseMove(f.view.viewport(), lead - QPoint(20, 0));
+        QTest::mouseMove(f.view.viewport(), pin);
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, pin);
+        QCOMPARE(model.wires.size(), size_t(1));
+        QCOMPARE(std::get<FreeEndRef>(model.wires[0].endA).freeEndId, eyeletId);
+        QCOMPARE(std::get<PinRef>(model.wires[0].endB).pinId, h.connectors[0].pins[1].id);
+        QCOMPARE(model.freeEnds.size(), size_t(2)); // the eyelet stays where it was
+        QCOMPARE(eyelet->pos(), QPointF(500, 100));
+        // The wire attaches at the tip of the eyelet's lead facing the connector (the left one):
+        // x = 500 - (12 + 14) = 474.
+        QCOMPARE(f.scene()->endAnchor(model.wires[0], false).point, QPointF(474, 100));
+
+        // Pin 3 dragged onto the eyelet: a second wire on it.
+        const QPoint pin3 = f.toView(a->mapToScene(a->circuitCellRect(2).center()));
+        const QPoint onEyelet = f.toView(eyelet->scenePos());
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, pin3);
+        QTest::mouseMove(f.view.viewport(), pin3 + QPoint(20, 0));
+        QTest::mouseMove(f.view.viewport(), onEyelet);
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, onEyelet);
+        QCOMPARE(model.wires.size(), size_t(2));
+        QCOMPARE(std::get<FreeEndRef>(model.wires[1].endB).freeEndId, eyeletId);
+
+        f.document.undoStack()->undo();
+        f.document.undoStack()->undo();
+        QVERIFY(model.wires.empty());
+    }
+
     void wireBendsAreRounded()
     {
         /* Route (0,0) -> (40,0) -> (40,100) -> (100,100), radius 12.
@@ -236,7 +297,7 @@ private slots:
             QVERIFY(f.scene()->wireItem(w.id));
         // Removing a wire through a command removes its item; undo restores it.
         const QString wireId = h.wires[0].id;
-        f.document.undoStack()->push(removeItems(f.model(), {}, {}, {wireId}).release());
+        f.document.undoStack()->push(removeItems(f.model(), {}, {}, {}, {wireId}).release());
         QVERIFY(!f.scene()->wireItem(wireId));
         f.document.undoStack()->undo();
         QVERIFY(f.scene()->wireItem(wireId));
@@ -302,8 +363,14 @@ private slots:
         QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, empty);
         QCOMPARE(f.model()->harness().wires.size(), size_t(2));
         const Wire &lead = f.model()->harness().wires[1];
-        QCOMPARE(std::get<FreeEnd>(lead.endB).kind, FreeEndKind::FlyingLead);
-        QVERIFY(f.model()->placement(freeEndPlacementKey(lead.id, true)));
+        const QString leadId = std::get<FreeEndRef>(lead.endB).freeEndId;
+        QCOMPARE(f.model()->find<FreeEnd>(leadId)->kind, FreeEndKind::FlyingLead);
+        QCOMPARE(f.model()->placement(leadId)->position, QPointF(300, 400));
+        // One undo removes the wire and its new flying lead.
+        f.document.undoStack()->undo();
+        QCOMPARE(f.model()->harness().wires.size(), size_t(1));
+        QVERIFY(f.model()->harness().freeEnds.empty());
+        f.document.undoStack()->redo();
 
         // A click without dragging only selects.
         QTest::mouseClick(f.view.viewport(), Qt::LeftButton, {}, from);
@@ -450,7 +517,7 @@ private slots:
         f.reset(ecuHarness(8, 2, 4));
         const Harness before = f.model()->harness();
         const QString j1 = before.connectors[1].id;
-        f.document.undoStack()->push(removeItems(f.model(), {j1}, {}, {}).release());
+        f.document.undoStack()->push(removeItems(f.model(), {j1}, {}, {}, {}).release());
         QCOMPARE(f.model()->harness().connectors.size(), size_t(2));
         QCOMPARE(f.model()->harness().wires.size(), size_t(4));
         f.document.undoStack()->undo();
@@ -556,7 +623,7 @@ private slots:
         QCOMPARE(item->runX(), 530.0);
 
         // Deleting the wire drops its route; undo brings both back. The file still loads.
-        f.document.undoStack()->push(removeItems(f.model(), {}, {}, {w.id}).release());
+        f.document.undoStack()->push(removeItems(f.model(), {}, {}, {}, {w.id}).release());
         QVERIFY(!f.model()->placement(w.id));
         f.document.undoStack()->undo();
         QCOMPARE(f.model()->placement(w.id)->position.x(), 530.0);
@@ -671,6 +738,33 @@ private slots:
         f.view.resetTransform();
         f.view.centerOn(QPointF(450, 300));
         f.view.grab().save(imageDir() + u"/schematic-100.png"_s);
+
+        // One free end of each kind, wired to a connector, plus an unwired eyelet.
+        Harness ends;
+        ends.connectors = {makeConnector(u"J1"_s, 4)};
+        ends.schematic.placements[ends.connectors[0].id] = SchematicPlacement{QPointF(0, 0), false, 0, {}};
+        const FreeEndKind kinds[] = {FreeEndKind::FlyingLead, FreeEndKind::Eyelet, FreeEndKind::RingTerminal,
+                                     FreeEndKind::Bare};
+        for (int i = 0; i < 4; ++i) {
+            FreeEnd end{newId(), kinds[i], i == 1 ? u"GND"_s : QString(), {}, {}};
+            ends.schematic.placements[end.id] = SchematicPlacement{QPointF(450, 40 + i * 60), false, 0, {}};
+            Wire w;
+            w.id = newId();
+            w.endA = PinRef{ends.connectors[0].id, ends.connectors[0].pins[size_t(i)].id};
+            w.endB = FreeEndRef{end.id};
+            w.baseColor = u"RED"_s;
+            w.gauge = {20, GaugeSystem::Awg};
+            ends.wires.push_back(w);
+            ends.freeEnds.push_back(end);
+        }
+        FreeEnd loose{newId(), FreeEndKind::Eyelet, {}, {}, {}};
+        ends.schematic.placements[loose.id] = SchematicPlacement{QPointF(600, 100), false, 0, {}};
+        ends.freeEnds.push_back(loose);
+        f.reset(ends);
+        f.view.centerOn(QPointF(350, 120));
+        f.view.scale(2, 2);
+        f.view.grab().save(imageDir() + u"/schematic-free-ends.png"_s);
+        f.view.resetTransform();
 
         // Whole window, dark theme, with a wire and then a connector selected.
         const QString file = imageDir() + u"/sample.tbh"_s;

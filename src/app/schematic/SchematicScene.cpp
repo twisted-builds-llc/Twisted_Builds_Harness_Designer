@@ -71,6 +71,8 @@ void SchematicScene::rebuild()
         addConnector(c);
     for (const Splice &s : h.splices)
         addSplice(s);
+    for (const FreeEnd &f : h.freeEnds)
+        addFreeEnd(f);
     for (const Wire &w : h.wires)
         addWire(w);
     for (const Note &n : h.notes)
@@ -107,35 +109,22 @@ void SchematicScene::addSplice(const Splice &splice)
     applyPlacement(item);
 }
 
+void SchematicScene::addFreeEnd(const FreeEnd &end)
+{
+    auto *item = new FreeEndItem(end);
+    addItem(item);
+    m_freeEnds.insert(end.id, item);
+    applyPlacement(item);
+}
+
 void SchematicScene::addWire(const Wire &wire)
 {
     auto *item = new WireItem(wire);
     addItem(item);
     m_wires.insert(wire.id, item);
     indexWire(wire);
-    syncFreeEnds(wire);
     if (!m_building)
         updateWire(wire.id);
-}
-
-void SchematicScene::syncFreeEnds(const Wire &wire)
-{
-    for (bool endB : {false, true}) {
-        const QString key = freeEndPlacementKey(wire.id, endB);
-        const auto *free = std::get_if<FreeEnd>(endB ? &wire.endB : &wire.endA);
-        FreeEndItem *item = m_freeEnds.value(key);
-        if (free && !item) {
-            item = new FreeEndItem(wire.id, endB, *free);
-            addItem(item);
-            m_freeEnds.insert(key, item);
-            applyPlacement(item);
-        } else if (free) {
-            item->setEnd(*free);
-        } else if (item) {
-            m_freeEnds.remove(key);
-            delete item;
-        }
-    }
 }
 
 void SchematicScene::applyPlacement(PlacedItem *item)
@@ -146,10 +135,6 @@ void SchematicScene::applyPlacement(PlacedItem *item)
         item->setPos(p->position);
         if (auto *connector = dynamic_cast<ConnectorItem *>(item))
             connector->setDisplay(p->collapsed, p->maxVisibleRows);
-    } else if (auto *freeEnd = dynamic_cast<FreeEndItem *>(item)) {
-        const Wire *wire = m_model->find<Wire>(freeEnd->wireId());
-        const WireEnd &other = freeEnd->isEndB() ? wire->endA : wire->endB;
-        item->setPos(snapped(endReference(other, wire->id, !freeEnd->isEndB()) + QPointF(180, 0)));
     } else {
         item->setPos(nextFreePosition());
     }
@@ -167,10 +152,13 @@ QPointF SchematicScene::nextFreePosition() const
         top = any ? std::min(top, r.top()) : r.top();
         any = true;
     }
-    for (auto *s : m_splices) {
-        const QRectF r = s->sceneBoundingRect();
-        right = any ? std::max(right, r.right()) : r.right();
-        any = true;
+    for (const auto &items : {QList<PlacedItem *>(m_splices.cbegin(), m_splices.cend()),
+                              QList<PlacedItem *>(m_freeEnds.cbegin(), m_freeEnds.cend())}) {
+        for (PlacedItem *item : items) {
+            const QRectF r = item->sceneBoundingRect();
+            right = any ? std::max(right, r.right()) : r.right();
+            any = true;
+        }
     }
     return any ? snapped(QPointF(right + 80, top)) : QPointF(0, 0);
 }
@@ -178,14 +166,13 @@ QPointF SchematicScene::nextFreePosition() const
 QStringList SchematicScene::endKeys(const Wire &wire)
 {
     QStringList keys;
-    for (bool endB : {false, true}) {
-        const WireEnd &end = endB ? wire.endB : wire.endA;
-        if (const auto *pin = std::get_if<PinRef>(&end))
+    for (const WireEnd *end : {&wire.endA, &wire.endB}) {
+        if (const auto *pin = std::get_if<PinRef>(end))
             keys << pin->connectorId;
-        else if (const auto *splice = std::get_if<SpliceRef>(&end))
+        else if (const auto *splice = std::get_if<SpliceRef>(end))
             keys << splice->spliceId;
         else
-            keys << freeEndPlacementKey(wire.id, endB);
+            keys << std::get<FreeEndRef>(*end).freeEndId;
     }
     return keys;
 }
@@ -208,7 +195,7 @@ void SchematicScene::unindexWire(const QString &wireId)
     }
 }
 
-QPointF SchematicScene::endReference(const WireEnd &end, const QString &wireId, bool endB) const
+QPointF SchematicScene::endReference(const WireEnd &end) const
 {
     if (const auto *pin = std::get_if<PinRef>(&end)) {
         if (auto *item = m_connectors.value(pin->connectorId))
@@ -216,7 +203,7 @@ QPointF SchematicScene::endReference(const WireEnd &end, const QString &wireId, 
     } else if (const auto *splice = std::get_if<SpliceRef>(&end)) {
         if (auto *item = m_splices.value(splice->spliceId))
             return item->scenePos();
-    } else if (auto *item = m_freeEnds.value(freeEndPlacementKey(wireId, endB))) {
+    } else if (auto *item = m_freeEnds.value(std::get<FreeEndRef>(end).freeEndId)) {
         return item->scenePos();
     }
     return {};
@@ -228,12 +215,12 @@ Anchor SchematicScene::endAnchor(const Wire &wire, bool endB) const
     const WireEnd &other = endB ? wire.endA : wire.endB;
     if (const auto *pin = std::get_if<PinRef>(&end)) {
         if (auto *item = m_connectors.value(pin->connectorId))
-            return item->pinAnchor(item->rowOfPin(pin->pinId), endReference(other, wire.id, !endB));
+            return item->pinAnchor(item->rowOfPin(pin->pinId), endReference(other));
     } else if (const auto *splice = std::get_if<SpliceRef>(&end)) {
         if (auto *item = m_splices.value(splice->spliceId))
             return item->anchor();
-    } else if (auto *item = m_freeEnds.value(freeEndPlacementKey(wire.id, endB))) {
-        return item->anchor();
+    } else if (auto *item = m_freeEnds.value(std::get<FreeEndRef>(end).freeEndId)) {
+        return item->anchor(endReference(other));
     }
     return {};
 }
@@ -280,6 +267,10 @@ void SchematicScene::onAdded(EntityKind kind, const QString &id)
         addSplice(*m_model->find<Splice>(id));
         updateWiresOf(id);
         break;
+    case EntityKind::FreeEnd:
+        addFreeEnd(*m_model->find<FreeEnd>(id));
+        updateWiresOf(id);
+        break;
     case EntityKind::Wire:
         addWire(*m_model->find<Wire>(id));
         break;
@@ -307,13 +298,16 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
         if (auto *item = m_splices.value(id))
             item->setSplice(*m_model->find<Splice>(id));
         break;
+    case EntityKind::FreeEnd:
+        if (auto *item = m_freeEnds.value(id))
+            item->setFreeEnd(*m_model->find<FreeEnd>(id));
+        break;
     case EntityKind::Wire:
         if (auto *item = m_wires.value(id)) {
             const Wire &wire = *m_model->find<Wire>(id);
             item->setWire(wire);
             unindexWire(id);
             indexWire(wire);
-            syncFreeEnds(wire);
             updateWire(id);
         }
         break;
@@ -336,10 +330,11 @@ void SchematicScene::onRemoved(EntityKind kind, const QString &id)
     case EntityKind::Splice:
         delete m_splices.take(id);
         break;
+    case EntityKind::FreeEnd:
+        delete m_freeEnds.take(id);
+        break;
     case EntityKind::Wire:
         delete m_wires.take(id);
-        delete m_freeEnds.take(freeEndPlacementKey(id, false));
-        delete m_freeEnds.take(freeEndPlacementKey(id, true));
         unindexWire(id);
         break;
     }
@@ -372,7 +367,7 @@ void SchematicScene::syncSelectionToModel()
             selection.wires.insert(static_cast<WireItem *>(item)->id());
             break;
         case FreeEndItemType:
-            selection.wires.insert(static_cast<FreeEndItem *>(item)->wireId());
+            selection.freeEnds.insert(static_cast<FreeEndItem *>(item)->id());
             break;
         case NoteItemType:
             selection.notes.insert(static_cast<NoteItem *>(item)->id());
@@ -398,10 +393,8 @@ void SchematicScene::syncSelectionFromModel()
         it.value()->setSelected(s.splices.contains(it.key()));
     for (auto it = m_wires.cbegin(); it != m_wires.cend(); ++it)
         it.value()->setSelected(s.wires.contains(it.key()));
-    for (auto *freeEnd : std::as_const(m_freeEnds)) {
-        if (!s.wires.contains(freeEnd->wireId()))
-            freeEnd->setSelected(false);
-    }
+    for (auto it = m_freeEnds.cbegin(); it != m_freeEnds.cend(); ++it)
+        it.value()->setSelected(s.freeEnds.contains(it.key()));
     for (auto it = m_notes.cbegin(); it != m_notes.cend(); ++it)
         it.value()->setSelected(s.notes.contains(it.key()));
     m_syncingSelection = false;

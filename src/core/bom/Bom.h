@@ -78,8 +78,8 @@ struct Bom
 // - Sleeving: each segment with sleeving adds its full length (v1 coverage is full).
 // - Connectors: one per connector, grouped by part number.
 // - Terminals: one per pin that has at least one wire (pin terminal P/N), plus one per
-//   eyelet or ring-terminal wire end (its terminal P/N; flying leads and bare ends with a
-//   terminal P/N count too).
+//   eyelet or ring-terminal free end, however many wires it takes (its terminal P/N; flying
+//   leads and bare ends with a terminal P/N count too).
 // - Seals: one per wired pin with a seal P/N.
 // - Cavity plugs: one per pin marked as a cavity plug; its part number is taken from the
 //   pin's seal P/N field.

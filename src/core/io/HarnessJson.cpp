@@ -299,13 +299,8 @@ WireEnd readWireEnd(ObjectReader r)
         return PinRef{r.id("connectorId"), r.id("pinId")};
     if (type == QLatin1StringView("splice"))
         return SpliceRef{r.id("spliceId")};
-    if (type == QLatin1StringView("free")) {
-        FreeEnd end;
-        end.kind = r.enumValue("kind", kFreeEndKinds, FreeEndKind::FlyingLead);
-        end.terminalPartNumber = r.string("terminalPartNumber");
-        end.label = r.string("label");
-        return end;
-    }
+    if (type == QLatin1StringView("free"))
+        return FreeEndRef{r.id("freeEndId")};
     fail(Tr::tr("%1: unknown wire end type \"%2\".").arg(r.context(), type));
 }
 
@@ -343,6 +338,17 @@ Splice readSplice(ObjectReader r)
     s.partNumber = r.string("partNumber");
     s.extra = r.extra();
     return s;
+}
+
+FreeEnd readFreeEnd(ObjectReader r)
+{
+    FreeEnd f;
+    f.id = r.id();
+    f.kind = r.enumValue("kind", kFreeEndKinds, FreeEndKind::FlyingLead);
+    f.label = r.string("label");
+    f.terminalPartNumber = r.string("terminalPartNumber");
+    f.extra = r.extra();
+    return f;
 }
 
 LayoutNode readLayoutNode(ObjectReader r)
@@ -458,6 +464,7 @@ void checkIntegrity(const Harness &h)
         pinsByConnector[c.id] = uniqueIds(c.pins, Tr::tr("pin"));
     }
     const QSet<QString> splices = uniqueIds(h.splices, Tr::tr("splice"));
+    const QSet<QString> freeEnds = uniqueIds(h.freeEnds, Tr::tr("free end"));
     const QSet<QString> nodes = uniqueIds(h.layoutNodes, Tr::tr("layout node"));
     const QSet<QString> segments = uniqueIds(h.layoutSegments, Tr::tr("layout segment"));
     uniqueIds(h.notes, Tr::tr("note"));
@@ -474,6 +481,9 @@ void checkIntegrity(const Harness &h)
         } else if (const auto *splice = std::get_if<SpliceRef>(&end)) {
             if (!splices.contains(splice->spliceId))
                 fail(Tr::tr("Wire \"%1\" references missing splice \"%2\".").arg(w.id, splice->spliceId));
+        } else if (const auto *free = std::get_if<FreeEndRef>(&end)) {
+            if (!freeEnds.contains(free->freeEndId))
+                fail(Tr::tr("Wire \"%1\" references missing free end \"%2\".").arg(w.id, free->freeEndId));
         }
     };
     for (const Wire &w : h.wires) {
@@ -483,13 +493,6 @@ void checkIntegrity(const Harness &h)
             if (!segments.contains(segmentId))
                 fail(Tr::tr("Wire \"%1\" routes through missing segment \"%2\".").arg(w.id, segmentId));
         }
-    }
-    QSet<QString> freeEnds;
-    for (const Wire &w : h.wires) {
-        if (std::holds_alternative<FreeEnd>(w.endA))
-            freeEnds.insert(freeEndPlacementKey(w.id, false));
-        if (std::holds_alternative<FreeEnd>(w.endB))
-            freeEnds.insert(freeEndPlacementKey(w.id, true));
     }
     QSet<QString> referenced;
     for (const LayoutNode &n : h.layoutNodes) {
@@ -578,11 +581,8 @@ QJsonObject writeWireEnd(const WireEnd &end)
         o[u"type"] = QStringLiteral("splice");
         o[u"spliceId"] = splice->spliceId;
     } else {
-        const auto &free = std::get<FreeEnd>(end);
         o[u"type"] = QStringLiteral("free");
-        o[u"kind"] = enumToString(kFreeEndKinds, free.kind);
-        o[u"terminalPartNumber"] = free.terminalPartNumber;
-        o[u"label"] = free.label;
+        o[u"freeEndId"] = std::get<FreeEndRef>(end).freeEndId;
     }
     return o;
 }
@@ -617,6 +617,16 @@ QJsonObject writeSplice(const Splice &s)
     o[u"id"] = s.id;
     o[u"label"] = s.label;
     o[u"partNumber"] = s.partNumber;
+    return o;
+}
+
+QJsonObject writeFreeEnd(const FreeEnd &f)
+{
+    QJsonObject o = f.extra;
+    o[u"id"] = f.id;
+    o[u"kind"] = enumToString(kFreeEndKinds, f.kind);
+    o[u"label"] = f.label;
+    o[u"terminalPartNumber"] = f.terminalPartNumber;
     return o;
 }
 
@@ -814,13 +824,10 @@ void dropOrphanPlacements(Harness &h)
         keys.insert(c.id);
     for (const Splice &s : h.splices)
         keys.insert(s.id);
-    for (const Wire &w : h.wires) {
+    for (const FreeEnd &f : h.freeEnds)
+        keys.insert(f.id);
+    for (const Wire &w : h.wires)
         keys.insert(w.id); // the wire's route (x of its vertical run)
-        if (std::holds_alternative<FreeEnd>(w.endA))
-            keys.insert(freeEndPlacementKey(w.id, false));
-        if (std::holds_alternative<FreeEnd>(w.endB))
-            keys.insert(freeEndPlacementKey(w.id, true));
-    }
     std::erase_if(h.schematic.placements, [&](const auto &entry) { return !keys.contains(entry.first); });
 }
 
@@ -836,7 +843,7 @@ QByteArray toJsonArrayBytes(const std::vector<T> &items, WriteFn write)
 bool isKnownEntry(const QString &name)
 {
     return name == kManifestEntry || name == kHarnessEntry || name == kConnectorsEntry
-           || name == kWiresEntry || name == kSplicesEntry || name == kLayoutEntry
+           || name == kWiresEntry || name == kSplicesEntry || name == kFreeEndsEntry || name == kLayoutEntry
            || name == kSchematicEntry || name == kLibraryEntry || name == kBomEntry;
 }
 
@@ -862,6 +869,7 @@ ZipEntries serializeHarness(const Harness &h)
     entries[QString(kConnectorsEntry)] = toJsonArrayBytes(h.connectors, writeConnector);
     entries[QString(kWiresEntry)] = toJsonArrayBytes(h.wires, writeWire);
     entries[QString(kSplicesEntry)] = toJsonArrayBytes(h.splices, writeSplice);
+    entries[QString(kFreeEndsEntry)] = toJsonArrayBytes(h.freeEnds, writeFreeEnd);
 
     QJsonArray nodes;
     for (const LayoutNode &n : h.layoutNodes)
@@ -924,6 +932,8 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         h.wires = readArray<Wire>(entryArray(entries, kWiresEntry), QStringLiteral("wires"), readWire);
         h.splices = readArray<Splice>(entryArray(entries, kSplicesEntry), QStringLiteral("splices"),
                                       readSplice);
+        h.freeEnds = readArray<FreeEnd>(entryArray(entries, kFreeEndsEntry), QStringLiteral("freeEnds"),
+                                        readFreeEnd);
 
         const QJsonDocument layoutDoc = parseEntry(entries, kLayoutEntry, false);
         if (!layoutDoc.isNull()) {

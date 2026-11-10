@@ -106,14 +106,12 @@ struct SpliceRef {
     bool operator==(const SpliceRef &) const = default;
 };
 
-struct FreeEnd {
-    FreeEndKind kind = FreeEndKind::FlyingLead;
-    QString terminalPartNumber; // empty = none
-    QString label;              // empty = none
-    bool operator==(const FreeEnd &) const = default;
+struct FreeEndRef {
+    QString freeEndId;
+    bool operator==(const FreeEndRef &) const = default;
 };
 
-using WireEnd = std::variant<PinRef, SpliceRef, FreeEnd>;
+using WireEnd = std::variant<PinRef, SpliceRef, FreeEndRef>;
 
 struct Gauge {
     double value = 0.0;
@@ -124,8 +122,8 @@ struct Gauge {
 struct Wire {
     QString id;
     QString name; // circuit name / text
-    WireEnd endA = FreeEnd{};
-    WireEnd endB = FreeEnd{};
+    WireEnd endA;
+    WireEnd endB;
     QString baseColor;   // standard color name or #rrggbb
     QString stripeColor; // empty = no stripe
     Gauge gauge;
@@ -147,10 +145,22 @@ struct Splice {
     bool operator==(const Splice &) const = default;
 };
 
+// A wire end that is not on a connector or splice: flying lead, eyelet, ring terminal or
+// bare end. Placed on the schematic like a splice; one or more wires end on it.
+struct FreeEnd {
+    QString id;
+    FreeEndKind kind = FreeEndKind::FlyingLead;
+    QString label;              // empty = none
+    QString terminalPartNumber; // empty = none
+    QJsonObject extra;
+
+    bool operator==(const FreeEnd &) const = default;
+};
+
 struct LayoutNode {
     QString id;
     LayoutNodeType type = LayoutNodeType::Branch;
-    QString refId; // connector/splice id for those node types, else empty
+    QString refId; // connector/splice/free end id for those node types, else empty
     QPointF position;
     QJsonObject extra;
     // Splice nodes only: further splices at the same point in the loom, side by side with
@@ -202,16 +212,13 @@ struct SchematicPlacement {
 };
 
 struct Schematic {
-    // Key: connector or splice id, freeEndPlacementKey() for a wire's free end, or a wire id
+    // Key: connector, splice or free end id, or a wire id
     // for a wire whose route was dragged (position.x is the x of its vertical run).
     std::map<QString, SchematicPlacement> placements;
     QJsonObject extra;
 
     bool operator==(const Schematic &) const = default;
 };
-
-// Placement key of a wire's free end: "<wireId>/a" or "<wireId>/b".
-QString freeEndPlacementKey(const QString &wireId, bool endB);
 
 // A BOM line the user adds by hand (tape, zip ties...), saved in bom.json.
 struct BomExtra {
@@ -284,6 +291,7 @@ struct Harness {
     std::vector<Connector> connectors;
     std::vector<Wire> wires;
     std::vector<Splice> splices;
+    std::vector<FreeEnd> freeEnds;
     std::vector<LayoutNode> layoutNodes;
     std::vector<LayoutSegment> layoutSegments;
     std::vector<Note> notes; // both canvases; layout.json and schematic.json hold their own

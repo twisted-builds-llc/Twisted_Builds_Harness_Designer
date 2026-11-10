@@ -20,8 +20,9 @@ no update checks. Your designs never leave your computer.
 | Change pin count | `−` / `+` in the connector header, or click the number and type (1-999) |
 | Fill pin labels in bulk | Properties > **Pin labels...** (e.g. `A1-A8, B1-B8, C1-C12`) |
 | Edit a pin label or circuit | Double-click it; **Enter** moves down, **Tab** moves across |
+| Add a flying lead / eyelet | **F** / **E** (or the toolbar), then drag from its lead to a pin; set ring terminal, bare end, label and terminal P/N in Properties |
 | Draw a wire | Drag from a pin row to another pin or a splice; drop on empty space for a flying lead |
-| Move a wire end | Select the wire, then drag its end to another pin or splice (or empty space for a flying lead); drag a flying lead onto a pin to attach it |
+| Move a wire end | Select the wire, then drag its end to another pin, splice, flying lead or eyelet (or empty space for a new flying lead) |
 | Wire from a splice | Wire tool (**W**), then drag from the splice |
 | Move items | Drag a connector by its header |
 | Color, stripe, gauge | Properties panel; select several wires to change them together |

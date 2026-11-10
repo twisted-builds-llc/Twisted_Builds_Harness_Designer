@@ -46,21 +46,6 @@ const T &byId(const std::vector<T> &items, const QString &id)
     return *std::find_if(items.begin(), items.end(), [&](const T &item) { return item.id == id; });
 }
 
-// Free-end keys of the given wires (layout nodes may reference them).
-QSet<QString> freeEndKeys(const HarnessModel *model, const std::vector<QString> &wireIds)
-{
-    QSet<QString> keys;
-    for (const QString &id : wireIds) {
-        if (const Wire *w = model->find<Wire>(id)) {
-            if (std::holds_alternative<FreeEnd>(w->endA))
-                keys.insert(freeEndPlacementKey(id, false));
-            if (std::holds_alternative<FreeEnd>(w->endB))
-                keys.insert(freeEndPlacementKey(id, true));
-        }
-    }
-    return keys;
-}
-
 // Layout nodes pointing at items that are going away keep their place but lose the reference.
 void clearLayoutRefs(HarnessModel *model, const QSet<QString> &refs, QUndoCommand *parent)
 {
@@ -85,7 +70,8 @@ void clearLayoutRefs(HarnessModel *model, const QSet<QString> &refs, QUndoComman
 } // namespace
 
 std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString> &connectorIds,
-                                      const QSet<QString> &spliceIds, const QSet<QString> &wireIds)
+                                      const QSet<QString> &spliceIds, const QSet<QString> &freeEndIds,
+                                      const QSet<QString> &wireIds)
 {
     QSet<QString> all = wireIds;
     for (const QString &id : connectorIds) {
@@ -94,6 +80,10 @@ std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString
     }
     for (const QString &id : spliceIds) {
         for (const QString &w : wiresOnSplice(harness, id))
+            all.insert(w);
+    }
+    for (const QString &id : freeEndIds) {
+        for (const QString &w : wiresOnFreeEnd(harness, id))
             all.insert(w);
     }
     // Keep model order so undo restores deterministically.
@@ -133,6 +123,7 @@ std::unique_ptr<QUndoCommand> setNoteText(HarnessModel *model, const QString &no
 
 std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QString> &connectorIds,
                                           const QSet<QString> &spliceIds,
+                                          const QSet<QString> &freeEndIds,
                                           const QSet<QString> &wireIds,
                                           const QSet<QString> &noteIds)
 {
@@ -140,10 +131,14 @@ std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QStrin
     auto macro = std::make_unique<QUndoCommand>(Tr::tr("Delete"));
     // Children redo in order and undo in reverse: wires go first and come back last.
     // Within each list, remove from the back so the recorded indices restore the order.
-    const std::vector<QString> wires = wiresRemovedWith(h, connectorIds, spliceIds, wireIds);
-    clearLayoutRefs(model, connectorIds + spliceIds + freeEndKeys(model, wires), macro.get());
+    const std::vector<QString> wires = wiresRemovedWith(h, connectorIds, spliceIds, freeEndIds, wireIds);
+    clearLayoutRefs(model, connectorIds + spliceIds + freeEndIds, macro.get());
     for (auto it = wires.rbegin(); it != wires.rend(); ++it)
         new RemoveEntityCommand<Wire>(model, *it, {}, macro.get());
+    for (auto it = h.freeEnds.rbegin(); it != h.freeEnds.rend(); ++it) {
+        if (freeEndIds.contains(it->id))
+            new RemoveEntityCommand<FreeEnd>(model, it->id, {}, macro.get());
+    }
     for (auto it = h.splices.rbegin(); it != h.splices.rend(); ++it) {
         if (spliceIds.contains(it->id))
             new RemoveEntityCommand<Splice>(model, it->id, {}, macro.get());
@@ -177,7 +172,6 @@ std::unique_ptr<QUndoCommand> setConnectorPins(HarnessModel *model, const QStrin
     const std::vector<QString> lost = wiresLostByPinChange(model->harness(), connector, newPins);
     connector.pins = std::move(newPins);
     auto macro = std::make_unique<QUndoCommand>(text);
-    clearLayoutRefs(model, freeEndKeys(model, lost), macro.get());
     // Remove from the back so indices recorded for undo stay valid.
     std::vector<QString> ordered = lost;
     std::sort(ordered.begin(), ordered.end(), [&](const QString &a, const QString &b) {
@@ -217,6 +211,12 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
             newItemIds->insert(s.id);
         Placements p = placementsOf(EntityKind::Splice, s.id);
         new AddEntityCommand<Splice>(model, std::move(s), std::move(p), {}, macro.get());
+    }
+    for (FreeEnd &f : fragment.freeEnds) {
+        if (newItemIds)
+            newItemIds->insert(f.id);
+        Placements p = placementsOf(EntityKind::FreeEnd, f.id);
+        new AddEntityCommand<FreeEnd>(model, std::move(f), std::move(p), {}, macro.get());
     }
     for (Wire &w : fragment.wires) {
         Placements p = placementsOf(EntityKind::Wire, w.id);
@@ -544,24 +544,17 @@ std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString
 }
 
 std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wireId, bool endB,
-                                         const WireEnd &newEnd, QPointF freeEndPosition)
+                                         const WireEnd &newEnd)
 {
     const Wire *current = model->find<Wire>(wireId);
     if (!current)
         return nullptr;
     const WireEnd &oldEnd = endB ? current->endB : current->endA;
     const WireEnd &otherEnd = endB ? current->endA : current->endB;
-    const bool newIsFree = std::holds_alternative<FreeEnd>(newEnd);
-    if (!newIsFree && (newEnd == oldEnd || newEnd == otherEnd))
+    if (newEnd == oldEnd || newEnd == otherEnd)
         return nullptr;
 
     auto macro = std::make_unique<QUndoCommand>(Tr::tr("Re-attach wire"));
-    const QString key = freeEndPlacementKey(wireId, endB);
-    const bool oldIsFree = std::holds_alternative<FreeEnd>(oldEnd);
-    if (oldIsFree && !newIsFree) {
-        clearLayoutRefs(model, {key}, macro.get());
-        new SetPlacementsCommand(model, {{key, std::nullopt}}, {}, macro.get());
-    }
     Harness after = model->harness();
     Wire &updated = *std::find_if(after.wires.begin(), after.wires.end(),
                                   [&](const Wire &w) { return w.id == wireId; });
@@ -570,12 +563,24 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
     const CircuitTextFill fill = fillEmptyCircuitText(after, {wireId});
     new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
     addFillUpdates(model, after, fill, macro.get(), {}, wireId);
-    if (newIsFree) {
-        SchematicPlacement placement;
-        if (const SchematicPlacement *old = model->placement(key))
-            placement = *old;
-        placement.position = freeEndPosition;
-        new SetPlacementsCommand(model, {{key, placement}}, {}, macro.get());
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> updateFreeEnd(HarnessModel *model, const FreeEnd &updated, const QString &text)
+{
+    const FreeEnd *current = model->find<FreeEnd>(updated.id);
+    if (!current || *current == updated)
+        return nullptr;
+    auto macro = std::make_unique<QUndoCommand>(text);
+    new UpdateEntityCommand<FreeEnd>(model, updated, {}, macro.get());
+    // Its layout node draws the new kind (an eyelet ring or a flying lead).
+    const LayoutNodeType type = layoutNodeTypeFor(updated.kind);
+    for (const LayoutNode &n : model->harness().layoutNodes) {
+        if (n.refId == updated.id && n.type != type) {
+            LayoutNode node = n;
+            node.type = type;
+            new UpdateEntityCommand<LayoutNode>(model, node, {}, macro.get());
+        }
     }
     return macro;
 }

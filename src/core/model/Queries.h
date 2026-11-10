@@ -14,6 +14,16 @@ std::vector<QString> wiresOnPins(const Harness &harness, const QString &connecto
                                  const QSet<QString> &pinIds);
 // Ids of wires with at least one end on the splice.
 std::vector<QString> wiresOnSplice(const Harness &harness, const QString &spliceId);
+// Ids of wires with at least one end on the free end.
+std::vector<QString> wiresOnFreeEnd(const Harness &harness, const QString &freeEndId);
+// The free end with this id, or null.
+const FreeEnd *findFreeEnd(const Harness &harness, const QString &id);
+// "Flying lead", "Eyelet", "Ring terminal", "Bare end".
+QString freeEndKindName(FreeEndKind kind);
+// Kind name plus label, e.g. "Eyelet GND".
+QString describeFreeEnd(const FreeEnd &end);
+// Layout node type that stands for a free end of this kind (ring terminals draw as eyelets).
+LayoutNodeType layoutNodeTypeFor(FreeEndKind kind);
 
 // Circuit text copied across wires, only into empty fields. Each listed wire is taken
 // with its net: every wire reachable through splices (connector pins end the net).
@@ -34,7 +44,7 @@ QString describeWireEnd(const Harness &harness, const WireEnd &end);
 // e.g. "5V REF (ECU-A : A1 - SENSOR : +)".
 QString describeWire(const Harness &harness, const Wire &wire);
 
-// Something a layout node can stand for: a connector, a splice or a wire's free end.
+// Something a layout node can stand for: a connector, a splice or a free end.
 struct LayoutRef
 {
     QString refId; // LayoutNode::refId value
@@ -42,7 +52,7 @@ struct LayoutRef
     QString label;
 };
 
-// All connectors, splices and wire free ends, in model order.
+// All connectors, splices and free ends, in model order.
 std::vector<LayoutRef> layoutRefs(const Harness &harness);
 // Label for whatever a layout node references ("" for none or branch points).
 QString layoutRefLabel(const Harness &harness, const QString &refId);

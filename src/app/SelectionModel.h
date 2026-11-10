@@ -12,7 +12,8 @@ struct Selection {
     QSet<QString> connectors;
     QSet<QString> pins; // "connectorId/pinId": narrows a selected connector to these pins
     QSet<QString> splices;
-    QSet<QString> wires; // selecting a wire's free end selects the wire
+    QSet<QString> freeEnds;
+    QSet<QString> wires;
     QSet<QString> layoutNodes;
     QSet<QString> layoutSegments;
     QSet<QString> notes;
@@ -20,7 +21,7 @@ struct Selection {
 
     bool isEmpty() const
     {
-        return connectors.isEmpty() && splices.isEmpty() && wires.isEmpty() && layoutNodes.isEmpty()
+        return connectors.isEmpty() && splices.isEmpty() && freeEnds.isEmpty() && wires.isEmpty() && layoutNodes.isEmpty()
                && layoutSegments.isEmpty() && notes.isEmpty() && bomExtras.isEmpty();
     }
     QSet<QString> &ids(EntityKind kind)
@@ -30,6 +31,8 @@ struct Selection {
             return connectors;
         case EntityKind::Splice:
             return splices;
+        case EntityKind::FreeEnd:
+            return freeEnds;
         case EntityKind::Wire:
             return wires;
         case EntityKind::LayoutNode:
