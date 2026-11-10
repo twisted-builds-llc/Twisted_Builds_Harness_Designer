@@ -34,7 +34,10 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
 ## Status (keep this current)
 
 - M1-M5 done and on `main`. M6 polish done (autosave/recovery, help, accessibility,
-  translations scaffolding). **Next: user hands-on testing, then M6 packaging** (GitHub Actions
+  translations scaffolding). Hands-on testing fixes on `main`: splices inside the loom
+  (type a splice stub's length to place it that far from the connector, or drag it onto the
+  loom), several splices side by side at one loom point (`LayoutNode::sharedSpliceIds`),
+  Show Bundle Diameters on by default. **Next: more user hands-on testing, then M6 packaging** (GitHub Actions
   CI on PRs/manual only, AppImage, Windows installer + zip, macOS dmg, v0.1.0 tag). CI was
   deliberately deferred until packaging; do not add workflows that run on every push.
 - Still open (not in any finished milestone): connector/terminal/seal autofill library (5.7),
