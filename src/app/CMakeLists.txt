@@ -67,8 +67,9 @@ elseif(APPLE)
     set(TBH_ICNS "${TBH_ICON_DIR}/twisted-harness-designer.icns")
     set_source_files_properties("${TBH_ICNS}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(twisted-harness-designer PRIVATE "${TBH_ICNS}")
+    # No OUTPUT_NAME with spaces: Qt 6.8's macdeployqt deploy step cannot handle them.
+    # The release workflow renames the bundle to "Twisted Harness Designer.app" in the dmg.
     set_target_properties(twisted-harness-designer PROPERTIES
-        OUTPUT_NAME "Twisted Harness Designer"
         MACOSX_BUNDLE_INFO_PLIST "${TBH_PACKAGING_DIR}/macos/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "Harness Designer"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.twistedbuilds.harnessdesigner"
