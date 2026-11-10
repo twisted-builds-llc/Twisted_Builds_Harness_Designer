@@ -3,7 +3,6 @@
 
 #include "model/Queries.h"
 
-#include <QCollator>
 #include <QCoreApplication>
 
 #include <algorithm>
@@ -41,14 +40,48 @@ PinoutRow wireRow(const Harness &harness, const Wire &wire, bool atEndA)
     return row;
 }
 
+// Natural order ("W2" before "W10"), case-insensitive. Done by hand instead of with
+// QCollator, whose numeric mode is ignored under the C locale (LANG=C), so the printed
+// cut list comes out the same on every system.
+int compareNatural(const QString &a, const QString &b)
+{
+    qsizetype i = 0, j = 0;
+    while (i < a.size() && j < b.size()) {
+        if (a[i].isDigit() && b[j].isDigit()) {
+            // Compare the whole digit runs as numbers: skip leading zeros, then the
+            // longer run is bigger, then compare digit by digit.
+            while (i < a.size() && a[i] == u'0')
+                ++i;
+            while (j < b.size() && b[j] == u'0')
+                ++j;
+            const qsizetype startA = i, startB = j;
+            while (i < a.size() && a[i].isDigit())
+                ++i;
+            while (j < b.size() && b[j].isDigit())
+                ++j;
+            const qsizetype lenA = i - startA, lenB = j - startB;
+            if (lenA != lenB)
+                return lenA < lenB ? -1 : 1;
+            if (const int c = QStringView(a).sliced(startA, lenA).compare(QStringView(b).sliced(startB, lenB)))
+                return c;
+            continue;
+        }
+        const QChar ca = a[i].toCaseFolded(), cb = b[j].toCaseFolded();
+        if (ca != cb)
+            return ca < cb ? -1 : 1;
+        ++i;
+        ++j;
+    }
+    // One name is a prefix of the other: the shorter one comes first.
+    const bool aDone = i >= a.size(), bDone = j >= b.size();
+    return aDone == bDone ? 0 : (aDone ? -1 : 1);
+}
+
 } // namespace
 
 std::vector<CutLine> cutListInCuttingOrder(std::vector<CutLine> lines)
 {
-    QCollator collator;
-    collator.setNumericMode(true);
-    collator.setCaseSensitivity(Qt::CaseInsensitive);
-    std::stable_sort(lines.begin(), lines.end(), [&](const CutLine &a, const CutLine &b) {
+    std::stable_sort(lines.begin(), lines.end(), [](const CutLine &a, const CutLine &b) {
         if (const int g = compareGauge(a.gauge, b.gauge))
             return g < 0;
         if (const int c = a.baseColor.compare(b.baseColor, Qt::CaseInsensitive))
@@ -57,7 +90,7 @@ std::vector<CutLine> cutListInCuttingOrder(std::vector<CutLine> lines)
             return s < 0;
         if (a.name.isEmpty() != b.name.isEmpty())
             return b.name.isEmpty();
-        return collator.compare(a.name, b.name) < 0;
+        return compareNatural(a.name, b.name) < 0;
     });
     return lines;
 }

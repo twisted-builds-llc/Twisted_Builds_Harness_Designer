@@ -56,6 +56,21 @@ private slots:
         QCOMPARE(names(cutListInCuttingOrder(input)), expected);
     }
 
+    void cuttingOrderNaturalNames()
+    {
+        // Same gauge and color, so only the names decide the order.
+        std::vector<CutLine> input;
+        for (const QString &name : {u"W02"_s, u"a10"_s, u"A2-10"_s, u"W1"_s, u"A2-9"_s,
+                                    u"A1"_s, u"A2"_s, u"b"_s, u"A"_s})
+            input.push_back(line(name, 20, GaugeSystem::Awg, u"BLK"_s));
+        // Hand-sorted: letters case-insensitive ("a10" = "A10"), digit runs as numbers,
+        // leading zeros ignored ("W02" = 2 > "W1"), a prefix before longer names:
+        //   A < A1 < A2 < A2-9 < A2-10 < a10 < b < W1 < W02
+        const QStringList expected = {u"A"_s, u"A1"_s, u"A2"_s, u"A2-9"_s, u"A2-10"_s,
+                                      u"a10"_s, u"b"_s, u"W1"_s, u"W02"_s};
+        QCOMPARE(names(cutListInCuttingOrder(input)), expected);
+    }
+
     void cuttingOrderKeepsTies()
     {
         CutLine a = line({}, 20, GaugeSystem::Awg, u"BLK"_s);
