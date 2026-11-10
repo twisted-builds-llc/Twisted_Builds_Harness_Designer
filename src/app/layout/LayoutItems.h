@@ -41,6 +41,8 @@ struct SegmentSplit
 // least 5 % from either end. The halves trace the same curve.
 SegmentSplit splitNear(const QPointF &a, const QPointF &b, const std::optional<QPointF> &bend,
                        const QPointF &scenePos);
+// Cuts the segment at curve parameter `u` (0 at `a`, 1 at `b`).
+SegmentSplit splitAt(const QPointF &a, const QPointF &b, const std::optional<QPointF> &bend, qreal u);
 
 class LayoutNodeItem : public QGraphicsItem
 {

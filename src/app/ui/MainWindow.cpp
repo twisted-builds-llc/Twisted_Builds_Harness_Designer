@@ -341,7 +341,7 @@ void MainWindow::createMenus()
     });
     QAction *diameters = m_viewMenu->addAction(tr("Show &Bundle Diameters"));
     diameters->setCheckable(true);
-    diameters->setChecked(QSettings().value(QStringLiteral("view/bundleDiameters"), false).toBool());
+    diameters->setChecked(QSettings().value(QStringLiteral("view/bundleDiameters"), true).toBool());
     m_layout->view()->layoutScene()->setShowBundleDiameters(diameters->isChecked());
     connect(diameters, &QAction::toggled, this, [this](bool on) {
         QSettings().setValue(QStringLiteral("view/bundleDiameters"), on);

@@ -294,6 +294,8 @@ void LayoutNodePanel::refresh()
     for (const LayoutNode &n : h.layoutNodes) {
         if (n.id != m_id)
             taken.insert(n.refId);
+        for (const QString &id : n.sharedSpliceIds)
+            taken.insert(id);
     }
     const QSignalBlocker blocker(m_ref);
     m_ref->clear();
@@ -322,6 +324,8 @@ void LayoutNodePanel::commit()
         if (ref.refId == updated.refId)
             updated.type = ref.nodeType;
     }
+    if (updated.type != LayoutNodeType::Splice)
+        updated.sharedSpliceIds.clear(); // only a splice point holds splices side by side
     if (updated != *current)
         m_document->undoStack()->push(new UpdateEntityCommand<LayoutNode>(model, updated, tr("Edit layout node")));
 }

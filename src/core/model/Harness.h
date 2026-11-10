@@ -153,6 +153,9 @@ struct LayoutNode {
     QString refId; // connector/splice id for those node types, else empty
     QPointF position;
     QJsonObject extra;
+    // Splice nodes only: further splices at the same point in the loom, side by side with
+    // `refId` (splices the same distance from a connector).
+    std::vector<QString> sharedSpliceIds;
 
     bool operator==(const LayoutNode &) const = default;
 };

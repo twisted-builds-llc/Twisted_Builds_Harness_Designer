@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 
 #include <algorithm>
+#include <cmath>
 
 namespace tbh::app {
 
@@ -65,11 +66,18 @@ void clearLayoutRefs(HarnessModel *model, const QSet<QString> &refs, QUndoComman
     if (refs.isEmpty())
         return;
     for (const LayoutNode &n : model->harness().layoutNodes) {
-        if (!n.refId.isEmpty() && refs.contains(n.refId)) {
-            LayoutNode updated = n;
+        LayoutNode updated = n;
+        std::erase_if(updated.sharedSpliceIds, [&](const QString &id) { return refs.contains(id); });
+        if (!updated.refId.isEmpty() && refs.contains(updated.refId)) {
             updated.refId.clear();
-            new UpdateEntityCommand<LayoutNode>(model, updated, {}, parent);
+            // A splice sharing the point takes it over.
+            if (!updated.sharedSpliceIds.empty()) {
+                updated.refId = updated.sharedSpliceIds.front();
+                updated.sharedSpliceIds.erase(updated.sharedSpliceIds.begin());
+            }
         }
+        if (updated != n)
+            new UpdateEntityCommand<LayoutNode>(model, updated, {}, parent);
     }
 }
 
@@ -335,6 +343,87 @@ std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString 
     new UpdateEntityCommand<LayoutSegment>(model, std::move(first), {}, macro.get());
     new AddEntityCommand<LayoutSegment>(model, std::move(second), {}, {}, macro.get());
     return macro;
+}
+
+namespace {
+
+std::vector<const LayoutSegment *> segmentsOn(const Harness &h, const QString &nodeId)
+{
+    std::vector<const LayoutSegment *> legs;
+    for (const LayoutSegment &s : h.layoutSegments) {
+        if (s.nodeA == nodeId || s.nodeB == nodeId)
+            legs.push_back(&s);
+    }
+    return legs;
+}
+
+// The splice node of a splice stub, or empty.
+QString stubSpliceNode(const Harness &h, const LayoutSegment &stub)
+{
+    for (const QString &id : {stub.nodeA, stub.nodeB}) {
+        const auto node = std::find_if(h.layoutNodes.begin(), h.layoutNodes.end(),
+                                       [&](const LayoutNode &n) { return n.id == id; });
+        if (node != h.layoutNodes.end() && node->type == LayoutNodeType::Splice && segmentsOn(h, id).size() == 1)
+            return id;
+    }
+    return {};
+}
+
+} // namespace
+
+QString spliceOfStub(const Harness &harness, const QString &stubId)
+{
+    const auto stub = std::find_if(harness.layoutSegments.begin(), harness.layoutSegments.end(),
+                                   [&](const LayoutSegment &s) { return s.id == stubId; });
+    return stub != harness.layoutSegments.end() ? stubSpliceNode(harness, *stub) : QString();
+}
+
+std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QString &stubId,
+                                                double distanceMm)
+{
+    const auto stub = std::find_if(harness.layoutSegments.begin(), harness.layoutSegments.end(),
+                                   [&](const LayoutSegment &s) { return s.id == stubId; });
+    if (stub == harness.layoutSegments.end() || distanceMm <= 0)
+        return std::nullopt;
+    const QString splice = stubSpliceNode(harness, *stub);
+    if (splice.isEmpty())
+        return std::nullopt;
+    QString at = stub->nodeA == splice ? stub->nodeB : stub->nodeA; // X
+    const LayoutSegment *came = &*stub;
+    double walked = 0;
+    QSet<QString> visited{splice};
+    while (!visited.contains(at)) {
+        visited.insert(at);
+        const auto legs = segmentsOn(harness, at);
+        if (legs.size() != 2)
+            return std::nullopt; // X needs exactly one loom; the walk stops at ends and forks
+        const LayoutSegment *next = legs[0] == came ? legs[1] : legs[0];
+        if (next->lengthMm <= 0)
+            return std::nullopt;
+        if (distanceMm < walked + next->lengthMm) {
+            if (distanceMm <= walked)
+                return std::nullopt; // on a point that is already there
+            return LoomPosition{next->id, next->nodeA == at, distanceMm - walked};
+        }
+        walked += next->lengthMm;
+        const QString far = next->nodeA == at ? next->nodeB : next->nodeA;
+        const auto farNode = std::find_if(harness.layoutNodes.begin(), harness.layoutNodes.end(),
+                                          [&](const LayoutNode &n) { return n.id == far; });
+        if (farNode == harness.layoutNodes.end())
+            return std::nullopt;
+        // Exactly on a splice already in the loom: side by side with it.
+        if (std::abs(distanceMm - walked) < 1e-6) {
+            if (farNode->type == LayoutNodeType::Splice && !farNode->refId.isEmpty())
+                return LoomPosition{{}, true, 0, far};
+            return std::nullopt;
+        }
+        // Only bends and splices inside the loom are walked through, not connectors.
+        if (farNode->type == LayoutNodeType::Connector)
+            return std::nullopt;
+        came = next;
+        at = far;
+    }
+    return std::nullopt;
 }
 
 std::unique_ptr<QUndoCommand> setDistanceAlongRun(HarnessModel *model, const QString &nodeId,

@@ -175,7 +175,10 @@ Loading fails with a message if:
   connector id (`connector`), splice id (`splice`), or a wire free-end key `<wireId>/a` or
   `<wireId>/b` (`flyingLead`, `eyelet`; eyelet is also used for ring terminals). `branch`
   nodes have no reference. Any node may have an empty `refId` (unassigned).
-- At most one node may reference the same item.
+- `sharedSpliceIds` (optional, `splice` nodes only): further splice ids at the same point in
+  the loom, side by side with the node's own `refId` splice (splices the same distance from a
+  connector). Written only when non-empty. The node must have a non-empty `refId`.
+- At most one node may reference the same item (through `refId` or `sharedSpliceIds`).
 - `position` is for drawing only. `lengthMm` is the entered branch length and is
   authoritative.
 - `sleevingCoverage`: only `full` in schema 1.

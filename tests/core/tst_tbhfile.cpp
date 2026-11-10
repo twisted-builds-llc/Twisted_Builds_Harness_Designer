@@ -486,6 +486,34 @@ private slots:
         QVERIFY(!io::deserializeHarness(io::serializeHarness(wrongType), &error));
     }
 
+    void sharedSplicesAtOnePoint()
+    {
+        // Splice node n4 (sp1) also holds sp2, side by side in the loom.
+        Harness h = sampleHarness();
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.layoutNodes[3].sharedSpliceIds = {u"sp2"_s};
+        QString error;
+        const auto loaded = io::deserializeHarness(io::serializeHarness(h), &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QVERIFY(loaded->layoutNodes == h.layoutNodes);
+        // Written only when present, so files without it are unchanged.
+        QVERIFY(!io::serializeHarness(sampleHarness()).at(u"layout.json"_s).contains("sharedSpliceIds"));
+
+        Harness missing = h; // no such splice
+        missing.layoutNodes[3].sharedSpliceIds = {u"gone"_s};
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(missing), &error));
+        QVERIFY(error.contains(u"gone"));
+
+        Harness twice = h; // sp1 is already the node's own splice
+        twice.layoutNodes[3].sharedSpliceIds = {u"sp1"_s};
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(twice), &error));
+
+        Harness notSplice = h; // only splice nodes share
+        notSplice.layoutNodes[1].sharedSpliceIds = {u"sp2"_s};
+        notSplice.layoutNodes[3].sharedSpliceIds.clear();
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(notSplice), &error));
+    }
+
     void orphanPlacementsAreDropped()
     {
         Harness h = sampleHarness();

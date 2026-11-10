@@ -60,6 +60,8 @@ LayoutGraph::LayoutGraph(const Harness &harness)
         m_adjacency[n.id];
         if (!n.refId.isEmpty())
             m_nodeByRef.insert(n.refId, n.id);
+        for (const QString &id : n.sharedSpliceIds)
+            m_nodeByRef.insert(id, n.id);
     }
     for (const LayoutSegment &s : harness.layoutSegments) {
         m_adjacency[s.nodeA].push_back({s.id, s.nodeB});
