@@ -51,8 +51,9 @@ SchematicView::SchematicView(Document *document, SelectionModel *selection, QWid
         closeEditor();
         cancelWire();
         m_pasteCount = 0;
-        QTimer::singleShot(0, this, &SchematicView::zoomToFit);
+        fitWhenShown();
     });
+    connect(m_scene, &SchematicScene::currentSheetChanged, this, &SchematicView::fitWhenShown);
 }
 
 void SchematicView::setTool(Tool tool)

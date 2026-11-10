@@ -37,7 +37,7 @@ LayoutView::LayoutView(Document *document, SelectionModel *selection, QWidget *p
         closeEditor();
         cancelSegment();
         m_placeCount = 0;
-        QTimer::singleShot(0, this, &LayoutView::zoomToFit);
+        fitWhenShown();
     });
 }
 

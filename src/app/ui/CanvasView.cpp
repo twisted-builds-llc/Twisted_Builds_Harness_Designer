@@ -7,6 +7,7 @@
 #include <QVarLengthArray>
 #include <QLineEdit>
 #include <QScrollBar>
+#include <QTimer>
 
 #include <algorithm>
 #include <cmath>
@@ -129,23 +130,34 @@ CanvasView::CanvasView(QWidget *parent)
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     setDragMode(QGraphicsView::RubberBandDrag);
     setFocusPolicy(Qt::StrongFocus);
+    for (QScrollBar *bar : {horizontalScrollBar(), verticalScrollBar()})
+        connect(bar, &QScrollBar::sliderPressed, this, [this] { m_fitPending = false; });
 }
 
 void CanvasView::zoomIn()
 {
+    m_fitPending = false;
     if (transform().m11() * 1.25 <= kMaxScale)
         scale(1.25, 1.25);
 }
 
 void CanvasView::zoomOut()
 {
+    m_fitPending = false;
     if (transform().m11() / 1.25 >= kMinScale)
         scale(1 / 1.25, 1 / 1.25);
 }
 
 void CanvasView::zoomToFit()
 {
-    const QRectF bounds = scene() ? scene()->itemsBoundingRect() : QRectF();
+    // Visible items only: e.g. other schematic sheets' items are hidden.
+    QRectF bounds;
+    if (scene()) {
+        for (const QGraphicsItem *item : scene()->items()) {
+            if (item->isVisible())
+                bounds |= item->sceneBoundingRect();
+        }
+    }
     if (bounds.isEmpty()) {
         resetTransform();
         centerOn(0, 0);
@@ -155,6 +167,50 @@ void CanvasView::zoomToFit()
     const qreal scale = std::clamp(transform().m11(), kMinScale, 1.5);
     setTransform(QTransform::fromScale(scale, scale));
     centerOn(bounds.center());
+}
+
+void CanvasView::fitWhenShown()
+{
+    m_fitPending = true;
+    if (isVisible())
+        fitLater();
+}
+
+void CanvasView::fitLater()
+{
+    // After pending layout, so the viewport has its final size.
+    QTimer::singleShot(0, this, [this] {
+        if (m_fitPending && isVisible())
+            zoomToFit();
+    });
+}
+
+bool CanvasView::event(QEvent *event)
+{
+    if (event->type() == QEvent::KeyPress)
+        m_fitPending = false; // the user is working in the view
+    return QGraphicsView::event(event);
+}
+
+bool CanvasView::viewportEvent(QEvent *event)
+{
+    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::Wheel)
+        m_fitPending = false; // the user is working in the view
+    return QGraphicsView::viewportEvent(event);
+}
+
+void CanvasView::showEvent(QShowEvent *event)
+{
+    QGraphicsView::showEvent(event);
+    if (m_fitPending)
+        fitLater();
+}
+
+void CanvasView::resizeEvent(QResizeEvent *event)
+{
+    QGraphicsView::resizeEvent(event);
+    if (m_fitPending)
+        fitLater();
 }
 
 void CanvasView::editText(const QRectF &sceneRect, const QString &text,

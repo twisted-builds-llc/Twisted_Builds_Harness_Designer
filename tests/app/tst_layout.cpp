@@ -1068,6 +1068,22 @@ private slots:
         QCOMPARE(model->harness().layoutSegments.back().nodeB, u"n5"_s);
     }
 
+    void layoutOpensFittedWhenShown()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(800, 600);
+        // Nodes span (0, 0) to (600, 200); opened while the view is hidden (another tab).
+        document.model()->reset(sample());
+        QTest::qWait(1);
+        view.show();
+        QTest::qWait(20);
+        const QRectF shown = view.mapToScene(view.viewport()->rect()).boundingRect();
+        for (const LayoutNode &n : document.model()->harness().layoutNodes)
+            QVERIFY2(shown.contains(n.position), qPrintable(n.id));
+    }
+
     void segmentDrawnOntoBundleBranchesOffIt()
     {
         Document document;
