@@ -57,7 +57,7 @@ bool migrateV1ToV2(ZipEntries &entries, QString *)
                                 {u"label"_s, end.value(u"label").toString()},
                                 {u"terminalPartNumber"_s, end.value(u"terminalPartNumber").toString()}};
             freeEnds.append(freeEnd);
-            idByOldKey.insert(wireId + QStringView(suffix), id);
+            idByOldKey.insert(wireId + QString::fromUtf16(suffix), id);
             wire[field] = QJsonObject{{u"type"_s, u"free"_s}, {u"freeEndId"_s, id}};
         }
         wires[i] = wire;
