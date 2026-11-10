@@ -135,6 +135,7 @@ std::vector<QString> HarnessModel::placementKeys(EntityKind kind, const QString 
 {
     switch (kind) {
     case EntityKind::Wire:
+        return {id, Schematic::wireSheetKey(id)}; // route, sheet it is drawn on
     case EntityKind::Connector:
     case EntityKind::Splice:
     case EntityKind::FreeEnd:
@@ -169,6 +170,15 @@ void HarnessModel::setPlacement(const QString &key, const std::optional<Schemati
         placements[key] = *placement;
     }
     emit placementChanged(key);
+}
+
+void HarnessModel::setSheets(std::vector<SchematicSheet> sheets)
+{
+    Q_ASSERT(!sheets.empty());
+    if (sheets.empty() || sheets == m_harness.schematic.sheets)
+        return;
+    m_harness.schematic.sheets = std::move(sheets);
+    emit sheetsChanged();
 }
 
 #define TBH_INSTANTIATE(T)                                                  \

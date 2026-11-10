@@ -8,14 +8,17 @@
 #include "commands/EntityCommands.h"
 #include "io/HarnessJson.h"
 #include "model/Fragment.h"
+#include "model/Queries.h"
 #include "schematic/SchematicScene.h"
 #include "ui/ConnectorEdits.h"
 
 #include <QApplication>
 #include <QClipboard>
+#include <QContextMenuEvent>
 #include <QGraphicsPathItem>
 #include <QKeyEvent>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMimeData>
 #include <QScrollBar>
 #include <QTimer>
@@ -187,7 +190,8 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
     }
 
     CanvasView::mousePressEvent(event);
-    if (item && item->type() == WireItemType && m_tool == Tool::Select) {
+    if (item && item->type() == WireItemType && m_tool == Tool::Select
+        && !static_cast<WireItem *>(item)->isOffSheet()) {
         auto *wire = static_cast<WireItem *>(item);
         m_routeWire = wire->id();
         m_routeDragging = false;
@@ -331,8 +335,13 @@ void SchematicView::mouseDoubleClickEvent(QMouseEvent *event)
             editConnectorTitle(connector->id());
         return;
     }
-    case SpliceItemType:
     case WireItemType:
+        if (auto *wire = static_cast<WireItem *>(item); wire->tagRect().contains(scenePos)) {
+            goToOtherSheet(wire->id());
+            return;
+        }
+        [[fallthrough]];
+    case SpliceItemType:
     case FreeEndItemType:
         m_scene->clearSelection();
         item->setSelected(true);
@@ -431,7 +440,10 @@ void SchematicView::finishWire(const QPointF &scenePos)
     // Dropped on empty space: the wire ends in a new flying lead there.
     wire.endB = target.end ? *target.end : WireEnd(addFreeEndAt(FreeEndKind::FlyingLead, scenePos));
     // addWire() also names the wire and copies circuit text to an empty pin at the other end.
-    stack->push(addWire(m_document->model(), std::move(wire), {}, tr("Add wire")).release());
+    SchematicPlacement drawnOn; // the sheet it is drawn on (its ends may be on others too)
+    drawnOn.sheetId = m_scene->currentSheet();
+    const QString wireSheet = Schematic::wireSheetKey(wire.id);
+    stack->push(addWire(m_document->model(), std::move(wire), {{wireSheet, drawnOn}}, tr("Add wire")).release());
     stack->endMacro();
     Selection selection;
     selection.wires.insert(id);
@@ -473,6 +485,8 @@ std::optional<bool> SchematicView::selectedWireEndAt(const QPoint &viewPos) cons
         return std::nullopt;
     constexpr int kGrabRadius = 8; // pixels
     for (bool endB : {false, true}) {
+        if (!m_scene->isEndOnCurrentSheet(*wire, endB))
+            continue; // that end is on another sheet
         const QPoint anchor = mapFromScene(m_scene->endAnchor(*wire, endB).point);
         if ((anchor - viewPos).manhattanLength() <= kGrabRadius)
             return endB;
@@ -522,11 +536,9 @@ void SchematicView::finishRouteDrag()
     WireItem *wire = m_scene->wireItem(wireId);
     if (!dragged || !wire || wire->runX() == m_routeStartX)
         return;
-    const SchematicPlacement *old = m_document->model()->placement(wireId);
-    SchematicPlacement placement = old ? *old : SchematicPlacement{};
-    placement.position = QPointF(wire->runX(), 0);
-    m_document->undoStack()->push(
-        new SetPlacementsCommand(m_document->model(), {{wireId, placement}}, tr("Move wire")));
+    // Kept per sheet: the wire may be shown on several.
+    m_document->undoStack()->push(new SetPlacementsCommand(
+        m_document->model(), {{wireId, placementAt(wireId, QPointF(wire->runX(), 0))}}, tr("Move wire")));
 }
 
 void SchematicView::cancelRouteDrag()
@@ -549,6 +561,17 @@ void SchematicView::rememberPressPositions()
     }
 }
 
+SchematicPlacement SchematicView::placementAt(const QString &key, const QPointF &position) const
+{
+    const Schematic &schematic = m_document->model()->harness().schematic;
+    const SchematicPlacement *old = m_document->model()->placement(key);
+    SchematicPlacement placement = old ? *old : SchematicPlacement{};
+    if (!old)
+        placement.sheetId = m_scene->currentSheet(); // a new placement starts on this sheet
+    placement.setPositionOn(schematic.resolvedSheetId(placement.sheetId), m_scene->currentSheet(), position);
+    return placement;
+}
+
 void SchematicView::commitMoves()
 {
     std::map<QString, std::optional<SchematicPlacement>> changes;
@@ -556,10 +579,7 @@ void SchematicView::commitMoves()
         PlacedItem *item = m_scene->placedItem(key);
         if (!item || item->pos() == before)
             continue;
-        const SchematicPlacement *old = m_document->model()->placement(key);
-        SchematicPlacement placement = old ? *old : SchematicPlacement{};
-        placement.position = item->pos();
-        changes[key] = placement;
+        changes[key] = placementAt(key, item->pos());
     }
     m_pressPositions.clear();
     HarnessModel *model = m_document->model();
@@ -603,9 +623,7 @@ void SchematicView::setConnectorDisplay(const QString &connectorId, bool collaps
     ConnectorItem *item = m_scene->connectorItem(connectorId);
     if (!item || (item->isCollapsed() == collapsed && item->maxVisibleRows() == maxVisibleRows))
         return;
-    const SchematicPlacement *old = m_document->model()->placement(connectorId);
-    SchematicPlacement placement = old ? *old : SchematicPlacement{};
-    placement.position = item->pos();
+    SchematicPlacement placement = placementAt(connectorId, item->pos());
     placement.collapsed = collapsed;
     placement.maxVisibleRows = maxVisibleRows;
     QString text = tr("Change connector display");
@@ -808,9 +826,10 @@ QPointF SchematicView::unoccupiedPosition(QPointF position) const
         ids.insert(s.id);
     for (const FreeEnd &f : h.freeEnds)
         ids.insert(f.id);
+    const QString sheet = m_scene->currentSheet();
     auto occupied = [&](const QPointF &p) {
-        for (const auto &[key, placement] : h.schematic.placements) {
-            if (ids.contains(key) && (placement.position - p).manhattanLength() < 1)
+        for (const QString &key : std::as_const(ids)) {
+            if (const auto pos = h.schematic.positionOn(key, sheet); pos && (*pos - p).manhattanLength() < 1)
                 return true;
         }
         return false;
@@ -830,6 +849,7 @@ void SchematicView::addConnector()
     SchematicPlacement placement;
     placement.position =
         unoccupiedPosition(SchematicScene::snapped(viewCenterSnapped() - QPointF(ConnectorItem::kWidth / 2, 40)));
+    placement.sheetId = m_scene->currentSheet();
     const QString id = connector.id;
     m_document->undoStack()->push(new AddEntityCommand<Connector>(
         m_document->model(), std::move(connector), {{id, placement}}, tr("Add connector")));
@@ -845,6 +865,7 @@ void SchematicView::addSplice()
     splice.label = uniqueLabel(QStringLiteral("S"), true);
     SchematicPlacement placement;
     placement.position = unoccupiedPosition(viewCenterSnapped());
+    placement.sheetId = m_scene->currentSheet();
     const QString id = splice.id;
     m_document->undoStack()->push(new AddEntityCommand<Splice>(
         m_document->model(), std::move(splice), {{id, placement}}, tr("Add splice")));
@@ -860,6 +881,7 @@ FreeEndRef SchematicView::addFreeEndAt(FreeEndKind kind, const QPointF &scenePos
     end.kind = kind;
     SchematicPlacement placement;
     placement.position = SchematicScene::snapped(scenePos);
+    placement.sheetId = m_scene->currentSheet();
     const QString id = end.id;
     m_document->undoStack()->push(new AddEntityCommand<FreeEnd>(m_document->model(), std::move(end),
                                                                 {{id, placement}}, tr("Add free end")));
@@ -873,6 +895,7 @@ void SchematicView::addFreeEnd(FreeEndKind kind)
     end.kind = kind;
     SchematicPlacement placement;
     placement.position = unoccupiedPosition(viewCenterSnapped());
+    placement.sheetId = m_scene->currentSheet();
     const QString id = end.id;
     m_document->undoStack()->push(
         new AddEntityCommand<FreeEnd>(m_document->model(), std::move(end), {{id, placement}},
@@ -889,7 +912,7 @@ void SchematicView::addNote()
         const QString text = value.trimmed();
         if (text.isEmpty())
             return; // nothing typed: no note
-        Note note{newId(), NoteCanvas::Schematic, text, position, {}};
+        Note note{newId(), NoteCanvas::Schematic, text, position, m_scene->currentSheet(), {}};
         const QString id = note.id;
         m_document->undoStack()->push(
             new AddEntityCommand<Note>(m_document->model(), std::move(note), {}, tr("Add note")));
@@ -913,7 +936,43 @@ void SchematicView::editNote(const QString &noteId)
 
 void SchematicView::deleteSelection()
 {
-    deleteItems(this, m_document, m_selection->selection());
+    // Items and wires also shown on other sheets only leave this one: deleting them would
+    // delete them (and the items' wiring) on every sheet.
+    Selection s = m_selection->selection();
+    const Harness &h = m_document->model()->harness();
+    const Schematic &schematic = h.schematic;
+    QSet<QString> shared;
+    for (QSet<QString> *ids : {&s.connectors, &s.splices, &s.freeEnds}) {
+        for (auto it = ids->begin(); it != ids->end();) {
+            if (m_scene->isOnCurrentSheet(*it) && schematic.sheetsOf(*it).size() > 1) {
+                shared.insert(*it);
+                it = ids->erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+    QSet<QString> sharedWires;
+    for (auto it = s.wires.begin(); it != s.wires.end();) {
+        const Wire *wire = m_document->model()->find<Wire>(*it);
+        const WireSheets sheets = wire ? wireSheets(h, *wire) : WireSheets{};
+        if (sheets.drawnOn(m_scene->currentSheet()) && sheets.sheets.size() > 1) {
+            sharedWires.insert(*it);
+            it = s.wires.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(tr("Delete"));
+    if (auto command = removeFromSheet(m_document->model(), shared, sharedWires, m_scene->currentSheet())) {
+        stack->push(command.release());
+        emit statusMessage(tr("Removed from this sheet only: still shown on other sheets."));
+    }
+    if (!s.connectors.isEmpty() || !s.splices.isEmpty() || !s.freeEnds.isEmpty() || !s.wires.isEmpty()
+        || !s.notes.isEmpty())
+        deleteItems(this, m_document, s);
+    stack->endMacro();
 }
 
 void SchematicView::selectAll()
@@ -929,7 +988,24 @@ QByteArray SchematicView::selectionFragment() const
     const Selection &s = m_selection->selection();
     if (s.connectors.isEmpty() && s.splices.isEmpty() && s.freeEnds.isEmpty())
         return {};
-    Harness fragment = extractFragment(m_document->model()->harness(), s.connectors, s.splices, s.freeEnds);
+    const Harness &h = m_document->model()->harness();
+    Harness fragment = extractFragment(h, s.connectors, s.splices, s.freeEnds);
+    // Positions as on this sheet, which is where they were copied from.
+    for (auto &[key, placement] : fragment.schematic.placements) {
+        if (const auto pos = h.schematic.positionOn(key, m_scene->currentSheet()))
+            placement.position = *pos;
+        placement.alsoOn.clear();
+        placement.sheetId.clear();
+    }
+    // Mark the selected wires: pasted onto another sheet with the same items, those wires
+    // are shown there too (see pasteFragment()).
+    for (const Wire &w : fragment.wires) {
+        if (s.wires.contains(w.id)) {
+            SchematicPlacement marker;
+            marker.sheetId = fragment.schematic.sheets.front().id;
+            fragment.schematic.placements[Schematic::wireSheetKey(w.id)] = marker;
+        }
+    }
     return io::writeZip(io::serializeHarness(fragment), nullptr).value_or(QByteArray());
 }
 
@@ -957,7 +1033,8 @@ void SchematicView::pasteFragmentBytes(const QByteArray &bytes, QPointF offset)
     }
     QSet<QString> newIds;
     m_document->undoStack()->push(
-        pasteFragment(m_document->model(), std::move(*fragment), offset, &newIds).release());
+        pasteFragment(m_document->model(), std::move(*fragment), offset, &newIds, m_scene->currentSheet())
+            .release());
     Selection selection;
     for (const QString &id : newIds) {
         if (m_document->model()->find<Connector>(id))
@@ -1016,10 +1093,7 @@ void SchematicView::align(Qt::Alignment alignment)
             delta.setY(bounds.bottom() - r.bottom());
         else if (alignment & Qt::AlignVCenter)
             delta.setY(bounds.center().y() - r.center().y());
-        const SchematicPlacement *old = m_document->model()->placement(item->placementKey());
-        SchematicPlacement placement = old ? *old : SchematicPlacement{};
-        placement.position = item->pos() + delta;
-        changes[item->placementKey()] = placement;
+        changes[item->placementKey()] = placementAt(item->placementKey(), item->pos() + delta);
     }
     m_document->undoStack()->push(new SetPlacementsCommand(m_document->model(), changes, tr("Align")));
 }
@@ -1039,11 +1113,9 @@ void SchematicView::distribute(Qt::Orientation orientation)
     std::map<QString, std::optional<SchematicPlacement>> changes;
     for (size_t i = 0; i < items.size(); ++i) {
         const qreal delta = first + step * qreal(i) - coord(items[i]);
-        const SchematicPlacement *old = m_document->model()->placement(items[i]->placementKey());
-        SchematicPlacement placement = old ? *old : SchematicPlacement{};
-        placement.position = items[i]->pos()
-                             + (orientation == Qt::Horizontal ? QPointF(delta, 0) : QPointF(0, delta));
-        changes[items[i]->placementKey()] = placement;
+        changes[items[i]->placementKey()] = placementAt(
+            items[i]->placementKey(),
+            items[i]->pos() + (orientation == Qt::Horizontal ? QPointF(delta, 0) : QPointF(0, delta)));
     }
     m_document->undoStack()->push(new SetPlacementsCommand(m_document->model(), changes, tr("Distribute")));
 }
@@ -1078,6 +1150,161 @@ int SchematicView::find(const QString &text)
                            .arg(matches.size())
                            .arg(item->connector().label, item->connector().pins[size_t(row)].label));
     return int(matches.size());
+}
+
+// ---- sheets ------------------------------------------------------------------------
+
+void SchematicView::goToOtherSheet(const QString &wireId)
+{
+    const Wire *wire = m_document->model()->find<Wire>(wireId);
+    if (!wire)
+        return;
+    const WireSheets sheets = wireSheets(m_document->model()->harness(), *wire);
+    if (!sheets.sheets.empty())
+        return; // drawn in full: no tag
+    const bool aHere = sheets.tagSheetA == m_scene->currentSheet();
+    const QString farId = wireEndItemId(aHere ? wire->endB : wire->endA);
+    m_scene->setCurrentSheet(aHere ? sheets.tagSheetB : sheets.tagSheetA);
+    Selection selection;
+    selection.wires.insert(wireId);
+    m_selection->setSelection(selection);
+    if (PlacedItem *item = m_scene->placedItem(farId))
+        centerOn(item);
+}
+
+void SchematicView::moveSelectionToSheet(const QString &sheetId)
+{
+    const Selection &s = m_selection->selection();
+    QSet<QString> keys = s.connectors;
+    keys.unite(s.splices).unite(s.freeEnds);
+    auto command = tbh::app::moveToSheet(m_document->model(), keys, s.notes, m_scene->currentSheet(), sheetId);
+    if (!command) {
+        emit statusMessage(tr("Select connectors, splices, flying leads, eyelets or notes to move to another sheet."));
+        return;
+    }
+    const Selection moved = s; // hiding the items clears the selection
+    m_document->undoStack()->push(command.release());
+    // Follow the items to their new sheet.
+    m_scene->setCurrentSheet(sheetId);
+    m_selection->setSelection(moved);
+}
+
+void SchematicView::showSelectionOnSheet(const QString &sheetId)
+{
+    const Selection &s = m_selection->selection();
+    std::map<QString, QPointF> positions;
+    for (const QSet<QString> *ids : {&s.connectors, &s.splices, &s.freeEnds}) {
+        for (const QString &id : *ids) {
+            if (PlacedItem *item = m_scene->placedItem(id))
+                positions[id] = item->pos(); // same place as on this sheet
+        }
+    }
+    auto command = showOnSheet(m_document->model(), positions, s.wires, sheetId);
+    if (!command) {
+        emit statusMessage(tr("Select connectors, splices, flying leads, eyelets or wires that are not on that sheet "
+                              "yet (a wire also needs both its ends there)."));
+        return;
+    }
+    const Selection shown = s;
+    m_document->undoStack()->push(command.release());
+    m_scene->setCurrentSheet(sheetId);
+    m_selection->setSelection(shown);
+}
+
+void SchematicView::showExistingItem(const QString &id)
+{
+    const QPointF position = unoccupiedPosition(viewCenterSnapped());
+    auto command = showOnSheet(m_document->model(), {{id, position}}, {}, m_scene->currentSheet());
+    if (!command)
+        return;
+    m_document->undoStack()->push(command.release());
+    Selection selection;
+    if (m_document->model()->find<Connector>(id))
+        selection.connectors.insert(id);
+    else if (m_document->model()->find<Splice>(id))
+        selection.splices.insert(id);
+    else
+        selection.freeEnds.insert(id);
+    m_selection->setSelection(selection);
+}
+
+void SchematicView::addExistingItemActions(QMenu *menu)
+{
+    const Harness &h = m_document->model()->harness();
+    const QString sheet = m_scene->currentSheet();
+    auto add = [&](const QString &id, const QString &label) {
+        if (!h.schematic.isOnSheet(id, sheet))
+            menu->addAction(label, this, [this, id] { showExistingItem(id); });
+    };
+    for (const Connector &c : h.connectors)
+        add(c.id, c.label.isEmpty() ? tr("(unnamed connector)") : c.label);
+    menu->addSeparator();
+    for (const Splice &sp : h.splices)
+        add(sp.id, sp.label.isEmpty() ? tr("(unnamed splice)") : sp.label);
+    menu->addSeparator();
+    for (const FreeEnd &f : h.freeEnds)
+        add(f.id, describeFreeEnd(f));
+    bool any = false;
+    for (QAction *action : menu->actions())
+        any = any || !action->isSeparator();
+    if (!any) {
+        menu->clear();
+        menu->addAction(tr("Everything is on this sheet already"))->setEnabled(false);
+    }
+}
+
+void SchematicView::contextMenuEvent(QContextMenuEvent *event)
+{
+    QGraphicsItem *item = itemAt(event->pos());
+    if (item && !item->isSelected()) {
+        m_scene->clearSelection();
+        item->setSelected(true);
+    }
+    const Selection &s = m_selection->selection();
+    QMenu menu(this);
+    if (!s.connectors.isEmpty() || !s.splices.isEmpty() || !s.freeEnds.isEmpty() || !s.notes.isEmpty()) {
+        addMoveToSheetActions(menu.addMenu(tr("Move to Sheet")));
+    }
+    if (!s.connectors.isEmpty() || !s.splices.isEmpty() || !s.freeEnds.isEmpty() || !s.wires.isEmpty())
+        addShowOnSheetActions(menu.addMenu(tr("Also Show on Sheet")));
+    addExistingItemActions(menu.addMenu(tr("Add Existing Item to This Sheet")));
+    menu.exec(event->globalPos());
+}
+
+void SchematicView::addMoveToSheetActions(QMenu *menu)
+{
+    const Schematic &schematic = m_document->model()->harness().schematic;
+    for (int i = 0; i < int(schematic.sheets.size()); ++i) {
+        const QString id = schematic.sheets[size_t(i)].id;
+        QAction *action = menu->addAction(sheetDisplayName(schematic, i), this, [this, id] { moveSelectionToSheet(id); });
+        action->setEnabled(id != m_scene->currentSheet());
+    }
+    menu->addSeparator();
+    menu->addAction(tr("New Sheet"), this, [this] {
+        QString id;
+        m_document->undoStack()->beginMacro(tr("Move to new sheet"));
+        m_document->undoStack()->push(addSheet(m_document->model(), &id).release());
+        moveSelectionToSheet(id);
+        m_document->undoStack()->endMacro();
+    });
+}
+
+void SchematicView::addShowOnSheetActions(QMenu *menu)
+{
+    const Schematic &schematic = m_document->model()->harness().schematic;
+    for (int i = 0; i < int(schematic.sheets.size()); ++i) {
+        const QString id = schematic.sheets[size_t(i)].id;
+        QAction *action = menu->addAction(sheetDisplayName(schematic, i), this, [this, id] { showSelectionOnSheet(id); });
+        action->setEnabled(id != m_scene->currentSheet());
+    }
+    menu->addSeparator();
+    menu->addAction(tr("New Sheet"), this, [this] {
+        QString id;
+        m_document->undoStack()->beginMacro(tr("Show on new sheet"));
+        m_document->undoStack()->push(addSheet(m_document->model(), &id).release());
+        showSelectionOnSheet(id);
+        m_document->undoStack()->endMacro();
+    });
 }
 
 } // namespace tbh::app

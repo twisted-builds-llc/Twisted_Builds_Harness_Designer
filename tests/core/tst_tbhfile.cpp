@@ -579,6 +579,84 @@ private slots:
         QVERIFY(loaded->schematic == expected);
     }
 
+    void sheetsRoundTrip()
+    {
+        Harness h = sampleHarness();
+        h.schematic.sheets = {SchematicSheet{u"engine"_s, u"Engine"_s, {}}, SchematicSheet{u"dash"_s, {}, {}}};
+        h.schematic.placements[u"c-ecu"_s].sheetId = u"dash"_s;
+        h.schematic.placements[u"c-ecu"_s].alsoOn[u"engine"_s] = QPointF(-20, 30.5); // shared ECU
+        h.schematic.placements[Schematic::wireSheetKey(u"w1"_s)] = SchematicPlacement{{}, false, 0, u"engine"_s, {}, {}};
+        h.notes[1].sheetId = u"dash"_s;
+        const QString file = path(u"sheets.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        const io::ZipEntries entries = readRaw(file);
+        const QJsonObject schematic = QJsonDocument::fromJson(entries.at(u"schematic.json"_s)).object();
+        QCOMPARE(schematic[u"sheets"].toArray().size(), 2);
+        QCOMPARE(schematic[u"placements"][u"c-ecu"][u"sheet"].toString(), u"dash"_s);
+        QVERIFY(!schematic[u"placements"][u"sp1"].toObject().contains(u"sheet")); // empty: not written
+        QCOMPARE(schematic[u"notes"][0][u"sheet"].toString(), u"dash"_s);
+        QCOMPARE(schematic[u"placements"][u"c-ecu"][u"alsoOn"][u"engine"][u"y"].toDouble(), 30.5);
+
+        const auto loaded = io::readTbhFile(file, nullptr);
+        QVERIFY(loaded);
+        QVERIFY(*loaded == h);
+        QCOMPARE(loaded->schematic.sheetOf(u"c-ecu"_s), u"dash"_s);
+        QCOMPARE(loaded->schematic.sheetOf(u"sp1"_s), u"engine"_s);    // empty id: first sheet
+        QCOMPARE(loaded->schematic.sheetOf(u"missing"_s), u"engine"_s); // no placement: first sheet
+        QCOMPARE(loaded->schematic.sheetIndex(u"dash"_s), 1);
+        QCOMPARE(loaded->schematic.sheetsOf(u"c-ecu"_s), (std::vector<QString>{u"engine"_s, u"dash"_s}));
+        QCOMPARE(loaded->schematic.positionOn(u"c-ecu"_s, u"engine"_s), std::optional(QPointF(-20, 30.5)));
+        QVERIFY(loaded->schematic.isOnSheet(u"sp1"_s, u"engine"_s));
+        QVERIFY(!loaded->schematic.isOnSheet(u"sp1"_s, u"dash"_s));
+    }
+
+    void fileWithoutSheetsHasOneSheet()
+    {
+        // Files from before sheets: schematic.json has no "sheets" and placements no "sheet".
+        const QString file = path(u"nosheets.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
+        io::ZipEntries entries = readRaw(file);
+        QJsonObject schematic = QJsonDocument::fromJson(entries.at(u"schematic.json"_s)).object();
+        schematic.remove(u"sheets");
+        entries[u"schematic.json"_s] = toBytes(schematic);
+        writeRaw(file, entries);
+        const auto loaded = io::readTbhFile(file, nullptr);
+        QVERIFY(loaded);
+        QCOMPARE(loaded->schematic.sheets.size(), size_t(1));
+        QCOMPARE(loaded->schematic.sheets[0].id, kDefaultSheetId);
+        QCOMPARE(loaded->schematic.sheetOf(u"c-ecu"_s), kDefaultSheetId);
+        QVERIFY(*loaded == sampleHarness());
+    }
+
+    void unknownSheetIdsMeanFirstSheet()
+    {
+        Harness h = sampleHarness();
+        h.schematic.placements[u"c-ecu"_s].sheetId = u"gone"_s;
+        h.schematic.placements[u"c-ecu"_s].alsoOn[u"gone2"_s] = QPointF(1, 1);
+        h.schematic.placements[u"c-ecu"_s].alsoOn[kDefaultSheetId] = QPointF(2, 2); // is its home
+        h.schematic.placements[Schematic::wireSheetKey(u"w1"_s)] = SchematicPlacement{{}, false, 0, u"gone"_s, {}, {}};
+        h.notes[1].sheetId = u"gone"_s;
+        const QString file = path(u"unknownsheet.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, h, nullptr));
+        const auto loaded = io::readTbhFile(file, nullptr);
+        QVERIFY(loaded);
+        QVERIFY(loaded->schematic.placements.at(u"c-ecu"_s).sheetId.isEmpty());
+        QVERIFY(loaded->schematic.placements.at(u"c-ecu"_s).alsoOn.empty());
+        QVERIFY(!loaded->schematic.placements.contains(Schematic::wireSheetKey(u"w1"_s)));
+        QVERIFY(loaded->notes[1].sheetId.isEmpty());
+    }
+
+    void duplicateSheetIdsAreRejected()
+    {
+        const QString error = readErrorAfter([](io::ZipEntries &entries) {
+            QJsonObject schematic = QJsonDocument::fromJson(entries.at(u"schematic.json"_s)).object();
+            const QJsonObject sheet{{u"id"_s, u"s"_s}, {u"name"_s, u""_s}};
+            schematic[u"sheets"] = QJsonArray{sheet, sheet};
+            entries[u"schematic.json"_s] = toBytes(schematic);
+        });
+        QVERIFY2(error.contains(u"sheet"_s), qPrintable(error));
+    }
+
     void saveOverwritesExistingFile()
     {
         const QString file = path(u"overwrite.tbh"_s);

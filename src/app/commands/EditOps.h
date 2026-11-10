@@ -37,10 +37,15 @@ std::vector<QString> wiresLostByPinChange(const Harness &harness, const Connecto
 std::unique_ptr<QUndoCommand> setConnectorPins(HarnessModel *model, const QString &connectorId,
                                                std::vector<Pin> newPins, const QString &text);
 
-// Inserts a fragment (see model/Fragment.h) with fresh ids, shifted by `offset`.
+// Inserts a fragment (see model/Fragment.h) with fresh ids, shifted by `offset`, onto
+// schematic sheet `sheetId` (empty = first sheet). Fragment items that still exist with the
+// same label and are not on that sheet are shown there instead of copied (wires touching
+// them are not copied); their ids are returned too. Wires between two reused items are
+// shown there too when the fragment marks them with a Schematic::wireSheetKey entry (the
+// wires selected when copying). New wires are drawn on that sheet.
 // Returns the new connector and splice ids through the out-parameter.
 std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragment, QPointF offset,
-                                            QSet<QString> *newItemIds);
+                                            QSet<QString> *newItemIds, const QString &sheetId = {});
 
 // Adds a wire. Empty circuit text is filled across it (fillEmptyCircuitText): a pin
 // without text takes the text of the pin at the other end (through splices), and an
@@ -128,5 +133,38 @@ std::unique_ptr<QUndoCommand> updateFreeEnd(HarnessModel *model, const FreeEnd &
 
 // Pins with `count` entries: existing pins are kept, new pins get nextPinLabel() labels.
 std::vector<Pin> resizedPins(const std::vector<Pin> &pins, int count);
+
+// ---- Schematic sheets ----
+// Placement keys of connectors, splices and free ends, and ids of schematic notes, are
+// "sheet items". Each builder keeps every other item on the sheet it is on, even when the
+// first sheet changes (items with an empty sheet id are on the first sheet).
+
+// Appends a new, unnamed sheet; its id goes to `newSheetId`.
+std::unique_ptr<QUndoCommand> addSheet(HarnessModel *model, QString *newSheetId = nullptr);
+// Sets a sheet's name (trimmed; empty = "Sheet N"). Null if the sheet is missing or nothing
+// changes.
+std::unique_ptr<QUndoCommand> renameSheet(HarnessModel *model, const QString &sheetId, const QString &name);
+// Removes a sheet; its items move to the sheet before it (the next one for the first sheet),
+// keeping their positions. Null for the last remaining sheet or a missing id.
+std::unique_ptr<QUndoCommand> removeSheet(HarnessModel *model, const QString &sheetId);
+// Moves a sheet to position `toIndex` (clamped). Null if nothing changes.
+std::unique_ptr<QUndoCommand> moveSheet(HarnessModel *model, const QString &sheetId, int toIndex);
+// Moves the items (placement keys and schematic note ids) shown on sheet `fromSheetId` to
+// sheet `toSheetId`, keeping their positions; items shown on other sheets too stay there.
+// Wires drawn on the old sheet follow when both their ends are now on the new one. Null if
+// the sheet is missing or nothing changes.
+std::unique_ptr<QUndoCommand> moveToSheet(HarnessModel *model, const QSet<QString> &placementKeys,
+                                          const QSet<QString> &noteIds, const QString &fromSheetId,
+                                          const QString &toSheetId);
+// Also shows existing connectors, splices and free ends (placement key -> position) and
+// wires on sheet `sheetId`: the same items and wires, not copies. A wire is shown only where
+// both its ends are (after this command). Items and wires already there are skipped. Null
+// if nothing changes.
+std::unique_ptr<QUndoCommand> showOnSheet(HarnessModel *model, const std::map<QString, QPointF> &positions,
+                                          const QSet<QString> &wireIds, const QString &sheetId);
+// Stops showing items and wires on sheet `sheetId` where they are also shown on another sheet
+// (they stay in the harness). Null if none qualifies.
+std::unique_ptr<QUndoCommand> removeFromSheet(HarnessModel *model, const QSet<QString> &placementKeys,
+                                              const QSet<QString> &wireIds, const QString &sheetId);
 
 } // namespace tbh::app

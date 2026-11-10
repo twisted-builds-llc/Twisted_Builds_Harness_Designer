@@ -4,6 +4,7 @@
 #include "SelectionModel.h"
 #include "bom/BuildSheets.h"
 #include "layout/LayoutScene.h"
+#include "model/Queries.h"
 #include "schematic/SchematicScene.h"
 #include "ui/Format.h"
 #include "ui/WireColors.h"
@@ -342,9 +343,20 @@ struct Sheet
     std::function<void(QPainter &, const QRectF &)> paint;
 };
 
+// Bounds of the shown items (itemsBoundingRect() counts hidden ones, e.g. other sheets).
+QRectF visibleItemsRect(const QGraphicsScene &scene)
+{
+    QRectF rect;
+    for (const QGraphicsItem *item : scene.items()) {
+        if (item->isVisible())
+            rect |= item->sceneBoundingRect();
+    }
+    return rect;
+}
+
 void drawScene(QPainter &p, QGraphicsScene &scene, const QRectF &area, const QString &emptyText)
 {
-    const QRectF items = scene.itemsBoundingRect();
+    const QRectF items = visibleItemsRect(scene);
     if (items.isEmpty()) {
         p.setFont(font(10));
         p.setPen(kCaption);
@@ -352,6 +364,55 @@ void drawScene(QPainter &p, QGraphicsScene &scene, const QRectF &area, const QSt
         return;
     }
     scene.render(&p, area, items.adjusted(-10, -10, 10, 10), Qt::KeepAspectRatio);
+}
+
+// Every schematic sheet in a row, at one scale, each under its name and in a thin frame.
+void drawSheetsSideBySide(QPainter &p, SchematicScene &scene, const QRectF &area)
+{
+    struct Part
+    {
+        QString id;
+        QString name;
+        QRectF rect; // scene rect of the sheet's items
+    };
+    const Schematic &schematic = scene.model()->harness().schematic;
+    std::vector<Part> parts;
+    for (int i = 0; i < int(schematic.sheets.size()); ++i) {
+        scene.setCurrentSheet(schematic.sheets[size_t(i)].id);
+        const QRectF rect = visibleItemsRect(scene);
+        if (!rect.isEmpty())
+            parts.push_back({schematic.sheets[size_t(i)].id, sheetDisplayName(schematic, i), rect.adjusted(-10, -10, 10, 10)});
+    }
+    if (parts.empty()) {
+        p.setFont(font(10));
+        p.setPen(kCaption);
+        p.drawText(area, Qt::AlignCenter, Tr::tr("Nothing is placed on the schematic yet."));
+        return;
+    }
+    constexpr qreal kGap = 120; // scene units between sheets
+    const qreal labelHeight = pt(14);
+    qreal width = kGap * qreal(parts.size() - 1);
+    qreal height = 0;
+    for (const Part &part : parts) {
+        width += part.rect.width();
+        height = std::max(height, part.rect.height());
+    }
+    const qreal scale = std::min(area.width() / width, (area.height() - labelHeight) / height);
+    qreal x = area.left() + (area.width() - width * scale) / 2;
+    const qreal y = area.top() + labelHeight;
+    for (const Part &part : parts) {
+        const QRectF target(x, y, part.rect.width() * scale, part.rect.height() * scale);
+        scene.setCurrentSheet(part.id);
+        scene.render(&p, target, part.rect, Qt::KeepAspectRatio);
+        p.setBrush(Qt::NoBrush);
+        p.setPen(QPen(kCaption, pt(0.5)));
+        p.drawRect(target);
+        p.setFont(font(8, true));
+        p.setPen(kInk);
+        p.drawText(QRectF(target.left(), area.top(), std::max(target.width(), pt(120)), labelHeight),
+                   Qt::AlignLeft | Qt::AlignVCenter, part.name);
+        x += (part.rect.width() + kGap) * scale;
+    }
 }
 
 // Bottom-right title block. Returns its rectangle.
@@ -438,9 +499,26 @@ int exportBuildPackage(const HarnessModel &source, const QString &path, const Pd
                       [&](QPainter &p, const QRectF &area) {
                           drawScene(p, layout, area, Tr::tr("Nothing is placed in the layout yet."));
                       }});
-    sheets.push_back({Tr::tr("Schematic"), QString(), [&](QPainter &p, const QRectF &area) {
-                          drawScene(p, schematic, area, Tr::tr("Nothing is placed on the schematic yet."));
-                      }});
+    // One schematic sheet prints as before. Several print side by side on one page first,
+    // then one page each.
+    const auto &schematicSheets = harness.schematic.sheets;
+    if (schematicSheets.size() == 1) {
+        sheets.push_back({Tr::tr("Schematic"), QString(), [&](QPainter &p, const QRectF &area) {
+                              drawScene(p, schematic, area, Tr::tr("Nothing is placed on the schematic yet."));
+                          }});
+    } else {
+        sheets.push_back({Tr::tr("Schematic - All Sheets"), QString(),
+                          [&](QPainter &p, const QRectF &area) { drawSheetsSideBySide(p, schematic, area); }});
+        for (int i = 0; i < int(schematicSheets.size()); ++i) {
+            const QString id = schematicSheets[size_t(i)].id;
+            sheets.push_back({Tr::tr("Schematic - %1").arg(sheetDisplayName(harness.schematic, i)),
+                              Tr::tr("Sheet %1 of %2").arg(i + 1).arg(schematicSheets.size()),
+                              [&, id](QPainter &p, const QRectF &area) {
+                                  schematic.setCurrentSheet(id);
+                                  drawScene(p, schematic, area, Tr::tr("Nothing is placed on this sheet yet."));
+                              }});
+        }
+    }
 
     const std::vector<TableBlock> cutList{cutListBlock(harness, model.library())};
     const std::vector<TableBlock> pinouts = pinoutBlocks(harness);

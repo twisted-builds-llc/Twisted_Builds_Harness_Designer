@@ -197,6 +197,7 @@ struct Note {
     NoteCanvas canvas = NoteCanvas::Layout;
     QString text;
     QPointF position; // top left of the text
+    QString sheetId;  // schematic notes: the sheet it is on; empty = first sheet
     QJsonObject extra;
 
     bool operator==(const Note &) const = default;
@@ -204,19 +205,65 @@ struct Note {
 
 // Where an item sits on the schematic canvas. Presentation only.
 struct SchematicPlacement {
-    QPointF position;
+    QPointF position;       // on the home sheet `sheetId`
     bool collapsed = false;
     int maxVisibleRows = 0; // connectors: rows shown before scrolling; 0 = show all
+    // Connectors, splices, free ends: their home sheet; empty = first sheet.
+    // Wire sheet entries (see Schematic::wireSheetKey): the sheet the wire is drawn on.
+    QString sheetId;
+    // Connectors, splices, free ends shown on further sheets: sheet id -> position there.
+    // The item is the same on every sheet (one connector, one splice in the layout and BOM).
+    std::map<QString, QPointF> alsoOn;
     QJsonObject extra;
+
+    // Every sheet the item is shown on with its position there, home sheet first.
+    // `resolvedHome` is Schematic::resolvedSheetId(sheetId).
+    std::vector<std::pair<QString, QPointF>> sheetPositions(const QString &resolvedHome) const;
+    // Replaces the sheets the item is shown on; the first entry becomes the home sheet.
+    // Must not be empty.
+    void setSheetPositions(const std::vector<std::pair<QString, QPointF>> &positions);
+    // Position on `sheet`, or nullopt when not shown there.
+    std::optional<QPointF> positionOn(const QString &resolvedHome, const QString &sheet) const;
+    // Sets the position on `sheet`, adding the sheet if the item is not shown there yet.
+    void setPositionOn(const QString &resolvedHome, const QString &sheet, const QPointF &position);
 
     bool operator==(const SchematicPlacement &) const = default;
 };
+
+// One page of the schematic. Each sheet has its own canvas coordinates; a wire whose ends
+// are on different sheets is drawn on each as a lead to an off-sheet tag.
+struct SchematicSheet {
+    QString id;
+    QString name; // empty = "Sheet N" by position
+    QJsonObject extra;
+
+    bool operator==(const SchematicSheet &) const = default;
+};
+
+inline const QString kDefaultSheetId = QStringLiteral("sheet1");
 
 struct Schematic {
     // Key: connector, splice or free end id, or a wire id
     // for a wire whose route was dragged (position.x is the x of its vertical run).
     std::map<QString, SchematicPlacement> placements;
+    // Never empty. Items whose sheetId is empty or unknown are on the first sheet.
+    std::vector<SchematicSheet> sheets{SchematicSheet{kDefaultSheetId, {}, {}}};
     QJsonObject extra;
+
+    // Index of the sheet `sheetId` resolves to (0 for empty or unknown ids).
+    int sheetIndex(const QString &sheetId) const;
+    // Resolved sheet id of an item placement or a note's sheetId.
+    QString resolvedSheetId(const QString &sheetId) const { return sheets[size_t(sheetIndex(sheetId))].id; }
+    // Home sheet of the item with this placement key (first sheet without a placement).
+    QString sheetOf(const QString &placementKey) const;
+    // True if the item is shown on `sheetId` (an item without a placement is on the first sheet).
+    bool isOnSheet(const QString &placementKey, const QString &sheetId) const;
+    // Sheets the item is shown on, in sheet order.
+    std::vector<QString> sheetsOf(const QString &placementKey) const;
+    // Position of the item on `sheetId`; nullopt without a placement or when not shown there.
+    std::optional<QPointF> positionOn(const QString &placementKey, const QString &sheetId) const;
+    // Key of the placement entry holding the sheet a wire was drawn on (its sheetId only).
+    static QString wireSheetKey(const QString &wireId) { return wireId + QStringLiteral("#sheet"); }
 
     bool operator==(const Schematic &) const = default;
 };

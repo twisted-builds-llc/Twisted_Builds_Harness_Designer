@@ -23,6 +23,7 @@ class Document;
 class Highlighter;
 class LayoutEditor;
 class SchematicView;
+class SheetTabBar;
 class SelectionModel;
 
 class MainWindow : public QMainWindow
@@ -84,6 +85,8 @@ private:
     Document *m_document;
     SelectionModel *m_selection;
     SchematicView *m_schematic = nullptr;
+    QWidget *m_schematicPage = nullptr; // sheet tabs + m_schematic
+    SheetTabBar *m_sheetTabs = nullptr;
     LayoutEditor *m_layout = nullptr;
     BomView *m_bom = nullptr;
     Highlighter *m_highlighter = nullptr;

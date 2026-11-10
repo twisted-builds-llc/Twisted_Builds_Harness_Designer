@@ -268,4 +268,52 @@ QString layoutRefLabel(const Harness &harness, const QString &refId)
     return {};
 }
 
+QString sheetDisplayName(const Schematic &schematic, int index)
+{
+    const QString &name = schematic.sheets[size_t(index)].name;
+    return name.isEmpty() ? Tr::tr("Sheet %1").arg(index + 1) : name;
+}
+
+WireSheets wireSheets(const Harness &harness, const Wire &wire)
+{
+    const Schematic &schematic = harness.schematic;
+    const QString a = wireEndItemId(wire.endA);
+    const QString b = wireEndItemId(wire.endB);
+    std::vector<QString> own = schematic.sheetsOf(Schematic::wireSheetKey(wire.id));
+    if (!schematic.placements.contains(Schematic::wireSheetKey(wire.id)))
+        own.clear(); // sheetsOf() puts an item without a placement on the first sheet
+    WireSheets result;
+    for (const QString &sheet : own) {
+        if (schematic.isOnSheet(a, sheet) && schematic.isOnSheet(b, sheet))
+            result.sheets.push_back(sheet);
+    }
+    if (!result.sheets.empty())
+        return result;
+    for (const SchematicSheet &sheet : schematic.sheets) {
+        if (schematic.isOnSheet(a, sheet.id) && schematic.isOnSheet(b, sheet.id)) {
+            result.sheets.push_back(sheet.id);
+            return result;
+        }
+    }
+    auto tagSheet = [&](const QString &end) {
+        for (const QString &sheet : own) {
+            if (schematic.isOnSheet(end, sheet))
+                return sheet;
+        }
+        return schematic.sheetOf(end);
+    };
+    result.tagSheetA = tagSheet(a);
+    result.tagSheetB = tagSheet(b);
+    return result;
+}
+
+QString wireEndItemId(const WireEnd &end)
+{
+    if (const auto *pin = std::get_if<PinRef>(&end))
+        return pin->connectorId;
+    if (const auto *splice = std::get_if<SpliceRef>(&end))
+        return splice->spliceId;
+    return std::get<FreeEndRef>(end).freeEndId;
+}
+
 } // namespace tbh

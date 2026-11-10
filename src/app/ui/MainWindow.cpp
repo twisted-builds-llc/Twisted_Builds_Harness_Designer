@@ -17,6 +17,7 @@
 #include "model/Queries.h"
 #include "layout/LayoutView.h"
 #include "schematic/SchematicView.h"
+#include "schematic/SheetTabBar.h"
 #include "ui/Format.h"
 #include "ui/ProblemsPanel.h"
 #include "ui/PreferencesDialog.h"
@@ -41,6 +42,7 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QSplitter>
+#include <QVBoxLayout>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTimer>
@@ -80,6 +82,14 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
         });
 
     m_schematic = new SchematicView(m_document, m_selection, this);
+    // The schematic editor page: sheet tabs over the canvas.
+    m_schematicPage = new QWidget(this);
+    auto *schematicLayout = new QVBoxLayout(m_schematicPage);
+    schematicLayout->setContentsMargins(0, 0, 0, 0);
+    schematicLayout->setSpacing(0);
+    m_sheetTabs = new SheetTabBar(m_document, m_schematic->schematicScene(), m_schematicPage);
+    schematicLayout->addWidget(m_sheetTabs);
+    schematicLayout->addWidget(m_schematic, 1);
     m_layout = new LayoutEditor(m_document, m_selection, this);
     m_highlighter = new Highlighter(m_document->model(), m_selection, this);
     connect(m_highlighter, &Highlighter::changed, this, [this] {
@@ -88,7 +98,7 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     });
     m_tabs = new QTabWidget(this);
     m_tabs->setDocumentMode(true);
-    m_tabs->addTab(m_schematic, tr("Schematic"));
+    m_tabs->addTab(m_schematicPage, tr("Schematic"));
     m_tabs->addTab(m_layout, tr("Layout"));
     m_bom = new BomView(m_document, this);
     m_tabs->addTab(m_bom, tr("BOM"));
@@ -104,7 +114,7 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     m_splitter->hide();
     m_lastCanvas = m_schematic;
     connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
-        if (now == m_schematic || m_schematic->isAncestorOf(now))
+        if (now == m_schematic || m_schematicPage->isAncestorOf(now))
             m_lastCanvas = m_schematic;
         else if (m_layout->isAncestorOf(now))
             m_lastCanvas = m_layout->view();
@@ -161,7 +171,7 @@ void MainWindow::showEditor(QWidget *editor)
         m_lastCanvas = canvas;
         canvas->setFocus();
     } else {
-        m_tabs->setCurrentWidget(editor);
+        m_tabs->setCurrentWidget(editor == m_schematic ? m_schematicPage : editor);
     }
 }
 
@@ -173,21 +183,21 @@ void MainWindow::setSplitView(bool on)
     // Taken before the tabs change: removing a tab moves the current index.
     QWidget *activeEditor = layoutActive() ? static_cast<QWidget *>(m_layout) : m_schematic;
     if (on) {
-        m_tabs->removeTab(m_tabs->indexOf(m_schematic));
+        m_tabs->removeTab(m_tabs->indexOf(m_schematicPage));
         m_tabs->removeTab(m_tabs->indexOf(m_layout));
-        m_splitter->addWidget(m_schematic);
+        m_splitter->addWidget(m_schematicPage);
         m_splitter->addWidget(m_layout);
         // Resizing the window keeps the split proportional.
         m_splitter->setStretchFactor(0, 1);
         m_splitter->setStretchFactor(1, 1);
         // The tab stack hid them; the splitter does not show hidden children itself.
-        m_schematic->show();
+        m_schematicPage->show();
         m_layout->show();
         m_tabs->insertTab(0, m_splitter, tr("Schematic + Layout"));
         equalizeSplit();
     } else {
         m_tabs->removeTab(m_tabs->indexOf(m_splitter));
-        m_tabs->insertTab(0, m_schematic, tr("Schematic"));
+        m_tabs->insertTab(0, m_schematicPage, tr("Schematic"));
         m_tabs->insertTab(1, m_layout, tr("Layout"));
     }
     m_lastCanvas = activeEditor == m_layout ? static_cast<CanvasView *>(m_layout->view()) : m_schematic;
@@ -426,6 +436,12 @@ void MainWindow::createMenus()
     QAction *addSchematicNote = toolAction(view, nullptr, tr("Add Note"), QKeySequence(Qt::Key_N),
                                            tr("Add a text note to the schematic (N)"), [view] { view->addNote(); });
     place->addActions({addConnector, addSplice, addFlyingLead, addEyelet, addSchematicNote, selectTool, wireTool});
+    QMenu *existing = place->addMenu(tr("Add E&xisting Item to Sheet"));
+    existing->setToolTip(tr("Show a connector, splice or free end from another sheet on this one: the same item, not a copy"));
+    connect(existing, &QMenu::aboutToShow, view, [view, existing] {
+        existing->clear();
+        view->addExistingItemActions(existing);
+    });
     place->addSection(tr("Layout"));
     QAction *addNote = toolAction(layout, nullptr, tr("Add Note"), QKeySequence(Qt::Key_N),
                                   tr("Add a text note to the layout (N)"), [layout] { layout->addNote(); });
@@ -442,6 +458,17 @@ void MainWindow::createMenus()
     arrange->addSeparator();
     arrange->addAction(tr("Distribute Hori&zontally"), view, [view] { view->distribute(Qt::Horizontal); });
     arrange->addAction(tr("Distribute Verti&cally"), view, [view] { view->distribute(Qt::Vertical); });
+    arrange->addSeparator();
+    QMenu *moveToSheet = arrange->addMenu(tr("Move to &Sheet"));
+    connect(moveToSheet, &QMenu::aboutToShow, view, [view, moveToSheet] {
+        moveToSheet->clear();
+        view->addMoveToSheetActions(moveToSheet);
+    });
+    QMenu *showOnSheet = arrange->addMenu(tr("Also Show on Sh&eet"));
+    connect(showOnSheet, &QMenu::aboutToShow, view, [view, showOnSheet] {
+        showOnSheet->clear();
+        view->addShowOnSheetActions(showOnSheet);
+    });
 
     m_viewMenu = menuBar()->addMenu(tr("&View"));
     m_viewMenu->addAction(tr("Zoom &In"), QKeySequence::ZoomIn, this, [this] { currentCanvas()->zoomIn(); });

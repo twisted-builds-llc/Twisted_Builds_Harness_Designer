@@ -53,6 +53,26 @@ private slots:
         QCOMPARE(pageObjects(pdf), 4);
     }
 
+    void severalSchematicSheets()
+    {
+        QTemporaryDir dir;
+        HarnessModel model;
+        Harness h = bomSample();
+        h.schematic.sheets = {SchematicSheet{u"engine"_s, u"Engine"_s, {}}, SchematicSheet{u"dash"_s, {}, {}},
+                              SchematicSheet{u"empty"_s, {}, {}}};
+        h.schematic.placements[u"lamp"_s] = SchematicPlacement{QPointF(0, 0), false, 0, u"dash"_s, {}};
+        model.reset(h);
+        const QString path = dir.filePath(u"sheets.pdf"_s);
+        // Layout, all sheets side by side, one page per sheet (3, the empty one too),
+        // cut list, pinouts: 1 + 1 + 3 + 1 + 1 = 7.
+        QCOMPARE(exportBuildPackage(model, path, PdfExportOptions{}, nullptr), 7);
+        QCOMPARE(pageObjects(readFile(path)), 7);
+        if (const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR"); !out.isEmpty()) {
+            QFile::remove(out + u"/sheets.pdf"_s); // copy() does not overwrite
+            QFile::copy(path, out + u"/sheets.pdf"_s);
+        }
+    }
+
     void longCutListContinues()
     {
         // 60 wires between flying leads: no connectors or splices, so no pinout sheet.

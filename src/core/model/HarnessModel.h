@@ -69,12 +69,17 @@ public:
     void remove(const QString &id);
 
     // Schematic placement keys owned by an entity: connector/splice/free end id; wire id
-    // (route); none for layout entities (their position is part of the entity).
+    // (route) and Schematic::wireSheetKey (its sheet); none for layout entities (their
+    // position is part of the entity).
     static std::vector<QString> placementKeys(EntityKind kind, const QString &id);
 
     const SchematicPlacement *placement(const QString &key) const;
     // nullopt removes the placement.
     void setPlacement(const QString &key, const std::optional<SchematicPlacement> &placement);
+
+    // Replaces the schematic sheet list (must not be empty). Placements and notes keep
+    // their sheet ids; commands move items off a removed sheet first.
+    void setSheets(std::vector<SchematicSheet> sheets);
 
 signals:
     void harnessReset();
@@ -85,6 +90,7 @@ signals:
     void entityChanged(tbh::EntityKind kind, const QString &id);
     void entityRemoved(tbh::EntityKind kind, const QString &id);
     void placementChanged(const QString &key);
+    void sheetsChanged();
 
 private:
     template<typename T>

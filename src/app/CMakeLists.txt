@@ -19,6 +19,7 @@ add_library(tbh_app_lib STATIC
     schematic/SchematicItems.h schematic/SchematicItems.cpp
     schematic/SchematicScene.h schematic/SchematicScene.cpp
     schematic/SchematicView.h schematic/SchematicView.cpp
+    schematic/SheetTabBar.h schematic/SheetTabBar.cpp
     ui/CanvasView.h ui/CanvasView.cpp
     ui/NoteItem.h ui/NoteItem.cpp
     ui/ConnectorEdits.h ui/ConnectorEdits.cpp

@@ -395,6 +395,8 @@ Note readNote(ObjectReader r, NoteCanvas canvas)
     n.text = r.string("text");
     ObjectReader pos(r.object("position"), r.context() + QStringLiteral(".position"));
     n.position = QPointF(pos.number("x", 0.0), pos.number("y", 0.0));
+    if (canvas == NoteCanvas::Schematic)
+        n.sheetId = r.string("sheet");
     n.extra = r.extra();
     return n;
 }
@@ -667,6 +669,8 @@ QJsonObject writeNote(const Note &n)
     o[u"id"] = n.id;
     o[u"text"] = n.text;
     o[u"position"] = QJsonObject{{u"x"_s, n.position.x()}, {u"y"_s, n.position.y()}};
+    if (!n.sheetId.isEmpty())
+        o[u"sheet"] = n.sheetId;
     return o;
 }
 
@@ -696,9 +700,25 @@ QJsonObject writeSchematic(const Schematic &schematic, const QJsonArray &notes)
         po[u"y"] = p.position.y();
         po[u"collapsed"] = p.collapsed;
         po[u"maxVisibleRows"] = p.maxVisibleRows;
+        if (!p.sheetId.isEmpty())
+            po[u"sheet"] = p.sheetId;
+        if (!p.alsoOn.empty()) {
+            QJsonObject also;
+            for (const auto &[sheet, pos] : p.alsoOn)
+                also[sheet] = QJsonObject{{u"x"_s, pos.x()}, {u"y"_s, pos.y()}};
+            po[u"alsoOn"] = also;
+        }
         placements[key] = po;
     }
     o[u"placements"] = placements;
+    QJsonArray sheets;
+    for (const SchematicSheet &sheet : schematic.sheets) {
+        QJsonObject so = sheet.extra;
+        so[u"id"] = sheet.id;
+        so[u"name"] = sheet.name;
+        sheets.append(so);
+    }
+    o[u"sheets"] = sheets;
     o[u"notes"] = notes;
     return o;
 }
@@ -716,8 +736,27 @@ Schematic readSchematic(ObjectReader r)
         p.maxVisibleRows = int(pr.number("maxVisibleRows", 0));
         if (p.maxVisibleRows < 0)
             fail(Tr::tr("%1: \"maxVisibleRows\" must not be negative.").arg(context));
+        p.sheetId = pr.string("sheet");
+        const QJsonObject also = pr.object("alsoOn");
+        for (auto a = also.begin(); a != also.end(); ++a) {
+            const QString alsoContext = context + QStringLiteral(".alsoOn.") + a.key();
+            ObjectReader ar(requireObject(a.value(), alsoContext), alsoContext);
+            p.alsoOn[a.key()] = QPointF(ar.number("x", 0.0), ar.number("y", 0.0));
+        }
         p.extra = pr.extra();
         schematic.placements[it.key()] = p;
+    }
+    std::vector<SchematicSheet> sheets =
+        readArray<SchematicSheet>(r.array("sheets"), QStringLiteral("schematic.sheets"), [](ObjectReader sr) {
+            SchematicSheet sheet;
+            sheet.id = sr.id();
+            sheet.name = sr.string("name");
+            sheet.extra = sr.extra();
+            return sheet;
+        });
+    if (!sheets.empty()) {
+        uniqueIds(sheets, Tr::tr("sheet"));
+        schematic.sheets = std::move(sheets);
     }
     schematic.extra = r.extra();
     return schematic;
@@ -826,9 +865,34 @@ void dropOrphanPlacements(Harness &h)
         keys.insert(s.id);
     for (const FreeEnd &f : h.freeEnds)
         keys.insert(f.id);
-    for (const Wire &w : h.wires)
+    for (const Wire &w : h.wires) {
         keys.insert(w.id); // the wire's route (x of its vertical run)
+        keys.insert(Schematic::wireSheetKey(w.id));
+    }
     std::erase_if(h.schematic.placements, [&](const auto &entry) { return !keys.contains(entry.first); });
+}
+
+// Sheet ids that name no sheet (e.g. from a pasted fragment) mean the first sheet; store
+// them as empty so later sheet edits treat them the same way.
+void clearUnknownSheetIds(Harness &h)
+{
+    QSet<QString> ids;
+    for (const SchematicSheet &sheet : h.schematic.sheets)
+        ids.insert(sheet.id);
+    // A wire's own sheet that no longer exists: the wire has none (see wireSheets()).
+    std::erase_if(h.schematic.placements, [&](const auto &entry) {
+        return entry.first.endsWith(QLatin1StringView("#sheet")) && !ids.contains(entry.second.sheetId);
+    });
+    for (auto &[key, p] : h.schematic.placements) {
+        if (!ids.contains(p.sheetId))
+            p.sheetId.clear();
+        const QString home = h.schematic.resolvedSheetId(p.sheetId);
+        std::erase_if(p.alsoOn, [&](const auto &entry) { return !ids.contains(entry.first) || entry.first == home; });
+    }
+    for (Note &n : h.notes) {
+        if (!ids.contains(n.sheetId))
+            n.sheetId.clear();
+    }
 }
 
 template<typename T, typename WriteFn>
@@ -996,6 +1060,7 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
 
         checkIntegrity(h);
         dropOrphanPlacements(h);
+        clearUnknownSheetIds(h);
         return h;
     } catch (const FormatError &e) {
         if (error)

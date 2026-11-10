@@ -45,4 +45,23 @@ void SetHarnessSettingsCommand::undo()
     m_model->setSettings(m_old);
 }
 
+SetSheetsCommand::SetSheetsCommand(HarnessModel *model, std::vector<SchematicSheet> newSheets,
+                                   const QString &text, QUndoCommand *parent)
+    : QUndoCommand(text, parent)
+    , m_model(model)
+    , m_old(model->harness().schematic.sheets)
+    , m_new(std::move(newSheets))
+{
+}
+
+void SetSheetsCommand::redo()
+{
+    m_model->setSheets(m_new);
+}
+
+void SetSheetsCommand::undo()
+{
+    m_model->setSheets(m_old);
+}
+
 } // namespace tbh::app

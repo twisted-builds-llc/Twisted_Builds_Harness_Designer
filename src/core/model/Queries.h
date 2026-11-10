@@ -5,6 +5,8 @@
 
 #include <QSet>
 
+#include <algorithm>
+
 namespace tbh {
 
 // Ids of wires with at least one end on the connector.
@@ -43,6 +45,30 @@ CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString
 QString describeWireEnd(const Harness &harness, const WireEnd &end);
 // e.g. "5V REF (ECU-A : A1 - SENSOR : +)".
 QString describeWire(const Harness &harness, const Wire &wire);
+
+// The sheet's name, or "Sheet N" (N = position, from 1) when it has none.
+QString sheetDisplayName(const Schematic &schematic, int index);
+// Placement key of the item a wire end is on: connector, splice or free end id.
+QString wireEndItemId(const WireEnd &end);
+
+// Where a wire appears on the schematic. A wire can be shown on several sheets (like a
+// connector shared by sheets); it stays one wire. It is drawn in full (`sheets`) on each of
+// its own sheets that shows both its ends; without any, on the first sheet in order showing
+// both. When the ends share no sheet, each end gets a lead to an off-sheet tag on
+// `tagSheetA` / `tagSheetB`: the wire's first own sheet if that end is shown there, else the
+// end's home sheet.
+struct WireSheets
+{
+    std::vector<QString> sheets; // in sheet order; empty when the ends share no sheet
+    QString tagSheetA;
+    QString tagSheetB;
+
+    bool drawnOn(const QString &sheetId) const
+    {
+        return std::find(sheets.begin(), sheets.end(), sheetId) != sheets.end();
+    }
+};
+WireSheets wireSheets(const Harness &harness, const Wire &wire);
 
 // Something a layout node can stand for: a connector, a splice or a free end.
 struct LayoutRef

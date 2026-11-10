@@ -19,7 +19,7 @@ Saving is atomic: the file is written to a temporary file next to the target, th
 | `splices.json`    | Array of splices. Optional, default `[]`.                   |
 | `freeEnds.json`   | Array of free ends (flying leads, eyelets...). Optional, default `[]`. |
 | `layout.json`     | Layout: `{ "nodes": [...], "segments": [...], "notes": [...] }`. |
-| `schematic.json`  | Schematic placements (positions, collapse, visible rows).   |
+| `schematic.json`  | Schematic sheets and placements (positions, collapse, visible rows, sheet). |
 | `library.json`    | Parts library entries this harness uses (embedded on save). |
 | `bom.json`        | BOM rows added by hand (the rest of the BOM is generated).  |
 
@@ -230,6 +230,27 @@ Presentation only: where items sit on the schematic canvas.
   their vertical run halfway between the ends. Older versions drop these entries on load,
   so the file stays readable; no `schemaVersion` change.
 - `maxVisibleRows`: connector rows shown before the box scrolls; `0` shows all rows.
+- `sheets` (optional): the schematic's sheets (pages), in order:
+  `[ { "id": "sheet1", "name": "Engine" }, { "id": "k3f9", "name": "" } ]`. An empty
+  `name` displays as "Sheet N" by position. Missing or empty means one sheet with id
+  `sheet1`. Sheet ids must be unique. Each sheet has its own canvas coordinates.
+- `sheet` (optional, on connector, splice and free end placements and on schematic notes):
+  the id of the sheet the item is on. Missing, empty or an id that names no sheet means the
+  first sheet (unknown ids are cleared on load). Wire route placements have none: a wire is
+  drawn on the sheets of its ends, and as a lead to an off-sheet tag where they differ.
+- `alsoOn` (optional, on connector, splice and free end placements): further sheets the
+  same item is shown on, with its position on each: `{ "k3f9": { "x": 0, "y": 40 } }`. The
+  item stays one item (one connector or splice in the layout and BOM); `x`/`y`/`sheet` are
+  its home sheet. Entries naming no sheet, or the home sheet, are dropped on load.
+- A key `<wire id>#sheet` holds the sheets a wire is shown on: `sheet` (the one it was
+  drawn on) plus `alsoOn` keys for further sheets (their `x`/`y` are unused). It stays one
+  wire. It is drawn in full on each of those sheets that shows both its ends; without any,
+  on the first sheet (in order) showing both; else as a lead to an off-sheet tag at each
+  end. Dropped on load when the wire or its `sheet` is gone.
+- A dragged wire route (key = wire id) is kept per sheet the same way: `x` on its `sheet`,
+  `alsoOn` for the others.
+- `sheets`, `sheet`, `alsoOn` and `#sheet` keys were added without a `schemaVersion` change: older files load as one
+  sheet, and older versions keep the keys but draw every sheet on one canvas.
 - `notes` (optional): free text on the schematic canvas, same shape as the layout notes:
   `[ { "id": "note2", "position": { "x": 500, "y": -80 }, "text": "Check ECU pinout" } ]`.
 - Items without a placement are laid out automatically when the file is opened.

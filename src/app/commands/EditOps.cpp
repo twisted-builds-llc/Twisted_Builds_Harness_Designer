@@ -3,6 +3,7 @@
 
 #include "calc/WireLength.h"
 #include "commands/EntityCommands.h"
+#include "commands/HarnessCommands.h"
 #include "model/Fragment.h"
 #include "model/PinLabels.h"
 #include "model/Queries.h"
@@ -183,12 +184,105 @@ std::unique_ptr<QUndoCommand> setConnectorPins(HarnessModel *model, const QStrin
     return macro;
 }
 
-std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragment, QPointF offset,
-                                            QSet<QString> *newItemIds)
+namespace {
+
+// The placement of a wire's sheet entry with `sheetId` added; a wire without an entry keeps
+// the sheet it is drawn on now.
+SchematicPlacement wireSheetsWith(const Harness &h, const Wire &wire, const QString &sheetId)
 {
+    const QString key = Schematic::wireSheetKey(wire.id);
+    SchematicPlacement entry;
+    if (const auto it = h.schematic.placements.find(key); it != h.schematic.placements.end()) {
+        entry = it->second;
+    } else {
+        const WireSheets now = wireSheets(h, wire);
+        entry.sheetId = now.sheets.empty() ? sheetId : now.sheets.front();
+    }
+    entry.setPositionOn(h.schematic.resolvedSheetId(entry.sheetId), sheetId, {});
+    return entry;
+}
+
+} // namespace
+
+std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragment, QPointF offset,
+                                            QSet<QString> *newItemIds, const QString &sheetId)
+{
+    const Harness &h = model->harness();
+    const QString targetSheet = h.schematic.resolvedSheetId(sheetId);
+    // Items that still exist under the same name and are not on the target sheet are shown
+    // there instead of copied: the same connector or splice on another sheet.
+    QSet<QString> reused;
+    auto reusable = [&](const QString &id, const QString &label, const QString &existingLabel) {
+        return label == existingLabel && !h.schematic.isOnSheet(id, targetSheet);
+    };
+    for (const Connector &c : fragment.connectors) {
+        if (const Connector *existing = model->find<Connector>(c.id); existing && reusable(c.id, c.label, existing->label))
+            reused.insert(c.id);
+    }
+    for (const Splice &sp : fragment.splices) {
+        if (const Splice *existing = model->find<Splice>(sp.id); existing && reusable(sp.id, sp.label, existing->label))
+            reused.insert(sp.id);
+    }
+    for (const FreeEnd &f : fragment.freeEnds) {
+        if (const FreeEnd *existing = model->find<FreeEnd>(f.id); existing && reusable(f.id, f.label, existing->label))
+            reused.insert(f.id);
+    }
+
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Paste"));
+    std::map<QString, std::optional<SchematicPlacement>> shown;
+    for (const QString &id : std::as_const(reused)) {
+        const auto it = fragment.schematic.placements.find(id);
+        const QPointF position = (it != fragment.schematic.placements.end() ? it->second.position : QPointF()) + offset;
+        if (const SchematicPlacement *old = model->placement(id)) {
+            SchematicPlacement placement = *old;
+            placement.setPositionOn(h.schematic.resolvedSheetId(old->sheetId), targetSheet, position);
+            shown[id] = placement;
+        } else {
+            SchematicPlacement placement;
+            placement.position = position;
+            placement.sheetId = targetSheet;
+            shown[id] = placement;
+        }
+        if (newItemIds)
+            newItemIds->insert(id);
+    }
+    // Wires between reused items that were selected when copied (marked by a wire sheet
+    // entry in the fragment) are shown there too.
+    Schematic after = h.schematic;
+    for (const auto &[key, placement] : shown)
+        after.placements[key] = *placement;
+    for (const Wire &w : fragment.wires) {
+        const Wire *existing = model->find<Wire>(w.id);
+        if (!existing || !fragment.schematic.placements.contains(Schematic::wireSheetKey(w.id))
+            || !reused.contains(wireEndItemId(w.endA)) || !reused.contains(wireEndItemId(w.endB))
+            || !after.isOnSheet(wireEndItemId(existing->endA), targetSheet)
+            || !after.isOnSheet(wireEndItemId(existing->endB), targetSheet) || wireSheets(h, *existing).drawnOn(targetSheet))
+            continue;
+        shown[Schematic::wireSheetKey(w.id)] = wireSheetsWith(h, *existing, targetSheet);
+    }
+    if (!shown.empty())
+        new SetPlacementsCommand(model, shown, {}, macro.get());
+    // The rest is a copy. Wires touching a reused item exist already.
+    std::erase_if(fragment.connectors, [&](const Connector &c) { return reused.contains(c.id); });
+    std::erase_if(fragment.splices, [&](const Splice &sp) { return reused.contains(sp.id); });
+    std::erase_if(fragment.freeEnds, [&](const FreeEnd &f) { return reused.contains(f.id); });
+    std::erase_if(fragment.wires, [&](const Wire &w) {
+        return reused.contains(wireEndItemId(w.endA)) || reused.contains(wireEndItemId(w.endB));
+    });
+
     assignNewIds(fragment);
-    for (auto &[key, placement] : fragment.schematic.placements)
+    for (auto &[key, placement] : fragment.schematic.placements) {
         placement.position += offset;
+        const bool wireRoute = std::any_of(fragment.wires.begin(), fragment.wires.end(),
+                                           [&](const Wire &w) { return w.id == key; });
+        placement.sheetId = wireRoute ? QString() : targetSheet;
+        placement.alsoOn.clear();
+    }
+    for (const Wire &w : fragment.wires) {
+        SchematicPlacement sheet;
+        sheet.sheetId = targetSheet;
+        fragment.schematic.placements[Schematic::wireSheetKey(w.id)] = sheet;
+    }
     auto placementsOf = [&](EntityKind kind, const QString &id) {
         Placements result;
         for (const QString &key : HarnessModel::placementKeys(kind, id)) {
@@ -199,18 +293,17 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
         return result;
     };
 
-    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Paste"));
     for (Connector &c : fragment.connectors) {
         if (newItemIds)
             newItemIds->insert(c.id);
         Placements p = placementsOf(EntityKind::Connector, c.id);
         new AddEntityCommand<Connector>(model, std::move(c), std::move(p), {}, macro.get());
     }
-    for (Splice &s : fragment.splices) {
+    for (Splice &sp : fragment.splices) {
         if (newItemIds)
-            newItemIds->insert(s.id);
-        Placements p = placementsOf(EntityKind::Splice, s.id);
-        new AddEntityCommand<Splice>(model, std::move(s), std::move(p), {}, macro.get());
+            newItemIds->insert(sp.id);
+        Placements p = placementsOf(EntityKind::Splice, sp.id);
+        new AddEntityCommand<Splice>(model, std::move(sp), std::move(p), {}, macro.get());
     }
     for (FreeEnd &f : fragment.freeEnds) {
         if (newItemIds)
@@ -596,6 +689,265 @@ std::vector<Pin> resizedPins(const std::vector<Pin> &pins, int count)
         result.push_back(std::move(pin));
     }
     return result;
+}
+
+// ---- Schematic sheets ----------------------------------------------------------
+
+namespace {
+
+bool isSheetItem(const HarnessModel *model, const QString &key)
+{
+    return model->find<Connector>(key) || model->find<Splice>(key) || model->find<FreeEnd>(key);
+}
+
+bool isWireSheetEntry(const HarnessModel *model, const QString &key)
+{
+    static const QString suffix = Schematic::wireSheetKey({});
+    return key.endsWith(suffix) && model->find<Wire>(key.chopped(suffix.size()));
+}
+
+// Child commands that put every sheet item (and wire's own sheet) on `sheetFor(sheet)` for
+// each sheet it is on once the list is `newSheets`, then set the list. Sheet ids are only
+// rewritten where the new list would resolve them differently.
+template<typename SheetFor>
+void addSheetChange(HarnessModel *model, std::vector<SchematicSheet> newSheets, SheetFor sheetFor,
+                    QUndoCommand *parent)
+{
+    const Schematic &old = model->harness().schematic;
+    Schematic after;
+    after.sheets = newSheets;
+    // `current` as stored, `wanted` as resolved: keep `current` when it still means `wanted`.
+    auto stored = [&](const QString &current, const QString &wanted) {
+        const bool known = current.isEmpty()
+                           || std::any_of(newSheets.begin(), newSheets.end(),
+                                          [&](const SchematicSheet &s) { return s.id == current; });
+        return known && after.resolvedSheetId(current) == wanted ? current : wanted;
+    };
+    std::map<QString, std::optional<SchematicPlacement>> placements;
+    for (const auto &[key, placement] : old.placements) {
+        SchematicPlacement moved = placement;
+        // Items, wire routes (kept per sheet) and the sheets a wire is drawn on.
+        if (isSheetItem(model, key) || isWireSheetEntry(model, key) || model->find<Wire>(key)) {
+            std::vector<std::pair<QString, QPointF>> positions;
+            for (const auto &[sheet, pos] : placement.sheetPositions(old.resolvedSheetId(placement.sheetId))) {
+                const QString target = sheetFor(sheet);
+                if (std::none_of(positions.begin(), positions.end(), [&](const auto &p) { return p.first == target; }))
+                    positions.emplace_back(target, pos);
+            }
+            moved.setSheetPositions(positions);
+            moved.sheetId = stored(placement.sheetId, moved.sheetId);
+        } else {
+            continue;
+        }
+        if (!(moved == placement))
+            placements[key] = moved;
+    }
+    if (!placements.empty())
+        new SetPlacementsCommand(model, placements, {}, parent);
+    for (const Note &note : model->harness().notes) {
+        if (note.canvas != NoteCanvas::Schematic)
+            continue;
+        const QString id = stored(note.sheetId, sheetFor(old.resolvedSheetId(note.sheetId)));
+        if (id != note.sheetId) {
+            Note moved = note;
+            moved.sheetId = id;
+            new UpdateEntityCommand<Note>(model, std::move(moved), {}, parent);
+        }
+    }
+    new SetSheetsCommand(model, std::move(newSheets), {}, parent);
+}
+
+QString unchanged(const QString &sheetId)
+{
+    return sheetId;
+}
+
+bool hasSheet(const Schematic &schematic, const QString &sheetId)
+{
+    return std::any_of(schematic.sheets.begin(), schematic.sheets.end(),
+                       [&](const SchematicSheet &s) { return s.id == sheetId; });
+}
+
+} // namespace
+
+std::unique_ptr<QUndoCommand> addSheet(HarnessModel *model, QString *newSheetId)
+{
+    std::vector<SchematicSheet> sheets = model->harness().schematic.sheets;
+    sheets.push_back(SchematicSheet{newId(), {}, {}});
+    if (newSheetId)
+        *newSheetId = sheets.back().id;
+    return std::make_unique<SetSheetsCommand>(model, std::move(sheets), Tr::tr("Add sheet"));
+}
+
+std::unique_ptr<QUndoCommand> renameSheet(HarnessModel *model, const QString &sheetId, const QString &name)
+{
+    std::vector<SchematicSheet> sheets = model->harness().schematic.sheets;
+    const auto it = std::find_if(sheets.begin(), sheets.end(), [&](const SchematicSheet &s) { return s.id == sheetId; });
+    if (it == sheets.end() || it->name == name.trimmed())
+        return nullptr;
+    it->name = name.trimmed();
+    return std::make_unique<SetSheetsCommand>(model, std::move(sheets), Tr::tr("Rename sheet"));
+}
+
+std::unique_ptr<QUndoCommand> removeSheet(HarnessModel *model, const QString &sheetId)
+{
+    std::vector<SchematicSheet> sheets = model->harness().schematic.sheets;
+    const auto it = std::find_if(sheets.begin(), sheets.end(), [&](const SchematicSheet &s) { return s.id == sheetId; });
+    if (it == sheets.end() || sheets.size() < 2)
+        return nullptr;
+    const QString target = it == sheets.begin() ? std::next(it)->id : std::prev(it)->id;
+    sheets.erase(it);
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Delete sheet"));
+    addSheetChange(model, std::move(sheets),
+                   [&](const QString &current) { return current == sheetId ? target : current; }, macro.get());
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> moveSheet(HarnessModel *model, const QString &sheetId, int toIndex)
+{
+    std::vector<SchematicSheet> sheets = model->harness().schematic.sheets;
+    const auto it = std::find_if(sheets.begin(), sheets.end(), [&](const SchematicSheet &s) { return s.id == sheetId; });
+    if (it == sheets.end())
+        return nullptr;
+    const int from = int(it - sheets.begin());
+    const int to = std::clamp(toIndex, 0, int(sheets.size()) - 1);
+    if (from == to)
+        return nullptr;
+    const SchematicSheet sheet = *it;
+    sheets.erase(it);
+    sheets.insert(sheets.begin() + to, sheet);
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Move sheet"));
+    addSheetChange(model, std::move(sheets), unchanged, macro.get());
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> moveToSheet(HarnessModel *model, const QSet<QString> &placementKeys,
+                                          const QSet<QString> &noteIds, const QString &fromSheetId,
+                                          const QString &toSheetId)
+{
+    const Schematic &schematic = model->harness().schematic;
+    const QString from = schematic.resolvedSheetId(fromSheetId);
+    if (!hasSheet(schematic, toSheetId) || from == toSheetId)
+        return nullptr;
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Move to sheet"));
+    Schematic after = schematic;
+    std::map<QString, std::optional<SchematicPlacement>> placements;
+    for (const QString &key : placementKeys) {
+        if (!isSheetItem(model, key) || !schematic.isOnSheet(key, from))
+            continue;
+        const SchematicPlacement *old = model->placement(key);
+        SchematicPlacement moved = old ? *old : SchematicPlacement{};
+        std::vector<std::pair<QString, QPointF>> positions;
+        const bool alreadyThere = schematic.isOnSheet(key, toSheetId);
+        for (const auto &[sheet, pos] : moved.sheetPositions(schematic.resolvedSheetId(moved.sheetId))) {
+            if (sheet != from)
+                positions.emplace_back(sheet, pos);
+            else if (!alreadyThere)
+                positions.emplace_back(toSheetId, pos); // keeps its place in the list (home stays home)
+        }
+        moved.setSheetPositions(positions);
+        placements[key] = moved;
+        after.placements[key] = moved;
+    }
+    // Wires drawn on the old sheet move along when both ends are now on the new one.
+    for (const Wire &w : model->harness().wires) {
+        const QString key = Schematic::wireSheetKey(w.id);
+        const SchematicPlacement *own = model->placement(key);
+        if (!own || !schematic.isOnSheet(key, from) || !after.isOnSheet(wireEndItemId(w.endA), toSheetId)
+            || !after.isOnSheet(wireEndItemId(w.endB), toSheetId))
+            continue;
+        std::vector<std::pair<QString, QPointF>> sheets;
+        for (const auto &[sheet, pos] : own->sheetPositions(schematic.resolvedSheetId(own->sheetId))) {
+            const QString target = sheet == from ? toSheetId : sheet;
+            if (std::none_of(sheets.begin(), sheets.end(), [&](const auto &p) { return p.first == target; }))
+                sheets.emplace_back(target, pos);
+        }
+        SchematicPlacement moved = *own;
+        moved.setSheetPositions(sheets);
+        placements[key] = moved;
+    }
+    if (!placements.empty())
+        new SetPlacementsCommand(model, placements, {}, macro.get());
+    for (const QString &id : noteIds) {
+        const Note *note = model->find<Note>(id);
+        if (!note || note->canvas != NoteCanvas::Schematic || schematic.resolvedSheetId(note->sheetId) != from)
+            continue;
+        Note moved = *note;
+        moved.sheetId = toSheetId;
+        new UpdateEntityCommand<Note>(model, std::move(moved), {}, macro.get());
+    }
+    if (macro->childCount() == 0)
+        return nullptr;
+    return macro;
+}
+
+
+std::unique_ptr<QUndoCommand> showOnSheet(HarnessModel *model, const std::map<QString, QPointF> &positions,
+                                          const QSet<QString> &wireIds, const QString &sheetId)
+{
+    const Harness &h = model->harness();
+    const Schematic &schematic = h.schematic;
+    if (!hasSheet(schematic, sheetId))
+        return nullptr;
+    std::map<QString, std::optional<SchematicPlacement>> placements;
+    Schematic after = schematic;
+    for (const auto &[key, position] : positions) {
+        if (!isSheetItem(model, key) || schematic.isOnSheet(key, sheetId))
+            continue;
+        SchematicPlacement placement;
+        if (const SchematicPlacement *old = model->placement(key)) {
+            placement = *old;
+            placement.setPositionOn(schematic.resolvedSheetId(old->sheetId), sheetId, position);
+        } else {
+            placement.position = position;
+            placement.sheetId = sheetId;
+        }
+        placements[key] = placement;
+        after.placements[key] = placement;
+    }
+    // Wires too, where both their ends are shown there (now or by this command).
+    for (const Wire &w : h.wires) {
+        if (!wireIds.contains(w.id) || wireSheets(h, w).drawnOn(sheetId)
+            || !after.isOnSheet(wireEndItemId(w.endA), sheetId) || !after.isOnSheet(wireEndItemId(w.endB), sheetId))
+            continue;
+        placements[Schematic::wireSheetKey(w.id)] = wireSheetsWith(h, w, sheetId);
+    }
+    if (placements.empty())
+        return nullptr;
+    return std::make_unique<SetPlacementsCommand>(model, placements, Tr::tr("Show on sheet"));
+}
+
+std::unique_ptr<QUndoCommand> removeFromSheet(HarnessModel *model, const QSet<QString> &placementKeys,
+                                              const QSet<QString> &wireIds, const QString &sheetId)
+{
+    const Harness &h = model->harness();
+    const Schematic &schematic = h.schematic;
+    const QString sheet = schematic.resolvedSheetId(sheetId);
+    std::map<QString, std::optional<SchematicPlacement>> placements;
+    for (const QString &key : placementKeys) {
+        const SchematicPlacement *old = model->placement(key);
+        if (!old || !isSheetItem(model, key) || !schematic.isOnSheet(key, sheet) || schematic.sheetsOf(key).size() < 2)
+            continue;
+        std::vector<std::pair<QString, QPointF>> positions = old->sheetPositions(schematic.resolvedSheetId(old->sheetId));
+        std::erase_if(positions, [&](const auto &p) { return p.first == sheet; });
+        SchematicPlacement placement = *old;
+        placement.setSheetPositions(positions);
+        placements[key] = placement;
+    }
+    for (const Wire &w : h.wires) {
+        const QString key = Schematic::wireSheetKey(w.id);
+        const SchematicPlacement *old = model->placement(key);
+        if (!wireIds.contains(w.id) || !old || wireSheets(h, w).sheets.size() < 2 || !schematic.isOnSheet(key, sheet))
+            continue;
+        std::vector<std::pair<QString, QPointF>> sheets = old->sheetPositions(schematic.resolvedSheetId(old->sheetId));
+        std::erase_if(sheets, [&](const auto &p) { return p.first == sheet; });
+        SchematicPlacement placement = *old;
+        placement.setSheetPositions(sheets); // not empty: drawn on two or more of its sheets
+        placements[key] = placement;
+    }
+    if (placements.empty())
+        return nullptr;
+    return std::make_unique<SetPlacementsCommand>(model, placements, Tr::tr("Remove from sheet"));
 }
 
 } // namespace tbh::app
