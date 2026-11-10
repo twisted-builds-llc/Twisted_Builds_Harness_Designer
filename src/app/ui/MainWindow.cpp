@@ -37,10 +37,12 @@
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QSettings>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTimer>
 #include <QToolBar>
+#include <QToolButton>
 #include <QTreeWidget>
 
 namespace tbh::app {
@@ -49,6 +51,8 @@ namespace {
 
 constexpr auto kRecentFilesKey = "recentFiles";
 constexpr int kMaxRecentFiles = 10;
+constexpr auto kSplitViewKey = "view/split";
+constexpr auto kSplitStackedKey = "view/splitStacked";
 
 QString fileFilter()
 {
@@ -89,9 +93,19 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
         Selection selection;
         selection.wires.insert(wireId);
         m_selection->setSelection(selection);
-        m_tabs->setCurrentWidget(m_schematic);
+        showEditor(m_schematic);
     });
     setCentralWidget(m_tabs);
+    m_splitter = new QSplitter(Qt::Horizontal, this);
+    m_splitter->setChildrenCollapsible(false);
+    m_splitter->hide();
+    m_lastCanvas = m_schematic;
+    connect(qApp, &QApplication::focusChanged, this, [this](QWidget *, QWidget *now) {
+        if (now == m_schematic || m_schematic->isAncestorOf(now))
+            m_lastCanvas = m_schematic;
+        else if (m_layout->isAncestorOf(now))
+            m_lastCanvas = m_layout->view();
+    });
 
     createDocks();
     createMenus();
@@ -122,16 +136,117 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     resize(1400, 860);
 }
 
-bool MainWindow::layoutTabActive() const
+bool MainWindow::layoutActive() const
 {
+    if (m_tabs->currentWidget() == m_splitter)
+        return m_lastCanvas == m_layout->view();
     return m_tabs->currentWidget() == m_layout;
 }
 
 CanvasView *MainWindow::currentCanvas() const
 {
-    if (layoutTabActive())
+    if (layoutActive())
         return m_layout->view();
     return m_schematic;
+}
+
+void MainWindow::showEditor(QWidget *editor)
+{
+    if (m_splitAction->isChecked()) {
+        m_tabs->setCurrentWidget(m_splitter);
+        CanvasView *canvas = editor == m_layout ? static_cast<CanvasView *>(m_layout->view()) : m_schematic;
+        m_lastCanvas = canvas;
+        canvas->setFocus();
+    } else {
+        m_tabs->setCurrentWidget(editor);
+    }
+}
+
+void MainWindow::setSplitView(bool on)
+{
+    if (on == (m_tabs->indexOf(m_splitter) >= 0))
+        return;
+    const bool editorShown = m_tabs->currentWidget() != m_bom;
+    // Taken before the tabs change: removing a tab moves the current index.
+    QWidget *activeEditor = layoutActive() ? static_cast<QWidget *>(m_layout) : m_schematic;
+    if (on) {
+        m_tabs->removeTab(m_tabs->indexOf(m_schematic));
+        m_tabs->removeTab(m_tabs->indexOf(m_layout));
+        m_splitter->addWidget(m_schematic);
+        m_splitter->addWidget(m_layout);
+        // Resizing the window keeps the split proportional.
+        m_splitter->setStretchFactor(0, 1);
+        m_splitter->setStretchFactor(1, 1);
+        // The tab stack hid them; the splitter does not show hidden children itself.
+        m_schematic->show();
+        m_layout->show();
+        m_tabs->insertTab(0, m_splitter, tr("Schematic + Layout"));
+        equalizeSplit();
+    } else {
+        m_tabs->removeTab(m_tabs->indexOf(m_splitter));
+        m_tabs->insertTab(0, m_schematic, tr("Schematic"));
+        m_tabs->insertTab(1, m_layout, tr("Layout"));
+    }
+    m_lastCanvas = activeEditor == m_layout ? static_cast<CanvasView *>(m_layout->view()) : m_schematic;
+    if (editorShown)
+        showEditor(activeEditor);
+    syncToolbars();
+}
+
+void MainWindow::setSplitStacked(bool stacked)
+{
+    m_splitter->setOrientation(stacked ? Qt::Vertical : Qt::Horizontal);
+    equalizeSplit();
+}
+
+void MainWindow::equalizeSplit()
+{
+    // Deferred: the splitter only has its real size once the tab is laid out; proportional
+    // sizes set before that drift as the layout editor's size hint takes the extra space.
+    QTimer::singleShot(0, m_splitter, [splitter = m_splitter] {
+        const int total = splitter->orientation() == Qt::Horizontal ? splitter->width() : splitter->height();
+        splitter->setSizes({total / 2, total - total / 2});
+    });
+}
+
+void MainWindow::styleButtons()
+{
+    const QPalette palette = QApplication::palette();
+    // Toolbar buttons: a neutral outline (between text and background, visible in both themes);
+    // the active tool gets the accent color.
+    QColor outline = palette.color(QPalette::ButtonText);
+    outline.setAlphaF(0.35);
+    const QString toolbar =
+        QStringLiteral("QToolButton { border: 1px solid %1; border-radius: 4px; padding: 2px 8px; margin: 2px 1px; }"
+                       "QToolButton:hover { background: %2; }"
+                       "QToolButton:checked { background: %2; border-color: %3; }")
+            .arg(outline.name(QColor::HexArgb), palette.color(QPalette::Button).name(),
+                 palette.color(QPalette::Highlight).name());
+    for (QToolBar *bar : {m_schematicBar, m_layoutBar})
+        bar->setStyleSheet(toolbar);
+    // Split view: outlined in the accent color, filled with it while split view is on.
+    m_splitButton->setStyleSheet(
+        QStringLiteral("QToolButton { color: %1; border: 1px solid %2; border-radius: 4px; padding: 2px 10px;"
+                       " margin: 2px; }"
+                       "QToolButton:hover { background: %3; }"
+                       "QToolButton:checked { background: %2; color: %4; }")
+            .arg(palette.color(QPalette::ButtonText).name(), palette.color(QPalette::Highlight).name(),
+                 palette.color(QPalette::Button).name(), palette.color(QPalette::HighlightedText).name()));
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::PaletteChange && m_layoutBar) // built last
+        styleButtons();
+}
+
+void MainWindow::syncToolbars()
+{
+    // Split view shows both editors, so it shows both toolbars.
+    const bool split = m_tabs->currentWidget() == m_splitter;
+    m_schematicBar->setVisible(split || !layoutActive());
+    m_layoutBar->setVisible(split || layoutActive());
 }
 
 void MainWindow::createDocks()
@@ -175,10 +290,10 @@ void MainWindow::createDocks()
                 Selection selection;
                 if (kind == calc::Problem::Kind::UnroutedWire) {
                     selection.wires.insert(id);
-                    m_tabs->setCurrentWidget(m_schematic);
+                    showEditor(m_schematic);
                 } else {
                     selection.layoutSegments.insert(id);
-                    m_tabs->setCurrentWidget(m_layout);
+                    showEditor(m_layout);
                 }
                 m_selection->setSelection(selection);
             });
@@ -212,7 +327,8 @@ void MainWindow::createMenus()
     edit->addSeparator();
     // Canvas actions: shortcuts only fire while an editor canvas has focus, so they never
     // steal keys (Delete, Ctrl+C...) from text fields and tables in the panels. From the
-    // menu they act on the editor of the current tab; `onLayout` may be empty.
+    // menu they act on the editor of the current tab (in split view, the one last focused);
+    // `onLayout` may be empty.
     auto canvasAction = [&](QMenu *menu, const QString &text, const QKeySequence &key,
                             std::function<void()> onSchematic, std::function<void()> onLayout) {
         QAction *action = menu->addAction(text);
@@ -222,7 +338,7 @@ void MainWindow::createMenus()
         if (onLayout)
             layout->addAction(action);
         connect(action, &QAction::triggered, this, [this, onSchematic, onLayout] {
-            if (!layoutTabActive())
+            if (!layoutActive())
                 onSchematic();
             else if (onLayout)
                 onLayout();
@@ -241,7 +357,7 @@ void MainWindow::createMenus()
                  [layout] { layout->selectAll(); });
     edit->addSeparator();
     edit->addAction(tr("&Find Pin..."), QKeySequence::Find, this, [this] {
-        m_tabs->setCurrentWidget(m_schematic);
+        showEditor(m_schematic);
         m_find->setFocus();
         m_find->selectAll();
     });
@@ -348,6 +464,33 @@ void MainWindow::createMenus()
         m_layout->view()->layoutScene()->setShowBundleDiameters(on);
     });
     m_viewMenu->addSeparator();
+    m_splitAction = m_viewMenu->addAction(tr("S&plit Schematic and Layout"));
+    m_splitAction->setCheckable(true);
+    m_splitAction->setObjectName(QStringLiteral("splitViewAction"));
+    m_splitAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Backslash));
+    m_splitAction->setToolTip(tr("Show the schematic and the layout at the same time (Ctrl+\\)"));
+    m_splitAction->setIconText(tr("Split View"));
+    QMenu *splitDirection = m_viewMenu->addMenu(tr("Split &Direction"));
+    auto *directionGroup = new QActionGroup(this);
+    QAction *sideBySide = splitDirection->addAction(tr("&Side by Side"));
+    QAction *stacked = splitDirection->addAction(tr("S&tacked"));
+    stacked->setObjectName(QStringLiteral("splitStackedAction"));
+    for (QAction *action : {sideBySide, stacked}) {
+        action->setCheckable(true);
+        directionGroup->addAction(action);
+    }
+    const bool stackedSaved = QSettings().value(QLatin1String(kSplitStackedKey), false).toBool();
+    (stackedSaved ? stacked : sideBySide)->setChecked(true);
+    setSplitStacked(stackedSaved);
+    connect(stacked, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue(QLatin1String(kSplitStackedKey), on);
+        setSplitStacked(on);
+    });
+    m_splitButton = new QToolButton(m_tabs);
+    m_splitButton->setDefaultAction(m_splitAction);
+    m_splitButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_tabs->setCornerWidget(m_splitButton, Qt::TopRightCorner);
+    m_viewMenu->addSeparator();
     for (QDockWidget *dock : findChildren<QDockWidget *>())
         m_viewMenu->addAction(dock->toggleViewAction());
     m_viewMenu->addSeparator();
@@ -373,7 +516,7 @@ void MainWindow::createMenus()
     help->addSeparator();
     help->addAction(tr("&About"), this, &MainWindow::showAbout);
 
-    // One toolbar per editor; the current tab decides which is shown.
+    // One toolbar per editor; the current tab decides which is shown (both in split view).
     QToolBar *schematicBar = addToolBar(tr("Schematic"));
     schematicBar->setObjectName(QStringLiteral("schematicToolbar"));
     schematicBar->setMovable(false);
@@ -406,11 +549,15 @@ void MainWindow::createMenus()
 
     for (QToolBar *bar : {schematicBar, layoutBar})
         bar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    auto syncToolbars = [this, schematicBar, layoutBar] {
-        schematicBar->setVisible(!layoutTabActive());
-        layoutBar->setVisible(layoutTabActive());
-    };
-    connect(m_tabs, &QTabWidget::currentChanged, this, syncToolbars);
+    m_schematicBar = schematicBar;
+    m_layoutBar = layoutBar;
+    styleButtons();
+    connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::syncToolbars);
+    connect(m_splitAction, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue(QLatin1String(kSplitViewKey), on);
+        setSplitView(on);
+    });
+    m_splitAction->setChecked(QSettings().value(QLatin1String(kSplitViewKey), false).toBool());
     syncToolbars();
 }
 

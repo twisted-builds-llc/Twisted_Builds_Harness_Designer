@@ -54,6 +54,9 @@ public:
     const LayoutNode &node() const { return m_node; }
     // `label` is the name of what the node stands for (empty for branch points).
     void setNode(const LayoutNode &node, const QString &label);
+    // Dimmer second line under the name, e.g. a splice's total run length; empty = none.
+    void setSubLabel(const QString &text);
+    QString subLabel() const { return m_subLabel; }
     // True if `itemPos` is on one of the short leads beside the node. Dragging a lead draws
     // a segment; dragging the node itself moves it.
     bool isStubAt(const QPointF &itemPos) const;
@@ -95,6 +98,7 @@ protected:
 private:
     // Name shown beside the node, "(unassigned)" for an end node without a reference.
     QString displayLabel() const;
+    QStringList subLabelLines() const;
     // Node types drawn as an icon facing away from their wire (connector, eyelet).
     bool hasIcon() const;
     // Outline of the icon in the facing-up frame (wire enters at the origin from below).
@@ -113,6 +117,8 @@ private:
     QPainterPath m_branchPath; // branchPath(m_legs)
     int m_facing = 0;          // facingFor(m_legs)
     qreal m_labelWidth = 0;
+    QString m_subLabel;
+    qreal m_subLabelWidth = 0;
 };
 
 class LayoutSegmentItem : public QGraphicsItem

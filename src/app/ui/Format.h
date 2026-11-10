@@ -10,6 +10,8 @@ namespace tbh::app {
 
 // "810 mm", "31.89 in", "81.0 cm" (locale-aware).
 QString formatLength(double mm, Units units, bool withSymbol = true);
+// Like formatLength() with the unit spelled out: "10 inches", "1 inch", "254 millimeters".
+QString formatLengthWords(double mm, Units units);
 // Parses a number in `units` (locale or C decimal point). Returns millimeters.
 std::optional<double> parseLength(const QString &text, Units units);
 

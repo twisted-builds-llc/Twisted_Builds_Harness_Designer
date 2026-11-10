@@ -137,6 +137,33 @@ private slots:
         QCOMPARE(usage.value(u"seg4"_s), (std::vector<QString>{u"w3"_s}));
     }
 
+    void spliceRunLength()
+    {
+        Harness h = sample();
+        // n4 sits between branch n2 and flying lead n5: seg3 120 + seg4 80 = 200.
+        QCOMPARE(spliceRunLengthMm(h, u"n4"_s), std::optional<double>(200.0));
+        // Not a pass-through splice: a branch node, and an unknown node.
+        QCOMPARE(spliceRunLengthMm(h, u"n2"_s), std::nullopt);
+        QCOMPARE(spliceRunLengthMm(h, u"nope"_s), std::nullopt);
+
+        // A second splice n6 in the run (n4 --50-- n6 --30-- n5) extends it:
+        // 120 + 50 + 30 = 200 from either splice.
+        h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
+        h.layoutNodes.push_back(node(u"n6"_s, LayoutNodeType::Splice, u"sp2"_s));
+        h.layoutSegments[3] = segment(u"seg4"_s, u"n4"_s, u"n6"_s, 50);
+        h.layoutSegments.push_back(segment(u"seg5"_s, u"n6"_s, u"n5"_s, 30));
+        QCOMPARE(spliceRunLengthMm(h, u"n4"_s), std::optional<double>(200.0));
+        QCOMPARE(spliceRunLengthMm(h, u"n6"_s), std::optional<double>(200.0));
+
+        // A segment without a length leaves the total unknown.
+        h.layoutSegments[4].lengthMm = 0;
+        QCOMPARE(spliceRunLengthMm(h, u"n4"_s), std::nullopt);
+
+        // A splice at the end of a stub (one segment) is not in a run.
+        h.layoutSegments.pop_back();
+        QCOMPARE(spliceRunLengthMm(h, u"n6"_s), std::nullopt);
+    }
+
     void problems()
     {
         Harness h = sample();

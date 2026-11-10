@@ -298,6 +298,25 @@ void LayoutNodeItem::setNode(const LayoutNode &node, const QString &label)
     update();
 }
 
+void LayoutNodeItem::setSubLabel(const QString &text)
+{
+    if (text == m_subLabel)
+        return;
+    prepareGeometryChange();
+    m_subLabel = text;
+    // The sub-label may span several lines ('\n'); its width is the widest line.
+    m_subLabelWidth = 0;
+    const QFontMetricsF metrics(captionFont(false));
+    for (const QString &line : text.split(u'\n', Qt::SkipEmptyParts))
+        m_subLabelWidth = std::max(m_subLabelWidth, metrics.horizontalAdvance(line) + 4);
+    update();
+}
+
+QStringList LayoutNodeItem::subLabelLines() const
+{
+    return m_subLabel.split(u'\n', Qt::SkipEmptyParts);
+}
+
 QString LayoutNodeItem::displayLabel() const
 {
     if (m_node.type == LayoutNodeType::Branch)
@@ -380,17 +399,18 @@ QRectF LayoutNodeItem::labelRect() const
 {
     if (m_node.type == LayoutNodeType::Branch)
         return {};
-    const qreal width = std::max(m_labelWidth, 20.0);
+    const qreal width = std::max({m_labelWidth, m_subLabelWidth, 20.0});
+    const qreal height = (1 + subLabelLines().size()) * kLabelHeight;
     const qreal d = (hasIcon() ? iconReach() : kRadius) + kLabelGap;
     switch (hasIcon() ? m_facing : 2) {
     case 1:
-        return QRectF(d, -kLabelHeight / 2, width, kLabelHeight);
+        return QRectF(d, -height / 2, width, height);
     case 2:
-        return QRectF(-width / 2, d, width, kLabelHeight);
+        return QRectF(-width / 2, d, width, height);
     case 3:
-        return QRectF(-d - width, -kLabelHeight / 2, width, kLabelHeight);
+        return QRectF(-d - width, -height / 2, width, height);
     default:
-        return QRectF(-width / 2, -d - kLabelHeight, width, kLabelHeight);
+        return QRectF(-width / 2, -d - height, width, height);
     }
 }
 
@@ -513,7 +533,17 @@ void LayoutNodeItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, 
             align = Qt::AlignVCenter | Qt::AlignLeft;
         else if (hasIcon() && m_facing == 3)
             align = Qt::AlignVCenter | Qt::AlignRight;
-        painter->drawText(r, align, label);
+        if (m_subLabel.isEmpty()) {
+            painter->drawText(r, align, label);
+        } else {
+            const QRectF top(r.left(), r.top(), r.width(), kLabelHeight);
+            painter->drawText(top, align, label);
+            painter->setFont(captionFont(false));
+            painter->setPen(mix(text, base, 0.4));
+            const QStringList lines = subLabelLines();
+            for (qsizetype i = 0; i < lines.size(); ++i)
+                painter->drawText(top.translated(0, (i + 1) * kLabelHeight), align, lines.at(i));
+        }
     }
 }
 

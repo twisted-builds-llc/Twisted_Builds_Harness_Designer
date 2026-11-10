@@ -807,6 +807,29 @@ QPointF SchematicView::viewCenterSnapped() const
     return SchematicScene::snapped(mapToScene(viewport()->rect().center()));
 }
 
+QPointF SchematicView::unoccupiedPosition(QPointF position) const
+{
+    // Step diagonally past any connector or splice already sitting exactly here, so a new item
+    // added repeatedly at the view center is visibly offset instead of stacked out of sight.
+    const Harness &h = m_document->model()->harness();
+    QSet<QString> ids;
+    for (const Connector &c : h.connectors)
+        ids.insert(c.id);
+    for (const Splice &s : h.splices)
+        ids.insert(s.id);
+    auto occupied = [&](const QPointF &p) {
+        for (const auto &[key, placement] : h.schematic.placements) {
+            if (ids.contains(key) && (placement.position - p).manhattanLength() < 1)
+                return true;
+        }
+        return false;
+    };
+    const QPointF step(2 * kCanvasGrid, 2 * kCanvasGrid);
+    while (occupied(position))
+        position += step;
+    return position;
+}
+
 void SchematicView::addConnector()
 {
     Connector connector;
@@ -814,7 +837,8 @@ void SchematicView::addConnector()
     connector.label = uniqueLabel(QStringLiteral("J"), false);
     connector.pins = resizedPins({}, 1);
     SchematicPlacement placement;
-    placement.position = SchematicScene::snapped(viewCenterSnapped() - QPointF(ConnectorItem::kWidth / 2, 40));
+    placement.position =
+        unoccupiedPosition(SchematicScene::snapped(viewCenterSnapped() - QPointF(ConnectorItem::kWidth / 2, 40)));
     const QString id = connector.id;
     m_document->undoStack()->push(new AddEntityCommand<Connector>(
         m_document->model(), std::move(connector), {{id, placement}}, tr("Add connector")));
@@ -829,7 +853,7 @@ void SchematicView::addSplice()
     splice.id = newId();
     splice.label = uniqueLabel(QStringLiteral("S"), true);
     SchematicPlacement placement;
-    placement.position = viewCenterSnapped();
+    placement.position = unoccupiedPosition(viewCenterSnapped());
     const QString id = splice.id;
     m_document->undoStack()->push(new AddEntityCommand<Splice>(
         m_document->model(), std::move(splice), {{id, placement}}, tr("Add splice")));

@@ -15,6 +15,13 @@ Document::Document(QObject *parent)
     newHarness();
 }
 
+Document::~Document()
+{
+    // The undo stack clears itself when destroyed, which would emit cleanChanged (and so
+    // modifiedChanged) to receivers, such as the main window, that may already be gone.
+    m_undoStack.blockSignals(true);
+}
+
 void Document::newHarness()
 {
     setRecovered(false);

@@ -24,6 +24,8 @@
 #include <QListWidget>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QSplitter>
+#include <QToolBar>
 #include <QStandardPaths>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -136,6 +138,86 @@ private slots:
         selection.setSelection({});
         QTRY_COMPARE(sc->wireItem(u"w1"_s)->opacity(), 1.0);
         QCOMPARE(ls->segmentItem(u"seg3"_s)->opacity(), 1.0);
+    }
+
+    void splitViewShowsBothEditors()
+    {
+        QTemporaryDir dir;
+        const QString file = dir.filePath(u"split.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, typedSample(), nullptr));
+        Theme theme;
+        MainWindow window(&theme);
+        window.show();
+        QVERIFY(window.openFile(file));
+        auto *tabs = window.findChild<QTabWidget *>();
+        auto *schematic = window.findChild<SchematicView *>();
+        auto *layout = window.findChild<LayoutView *>();
+        auto *split = window.findChild<QAction *>(u"splitViewAction"_s);
+        auto *stacked = window.findChild<QAction *>(u"splitStackedAction"_s);
+        QVERIFY(split && stacked);
+
+        // Off by default: Schematic, Layout, BOM tabs.
+        QVERIFY(!split->isChecked());
+        QCOMPARE(tabs->count(), 3);
+
+        split->trigger();
+        QCOMPARE(tabs->count(), 2); // "Schematic + Layout", BOM
+        auto *splitter = qobject_cast<QSplitter *>(tabs->currentWidget());
+        QVERIFY(splitter);
+        QCOMPARE(splitter->orientation(), Qt::Horizontal);
+        QVERIFY(splitter->isAncestorOf(schematic) && splitter->isAncestorOf(layout));
+        QVERIFY(schematic->isVisible() && layout->isVisible());
+        for (QToolBar *bar : window.findChildren<QToolBar *>())
+            QVERIFY(bar->isVisible());
+        QVERIFY(QSettings().value(u"view/split"_s).toBool());
+        // Opens about 50/50.
+        QTRY_VERIFY(std::abs(splitter->sizes().at(0) - splitter->sizes().at(1)) <= splitter->handleWidth() + 2);
+        // Screenshot of the split view and its corner button, light then dark.
+        if (const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR"); !out.isEmpty()) {
+            window.grab().save(out + u"/split-light.png"_s);
+            theme.setMode(Theme::Mode::Dark);
+            QTest::qWait(20);
+            window.grab().save(out + u"/split-dark.png"_s);
+            split->setChecked(false);
+            QTest::qWait(20);
+            window.grab().save(out + u"/split-off-dark.png"_s);
+            theme.setMode(Theme::Mode::Light);
+            QTest::qWait(20);
+            window.grab().save(out + u"/split-off-light.png"_s);
+            split->setChecked(true);
+            theme.setMode(Theme::Mode::System);
+        }
+
+        // One selection highlights in both visible editors.
+        Selection s;
+        s.connectors.insert(u"sensor"_s);
+        window.findChild<SelectionModel *>()->setSelection(s);
+        QTRY_VERIFY(schematic->schematicScene()->connectorItem(u"lamp"_s)->opacity() < 0.5);
+        QVERIFY(layout->layoutScene()->segmentItem(u"seg3"_s)->opacity() < 0.5);
+
+        // Menu Delete acts on the editor that last had focus: the layout here.
+        Selection seg;
+        seg.layoutSegments.insert(u"seg3"_s);
+        window.findChild<SelectionModel *>()->setSelection(seg);
+        layout->setFocus();
+        QTRY_VERIFY(layout->hasFocus());
+        const auto segments = window.findChild<Document *>()->model()->harness().layoutSegments.size();
+        QAction *del = nullptr;
+        for (QAction *action : window.findChildren<QAction *>())
+            if (action->text() == u"&Delete"_s)
+                del = action;
+        QVERIFY(del);
+        del->trigger();
+        QCOMPARE(window.findChild<Document *>()->model()->harness().layoutSegments.size(), segments - 1);
+
+        stacked->trigger();
+        QCOMPARE(splitter->orientation(), Qt::Vertical);
+
+        // Back to tabs; the layout stays the shown editor.
+        split->trigger();
+        QCOMPARE(tabs->count(), 3);
+        QVERIFY(tabs->currentWidget()->isAncestorOf(layout));
+        QSettings().clear();
     }
 
     void clickingPinNarrowsSelection()

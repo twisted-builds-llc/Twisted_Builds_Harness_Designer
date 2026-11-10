@@ -10,6 +10,7 @@
 
 class QGraphicsLineItem;
 class QListWidget;
+class QListWidgetItem;
 
 namespace tbh::app {
 
@@ -46,8 +47,9 @@ public:
     // Edits a note's text in place; clearing the text deletes the note.
     void editNote(const QString &noteId);
     void straightenSegment(const QString &segmentId);
-    // Adds a node standing for `ref` near the view center.
-    void placeRef(const LayoutRef &ref);
+    // Adds a node standing for each ref near the view center, each a little offset from the
+    // last so none hide under another. One undo step; the new nodes are selected.
+    void placeRefs(const std::vector<LayoutRef> &refs);
     void deleteSelection();
     void selectAll();
     void editSegmentLength(const QString &segmentId);
@@ -120,7 +122,9 @@ public:
 
 private:
     void refreshUnplaced();
-    void placeCurrent();
+    void placeSelected();
+    void placeAll();
+    void placeItems(const QList<QListWidgetItem *> &items);
 
     Document *m_document;
     LayoutView *m_view;

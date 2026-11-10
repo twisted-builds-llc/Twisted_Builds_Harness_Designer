@@ -26,6 +26,21 @@ QString formatLength(double mm, Units units, bool withSymbol)
     return withSymbol ? text + QLatin1Char(' ') + unitsSymbol(units) : text;
 }
 
+QString formatLengthWords(double mm, Units units)
+{
+    const QString number = formatLength(mm, units, false);
+    const bool one = number == QLocale().toString(1);
+    switch (units) {
+    case Units::Inches:
+        return one ? Tr::tr("%1 inch").arg(number) : Tr::tr("%1 inches").arg(number);
+    case Units::Millimeters:
+        return one ? Tr::tr("%1 millimeter").arg(number) : Tr::tr("%1 millimeters").arg(number);
+    case Units::Centimeters:
+        return one ? Tr::tr("%1 centimeter").arg(number) : Tr::tr("%1 centimeters").arg(number);
+    }
+    return formatLength(mm, units);
+}
+
 std::optional<double> parseLength(const QString &text, Units units)
 {
     const QString trimmed = text.trimmed();
