@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-twisted-harness">
+    <comment>Twisted Builds harness file</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.tbh"/>
+    <icon name="twisted-harness-designer"/>
+  </mime-type>
+</mime-info>

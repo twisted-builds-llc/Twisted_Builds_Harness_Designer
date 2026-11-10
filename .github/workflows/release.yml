@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Builds the installers. On a v* tag it also attaches them to a draft GitHub
+# Release for review; a manual run only uploads them as workflow artifacts.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: '6.8.3'
+
+jobs:
+  linux:
+    name: Linux AppImage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build AppImage (AlmaLinux 8, glibc 2.28)
+        run: >
+          docker run --rm -v "$PWD":/src -w /src
+          -e HOST_UID="$(id -u)" -e QT_VERSION="$QT_VERSION"
+          almalinux:8 packaging/linux/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+  windows:
+    name: Windows installer and zip
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: lukka/get-cmake@latest
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Configure
+        run: cmake --preset release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+      - name: Build
+        run: cmake --build --preset release
+      - name: Test
+        run: ctest --preset release
+      - name: Install into stage (runs windeployqt)
+        run: |
+          cmake --install build/release --prefix stage
+          echo "VERSION=$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' build/release/CMakeCache.txt)" >> "$GITHUB_ENV"
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          & $iscc "/DAppVersion=$env:VERSION" "/DStageDir=$PWD\stage" "/DOutputDir=$PWD\dist" packaging\windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $name = "TwistedHarnessDesigner-$env:VERSION-windows-x64"
+          Copy-Item -Recurse stage $name
+          Compress-Archive -Path $name -DestinationPath "dist\$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          if-no-files-found: error
+
+  macos:
+    name: macOS dmg
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          arch: clang_64
+          cache: true
+      - uses: lukka/get-cmake@latest
+      - name: Configure (universal, macOS 12+)
+        run: >
+          cmake --preset release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0
+      - name: Build
+        run: cmake --build --preset release
+      - name: Test
+        run: ctest --preset release
+      - name: Install into stage (runs macdeployqt)
+        run: |
+          cmake --install build/release --prefix stage
+          echo "VERSION=$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' build/release/CMakeCache.txt)" >> "$GITHUB_ENV"
+      - name: Disk image
+        run: |
+          app="stage/Twisted Harness Designer.app"
+          # Ad-hoc signature: Apple Silicon refuses to run unsigned code. This is
+          # not a Developer ID signature, so Gatekeeper still asks on first open.
+          codesign --force --deep --sign - "$app"
+          mkdir -p dmgroot dist
+          cp -R "$app" dmgroot/
+          ln -s /Applications dmgroot/Applications
+          dmg="dist/TwistedHarnessDesigner-$VERSION-macos.dmg"
+          # hdiutil sometimes fails with "Resource busy" on hosted runners; retry.
+          for attempt in 1 2 3 4 5; do
+            hdiutil create -volname "Harness Designer" -srcfolder dmgroot -ov -format UDZO "$dmg" && break
+            sleep 10
+          done
+          test -f "$dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Draft GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Check the tag matches the project version
+        run: |
+          ls -l dist
+          version="${GITHUB_REF_NAME#v}"
+          count=$(ls dist | grep -c -- "-${version}-")
+          if [ "$count" -ne 4 ]; then
+            echo "Expected 4 files for version ${version}; the tag must match project(VERSION) in CMakeLists.txt."
+            exit 1
+          fi
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --draft --generate-notes
+          --title "Twisted Builds Harness Designer ${GITHUB_REF_NAME#v}"

@@ -37,6 +37,9 @@ public:
     bool openFile(const QString &path);
 
 protected:
+    // Opens files the system hands to the app (double-clicking a .tbh file on macOS
+    // sends a QFileOpenEvent instead of a command-line argument).
+    bool eventFilter(QObject *watched, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
     void changeEvent(QEvent *event) override;
 

@@ -1,0 +1,3 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Application icon shown by Explorer, the taskbar and the installer shortcuts.
+IDI_ICON1 ICON "../../resources/icons/twisted-harness-designer.ico"
