@@ -7,10 +7,31 @@ lengths, bundle diameters and a bill of materials.
 **Privacy:** this application makes no network connections. No cloud, no accounts, no telemetry,
 no update checks. Your designs never leave your computer.
 
-> Status: early development. All editing features of v0.1 are in place (schematic, layout,
-> wire lengths, highlighting, bundle diameters, sleeving, BOM, autosave, help). Installers
-> come next.
-> See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for scope and roadmap.
+> Status: early development (v0.1). See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for
+> scope and roadmap.
+
+## Download and install
+
+Get the latest version from the
+[Releases page](https://github.com/twisted-builds-llc/Twisted_Builds_Harness_Designer/releases).
+The installers are **not code-signed** yet, so Windows and macOS warn the first time you open
+them. That is expected; the steps below get past it.
+
+- **Windows 10/11 (64-bit):** run `TwistedHarnessDesigner-<version>-setup.exe`. If Windows
+  shows "Windows protected your PC", click **More info**, then **Run anyway**. The installer
+  asks whether to install for you only (no admin rights needed) or for all users, and can
+  make `.tbh` files open in the app. The `-windows-x64.zip` is a portable copy: unzip it
+  and run `bin\twisted-harness-designer.exe`.
+- **macOS 12 or newer (Apple Silicon and Intel):** open the `.dmg` and drag
+  **Twisted Harness Designer** to **Applications**. The first time, macOS says it cannot
+  check the app for malicious software. On macOS 15 and newer, open **System Settings >
+  Privacy & Security**, scroll down and click **Open Anyway**. On macOS 12-14, right-click
+  the app, choose **Open**, then **Open** again.
+- **Linux (64-bit, glibc 2.28 or newer: Ubuntu 20.04+, Debian 10+, Fedora 29+,
+  RHEL/Rocky/Alma 8+, Mint 20+):** download the `.AppImage`, make it executable
+  (`chmod +x TwistedHarnessDesigner-*.AppImage`, or Properties > Permissions in your file
+  manager) and run it. If it complains about FUSE, run it with `--appimage-extract-and-run`,
+  or install FUSE 2 (`sudo apt install libfuse2`, called `libfuse2t64` on Ubuntu 24.04).
 
 ## Using the schematic editor
 
@@ -97,6 +118,8 @@ ctest --preset release
 - **macOS:** install Xcode command line tools and Ninja (`brew install ninja`).
 
 Qt Creator can open `CMakeLists.txt` directly and picks up the presets.
+
+How the installers are built is described in [packaging/README.md](packaging/README.md).
 
 ## Help, autosave and keyboard use
 

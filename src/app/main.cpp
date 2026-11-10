@@ -5,6 +5,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QIcon>
 
 int main(int argc, char *argv[])
 {
@@ -13,6 +14,10 @@ int main(int argc, char *argv[])
     QApplication::setApplicationName(QStringLiteral("Harness Designer"));
     QApplication::setApplicationDisplayName(QStringLiteral("Twisted Builds Harness Designer"));
     QApplication::setApplicationVersion(QStringLiteral(TBH_APP_VERSION));
+#ifndef Q_OS_MACOS
+    // macOS takes the Dock icon from the bundle's .icns instead.
+    QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/twisted-harness-designer.png")));
+#endif
     tbh::app::installTranslators(app);
 
     QCommandLineParser parser;
