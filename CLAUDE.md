@@ -41,8 +41,7 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   side by side or stacked; off by default), Place All for unplaced items, a splice partway
   along a run labeled with the run's total length on two lines ("N inches total" /
   "branch length", `calc::spliceRunLengthMm`), and splice stubs placed by distance that walk
-  through forks along the path most of their wires take, all on branch `split-view`
-  (pushed, not yet merged to `main`). **Next: more user hands-on testing, then M6 packaging** (GitHub Actions
+  through forks along the path most of their wires take, all merged to `main`. **Next: more user hands-on testing, then M6 packaging** (GitHub Actions
   CI on PRs/manual only, AppImage, Windows installer + zip, macOS dmg, v0.1.0 tag). CI was
   deliberately deferred until packaging; do not add workflows that run on every push.
 - Still open (not in any finished milestone): connector/terminal/seal autofill library (5.7),
