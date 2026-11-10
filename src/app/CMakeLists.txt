@@ -67,8 +67,9 @@ elseif(APPLE)
     set(TBH_ICNS "${TBH_ICON_DIR}/twisted-harness-designer.icns")
     set_source_files_properties("${TBH_ICNS}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
     target_sources(twisted-harness-designer PRIVATE "${TBH_ICNS}")
+    # No OUTPUT_NAME with spaces: Qt 6.8's macdeployqt deploy step cannot handle them.
+    # The release workflow renames the bundle to "Twisted Harness Designer.app" in the dmg.
     set_target_properties(twisted-harness-designer PROPERTIES
-        OUTPUT_NAME "Twisted Harness Designer"
         MACOSX_BUNDLE_INFO_PLIST "${TBH_PACKAGING_DIR}/macos/Info.plist.in"
         MACOSX_BUNDLE_BUNDLE_NAME "Harness Designer"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.twistedbuilds.harnessdesigner"
@@ -85,9 +86,16 @@ install(TARGETS twisted-harness-designer
 
 if(WIN32 OR APPLE)
     # Copies the Qt libraries and plugins next to the app (windeployqt/macdeployqt).
+    # On Windows the MSVC runtime DLLs are installed below, so windeployqt does not
+    # need to add the 25 MB vc_redist installer.
+    set(tbh_deploy_options "")
+    if(WIN32)
+        set(tbh_deploy_options DEPLOY_TOOL_OPTIONS --no-compiler-runtime)
+    endif()
     qt_generate_deploy_app_script(
         TARGET twisted-harness-designer
-        OUTPUT_SCRIPT tbh_deploy_script)
+        OUTPUT_SCRIPT tbh_deploy_script
+        ${tbh_deploy_options})
     install(SCRIPT "${tbh_deploy_script}")
 endif()
 

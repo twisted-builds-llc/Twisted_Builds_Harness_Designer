@@ -54,7 +54,8 @@ jobs:
         run: ctest --preset release
       - name: Install into stage (runs windeployqt)
         run: |
-          cmake --install build/release --prefix stage
+          # Qt's deploy step needs an absolute Windows-style prefix (D:/...).
+          cmake --install build/release --prefix "$(pwd -W)/stage"
           echo "VERSION=$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' build/release/CMakeCache.txt)" >> "$GITHUB_ENV"
       - name: Installer (Inno Setup)
         shell: pwsh
@@ -98,16 +99,16 @@ jobs:
         run: ctest --preset release
       - name: Install into stage (runs macdeployqt)
         run: |
-          cmake --install build/release --prefix stage
+          cmake --install build/release --prefix "$PWD/stage"
           echo "VERSION=$(sed -n 's/^CMAKE_PROJECT_VERSION:STATIC=//p' build/release/CMakeCache.txt)" >> "$GITHUB_ENV"
       - name: Disk image
         run: |
-          app="stage/Twisted Harness Designer.app"
+          mkdir -p dmgroot dist
+          app="dmgroot/Twisted Harness Designer.app"
+          cp -R stage/twisted-harness-designer.app "$app"
           # Ad-hoc signature: Apple Silicon refuses to run unsigned code. This is
           # not a Developer ID signature, so Gatekeeper still asks on first open.
           codesign --force --deep --sign - "$app"
-          mkdir -p dmgroot dist
-          cp -R "$app" dmgroot/
           ln -s /Applications dmgroot/Applications
           dmg="dist/TwistedHarnessDesigner-$VERSION-macos.dmg"
           # hdiutil sometimes fails with "Resource busy" on hosted runners; retry.
