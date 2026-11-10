@@ -45,9 +45,13 @@ target_include_directories(tbh_app_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 qt_add_resources(tbh_app_lib "default_library"
     PREFIX "/"
     BASE "${PROJECT_SOURCE_DIR}/resources"
-    FILES "${PROJECT_SOURCE_DIR}/resources/default-library/library.json")
+    FILES "${PROJECT_SOURCE_DIR}/resources/default-library/library.json"
+          "${PROJECT_SOURCE_DIR}/resources/icons/twisted-harness-designer.png")
 target_link_libraries(tbh_app_lib PUBLIC tbh_core Qt6::Widgets)
 tbh_set_warnings(tbh_app_lib)
+
+set(TBH_PACKAGING_DIR "${PROJECT_SOURCE_DIR}/packaging")
+set(TBH_ICON_DIR "${PROJECT_SOURCE_DIR}/resources/icons")
 
 qt_add_executable(twisted-harness-designer main.cpp)
 target_link_libraries(twisted-harness-designer PRIVATE tbh_app_lib)
@@ -55,6 +59,51 @@ set_target_properties(twisted-harness-designer PROPERTIES
     WIN32_EXECUTABLE ON
     MACOSX_BUNDLE ON)
 tbh_set_warnings(twisted-harness-designer)
+
+if(WIN32)
+    target_sources(twisted-harness-designer PRIVATE
+        "${TBH_PACKAGING_DIR}/windows/twisted-harness-designer.rc")
+elseif(APPLE)
+    set(TBH_ICNS "${TBH_ICON_DIR}/twisted-harness-designer.icns")
+    set_source_files_properties("${TBH_ICNS}" PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(twisted-harness-designer PRIVATE "${TBH_ICNS}")
+    set_target_properties(twisted-harness-designer PROPERTIES
+        OUTPUT_NAME "Twisted Harness Designer"
+        MACOSX_BUNDLE_INFO_PLIST "${TBH_PACKAGING_DIR}/macos/Info.plist.in"
+        MACOSX_BUNDLE_BUNDLE_NAME "Harness Designer"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.twistedbuilds.harnessdesigner"
+        MACOSX_BUNDLE_ICON_FILE "twisted-harness-designer.icns"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_COPYRIGHT "Twisted Builds LLC. GPL-3.0-or-later.")
+endif()
+
+# Install layout used by the packages (see packaging/README.md).
+install(TARGETS twisted-harness-designer
+    BUNDLE DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+if(WIN32 OR APPLE)
+    # Copies the Qt libraries and plugins next to the app (windeployqt/macdeployqt).
+    qt_generate_deploy_app_script(
+        TARGET twisted-harness-designer
+        OUTPUT_SCRIPT tbh_deploy_script)
+    install(SCRIPT "${tbh_deploy_script}")
+endif()
+
+if(WIN32)
+    # MSVC runtime DLLs next to the .exe, so the app runs without a separate
+    # Visual C++ redistributable install (also needed by the portable zip).
+    set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION ${CMAKE_INSTALL_BINDIR})
+    include(InstallRequiredSystemLibraries)
+elseif(UNIX AND NOT APPLE)
+    install(FILES "${TBH_PACKAGING_DIR}/linux/twisted-harness-designer.desktop"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES "${TBH_PACKAGING_DIR}/linux/twisted-harness-designer.xml"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/mime/packages)
+    install(FILES "${TBH_ICON_DIR}/twisted-harness-designer.png"
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps)
+endif()
 
 # Translations (.qm embedded under :/i18n). The English file only holds plural forms
 # ("1 wire" / "2 wires"); other languages are added in the top-level CMakeLists.txt.

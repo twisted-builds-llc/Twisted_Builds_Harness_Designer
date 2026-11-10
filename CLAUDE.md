@@ -41,9 +41,13 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   side by side or stacked; off by default), Place All for unplaced items, a splice partway
   along a run labeled with the run's total length on two lines ("N inches total" /
   "branch length", `calc::spliceRunLengthMm`), and splice stubs placed by distance that walk
-  through forks along the path most of their wires take, all merged to `main`. Splices go anywhere in the loom: a typed distance can end on a bend/fork (the splice takes its place), and a splice dragged, or its lead drawn, onto any segment, branch point or other splice goes there (`LayoutView::placeSpliceOnPoint`/`placeSpliceInSegment`, `stubOfSplice`); a lead drawn onto a segment's middle branches off inside it. Views fit themselves to the drawing when a harness opens, when first shown, and on a sheet switch (`CanvasView::fitWhenShown`; resizes refit until the user zooms, pans or clicks). **Next: more user hands-on testing, then M6 packaging** (GitHub Actions
-  CI on PRs/manual only, AppImage, Windows installer + zip, macOS dmg, v0.1.0 tag). CI was
-  deliberately deferred until packaging; do not add workflows that run on every push.
+  through forks along the path most of their wires take, all merged to `main`. Splices go anywhere in the loom: a typed distance can end on a bend/fork (the splice takes its place), and a splice dragged, or its lead drawn, onto any segment, branch point or other splice goes there (`LayoutView::placeSpliceOnPoint`/`placeSpliceInSegment`, `stubOfSplice`); a lead drawn onto a segment's middle branches off inside it. Views fit themselves to the drawing when a harness opens, when first shown, and on a sheet switch (`CanvasView::fitWhenShown`; resizes refit until the user zooms, pans or clicks). **M6 packaging on branch `m6-packaging`** (not yet run on
+  GitHub): `ci.yml` (PRs/manual only; never add workflows that run on every push) and
+  `release.yml` (on `v*` tag: AppImage built in AlmaLinux 8 for glibc 2.28, Inno Setup
+  installer with per-user/all-users choice + `.tbh` association + portable zip, universal
+  macOS 12+ dmg, ad-hoc signed; draft GitHub Release). Details in `packaging/README.md`.
+  Unsigned by the user's choice. Next: run the Release workflow by hand, user tests the
+  packages, then merge and tag v0.1.0.
 - M7 printable build package merged to `main`: File > Export Build Package (PDF) writes layout,
   schematic, cut list (sorted for cutting) and pinout sheets with a title block
   (`src/app/print/PdfExport.*`, rows from `src/core/bom/BuildSheets.*`); harness `partNumber`.

@@ -5,3 +5,4 @@ CMakeLists.txt.user*
 .qtcreator/
 /dales-screenshots-for-claude/
 /test_harness/
+/dist/

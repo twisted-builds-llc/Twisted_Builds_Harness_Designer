@@ -32,6 +32,7 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFileOpenEvent>
 #include <QInputDialog>
 #include <QRegularExpression>
 #include <QLabel>
@@ -142,6 +143,7 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
     m_autosave = new Autosave(m_document, this);
     m_autosave->setIntervalMinutes(preferences::autosaveMinutes());
     QTimer::singleShot(0, this, [this] { offerRecovery(true); });
+    qApp->installEventFilter(this);
 
     refreshProjectTree();
     updateTitle();
@@ -657,6 +659,17 @@ void MainWindow::showSelectionStatus()
     } else {
         statusBar()->clearMessage();
     }
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == qApp && event->type() == QEvent::FileOpen) {
+        const QString path = static_cast<QFileOpenEvent *>(event)->file();
+        if (!path.isEmpty() && maybeSave())
+            openFile(path);
+        return true;
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 bool MainWindow::openFile(const QString &path)
