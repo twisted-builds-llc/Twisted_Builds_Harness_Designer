@@ -61,6 +61,7 @@ struct Settings {
 struct HarnessInfo {
     QString name;
     QString description;
+    QString partNumber;
     QString revision;
     QString author;
     Units units = Units::Inches;

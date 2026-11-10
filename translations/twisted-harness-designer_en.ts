@@ -42,7 +42,7 @@
 <context>
     <name>tbh::app::LayoutScene</name>
     <message numerus="yes">
-        <location filename="../src/app/layout/LayoutScene.cpp" line="146"/>
+        <location filename="../src/app/layout/LayoutScene.cpp" line="236"/>
         <source>%n wire(s)</source>
         <translation>
             <numerusform>%n wire</numerusform>
@@ -53,7 +53,7 @@
 <context>
     <name>tbh::app::MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/ui/MainWindow.cpp" line="465"/>
+        <location filename="../src/app/ui/MainWindow.cpp" line="626"/>
         <source>%n item(s) selected</source>
         <translation>
             <numerusform>%n item selected</numerusform>
@@ -61,7 +61,15 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/ui/MainWindow.cpp" line="592"/>
+        <location filename="../src/app/ui/MainWindow.cpp" line="721"/>
+        <source>Exported %n sheet(s) to %1</source>
+        <translation>
+            <numerusform>Exported %n sheet to %1</numerusform>
+            <numerusform>Exported %n sheets to %1</numerusform>
+        </translation>
+    </message>
+    <message numerus="yes">
+        <location filename="../src/app/ui/MainWindow.cpp" line="797"/>
         <source>%1 - %n pin(s)</source>
         <translation>
             <numerusform>%1 - %n pin</numerusform>
@@ -83,8 +91,8 @@
 <context>
     <name>tbh::app::PropertiesPanel</name>
     <message numerus="yes">
-        <location filename="../src/app/ui/properties/PropertiesPanel.cpp" line="51"/>
-        <location filename="../src/app/ui/properties/PropertiesPanel.cpp" line="63"/>
+        <location filename="../src/app/ui/properties/PropertiesPanel.cpp" line="53"/>
+        <location filename="../src/app/ui/properties/PropertiesPanel.cpp" line="68"/>
         <source>%n item(s) selected</source>
         <translation>
             <numerusform>%n item selected</numerusform>
@@ -122,7 +130,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/ui/properties/WirePanel.cpp" line="249"/>
+        <location filename="../src/app/ui/properties/WirePanel.cpp" line="238"/>
         <source>%n wires selected</source>
         <translation>
             <numerusform>%n wire selected</numerusform>

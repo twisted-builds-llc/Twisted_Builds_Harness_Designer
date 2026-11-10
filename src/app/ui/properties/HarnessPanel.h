@@ -33,6 +33,7 @@ private:
 
     Document *m_document;
     QLineEdit *m_name;
+    QLineEdit *m_partNumber;
     QLineEdit *m_revision;
     QLineEdit *m_author;
     QComboBox *m_units;

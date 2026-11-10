@@ -20,6 +20,7 @@
 #include "ui/Format.h"
 #include "ui/ProblemsPanel.h"
 #include "ui/PreferencesDialog.h"
+#include "print/PdfExport.h"
 #include "ui/properties/ConnectorPanel.h"
 #include "ui/properties/PropertiesPanel.h"
 
@@ -30,6 +31,8 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
+#include <QRegularExpression>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -311,6 +314,7 @@ void MainWindow::createMenus()
     file->addAction(tr("Save &As..."), QKeySequence::SaveAs, this, &MainWindow::saveAs);
     file->addSeparator();
     file->addAction(tr("&Export BOM (CSV)..."), this, [this] { m_bom->exportCsv(); });
+    file->addAction(tr("Export Build Package (&PDF)..."), this, &MainWindow::exportPdf);
     file->addAction(tr("Recover &Unsaved Work..."), this, [this] { offerRecovery(false); });
     file->addSeparator();
     file->addAction(tr("&Quit"), QKeySequence(Qt::CTRL | Qt::Key_Q), this, &QWidget::close);
@@ -672,6 +676,49 @@ bool MainWindow::saveAs()
     if (!path.endsWith(suffix, Qt::CaseInsensitive))
         path += suffix;
     return saveTo(path);
+}
+
+void MainWindow::exportPdf()
+{
+    const Harness &harness = m_document->model()->harness();
+    const QList<QPageSize::PageSizeId> sizes = {QPageSize::Letter, QPageSize::Tabloid, QPageSize::A4, QPageSize::A3};
+    const QStringList names = {tr("Letter (8.5 \u00d7 11 in)"), tr("Tabloid (11 \u00d7 17 in)"), tr("A4"), tr("A3")};
+    const auto defaultSize = harness.info.units == Units::Inches ? QPageSize::Letter : QPageSize::A4;
+    QSettings settings;
+    const auto stored = QPageSize::PageSizeId(settings.value(QStringLiteral("export/pdfPageSize"), int(defaultSize)).toInt());
+    bool ok = false;
+    const QString choice = QInputDialog::getItem(this, tr("Export Build Package"),
+                                                 tr("Page size (printed in landscape):"), names,
+                                                 int(std::max(qsizetype(0), sizes.indexOf(stored))), false, &ok);
+    if (!ok)
+        return;
+    const QPageSize::PageSizeId size = sizes[names.indexOf(choice)];
+    settings.setValue(QStringLiteral("export/pdfPageSize"), int(size));
+
+    const QFileInfo file(m_document->filePath());
+    QString base = m_document->filePath().isEmpty() ? harness.info.name : file.completeBaseName();
+    base.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
+    if (base.trimmed().isEmpty())
+        base = QStringLiteral("harness");
+    const QString startDir = m_document->filePath().isEmpty() ? QDir::homePath() : file.absolutePath();
+    QString path = QFileDialog::getSaveFileName(this, tr("Export Build Package"),
+                                                QDir(startDir).filePath(base + QStringLiteral(".pdf")),
+                                                tr("PDF files (*.pdf)"));
+    if (path.isEmpty())
+        return;
+    if (!path.endsWith(QStringLiteral(".pdf"), Qt::CaseInsensitive))
+        path += QStringLiteral(".pdf");
+
+    PdfExportOptions options;
+    options.pageSize = QPageSize(size);
+    options.showBundleDiameters = settings.value(QStringLiteral("view/bundleDiameters"), true).toBool();
+    QString error;
+    const int sheets = exportBuildPackage(*m_document->model(), path, options, &error);
+    if (sheets == 0) {
+        QMessageBox::critical(this, tr("Export failed"), error);
+        return;
+    }
+    statusBar()->showMessage(tr("Exported %n sheet(s) to %1", nullptr, sheets).arg(QDir::toNativeSeparators(path)), 8000);
 }
 
 bool MainWindow::saveTo(const QString &path)

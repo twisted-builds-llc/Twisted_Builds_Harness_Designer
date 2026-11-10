@@ -65,6 +65,11 @@ QPalette lightPalette()
 
 } // namespace
 
+QPalette lightThemePalette()
+{
+    return lightPalette();
+}
+
 Theme::Theme(QObject *parent)
     : QObject(parent)
 {

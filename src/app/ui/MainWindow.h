@@ -48,6 +48,8 @@ private:
     bool save();
     bool saveAs();
     bool saveTo(const QString &path);
+    // Asks for a page size and file name, then writes the printable build package.
+    void exportPdf();
     // Offers to save unsaved changes. Returns false if the user cancels.
     bool maybeSave();
 

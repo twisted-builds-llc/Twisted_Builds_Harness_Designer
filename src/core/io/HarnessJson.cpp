@@ -860,6 +860,7 @@ ZipEntries serializeHarness(const Harness &h)
     QJsonObject harness = h.extra;
     harness[u"name"] = h.info.name;
     harness[u"description"] = h.info.description;
+    harness[u"partNumber"] = h.info.partNumber;
     harness[u"revision"] = h.info.revision;
     harness[u"author"] = h.info.author;
     harness[u"units"] = unitsSymbol(h.info.units);
@@ -915,6 +916,7 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         ObjectReader r(harnessDoc.object(), QStringLiteral("harness"));
         h.info.name = r.string("name");
         h.info.description = r.string("description");
+        h.info.partNumber = r.string("partNumber");
         h.info.revision = r.string("revision");
         h.info.author = r.string("author");
         const QString units = r.string("units");
