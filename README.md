@@ -7,7 +7,7 @@ lengths, bundle diameters and a bill of materials.
 **Privacy:** this application makes no network connections. No cloud, no accounts, no telemetry,
 no update checks. Your designs never leave your computer.
 
-> Status: early development (v0.1). See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for
+> Status: deployed v0.1. See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for
 > scope and roadmap.
 
 ## Download and install
