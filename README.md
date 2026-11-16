@@ -1,5 +1,9 @@
 # Twisted Builds Harness Designer
 
+<img width="2559" height="1397" alt="Schematic" src="https://github.com/user-attachments/assets/f354d544-e4c4-4515-aaaf-3e0b3e7c9ec8" />
+
+<img width="2560" height="1397" alt="Layout" src="https://github.com/user-attachments/assets/648d03e0-40a8-490d-9cf6-9f4af6faed8a" />
+
 Free, open-source (GPLv3-or-later) wiring harness design software for Linux, Windows and macOS.
 Design connectors and circuits in a schematic, route them in a physical layout, and get wire
 lengths, bundle diameters and a bill of materials.
