@@ -2,7 +2,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 project(TwistedHarnessDesigner
-    VERSION 0.1.0
+    VERSION 0.1.1
     DESCRIPTION "Twisted Builds Harness Designer"
     LANGUAGES C CXX)
 

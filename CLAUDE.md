@@ -47,7 +47,8 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   `release.yml` (on `v*` tag: AppImage built in AlmaLinux 8 for glibc 2.28, Inno Setup
   installer with per-user/all-users choice + `.tbh` association + portable zip, universal
   macOS 12+ dmg, ad-hoc signed; draft GitHub Release). Details in `packaging/README.md`.
-  Unsigned by the user's choice. Next: user tests the packages, then tag v0.1.0.
+  Unsigned by the user's choice. v0.1.0 released; v0.1.1 draft (canvas pan preferences) tagged
+  from branch `canvas-pan-preferences` for testing before merge.
 - M7 printable build package merged to `main`: File > Export Build Package (PDF) writes layout,
   schematic, cut list (sorted for cutting) and pinout sheets with a title block
   (`src/app/print/PdfExport.*`, rows from `src/core/bom/BuildSheets.*`); harness `partNumber`.
@@ -62,6 +63,10 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
 - Flying leads, eyelets, ring terminals and bare ends are `FreeEnd` entities (schema 2,
   `freeEnds.json`; v1 files migrate on open), placed on the schematic like splices
   (Place > Add Flying Lead F / Add Eyelet E) and wired from their leads. Merged to `main`.
+- Canvas pan preferences on branch `canvas-pan-preferences` (not merged): Edit > Preferences picks
+  an extra pan input (right drag, where a right-click without movement still opens the menu, or
+  Space + left drag; middle drag always pans) and "Scroll wheel pans" (Ctrl+wheel zooms); pinch
+  zooms. Panning is intercepted in `CanvasView::viewportEvent` before subclasses see the mouse.
 - Still open (not in any finished milestone): connector/terminal/seal autofill library (5.7),
   UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
   translations for languages other than English.

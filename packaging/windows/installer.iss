@@ -1,7 +1,7 @@
 ; SPDX-License-Identifier: GPL-3.0-or-later
 ;
 ; Inno Setup script for the Windows installer. Built by the release workflow:
-;   iscc /DAppVersion=0.1.0 /DStageDir=<cmake --install prefix> /DOutputDir=<dir> installer.iss
+;   iscc /DAppVersion=0.1.1 /DStageDir=<cmake --install prefix> /DOutputDir=<dir> installer.iss
 ; StageDir holds bin\twisted-harness-designer.exe with the Qt DLLs and plugins
 ; that windeployqt placed next to it.
 
@@ -18,6 +18,12 @@
 #define AppName "Twisted Builds Harness Designer"
 #define AppExe "twisted-harness-designer.exe"
 #define ProgId "TwistedBuilds.HarnessDesigner.tbh"
+
+; Upgrades: a newer setup run over an installed copy finds it by AppId and installs into the
+; same folder with the same per-user/all-users choice and tasks (Inno Setup's UsePrevious*
+; defaults), closing the running app first. Nothing here touches user data: harness files are
+; wherever the user saved them, and settings, the parts library and recovery files live in the
+; registry and %APPDATA%, which neither setup nor the uninstaller removes.
 
 [Setup]
 ; Never change AppId: Windows uses it to find the installed copy for upgrades and uninstall.
@@ -52,6 +58,13 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "associate"; Description: "Open .tbh harness files with {#AppName}"; GroupDescription: "File types:"
+
+[InstallDelete]
+; Clear the previous version's program files first, so DLLs or plugins a newer build no longer
+; ships are not left behind. These folders hold only files this setup installed.
+Type: filesandordirs; Name: "{app}\bin"
+Type: filesandordirs; Name: "{app}\plugins"
+Type: filesandordirs; Name: "{app}\translations"
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

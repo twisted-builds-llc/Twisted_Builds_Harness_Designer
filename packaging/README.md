@@ -20,6 +20,22 @@ All packages use Qt 6.8.3 (LTS). The version comes from `project(VERSION ...)` i
    four files. It fails if the tag does not match the project version.
 4. Download and try each package, then publish the draft on GitHub.
 
+A tag pushed from a branch also works: the draft release can be tested before the branch is
+merged. If testing finds a problem, delete the draft and the tag
+(`git push --delete origin vx.y.z && git tag -d vx.y.z`), fix it, and tag again.
+
+## Upgrading an installed copy
+
+- **Windows:** run the new `-setup.exe`. It finds the installed copy (same `AppId`), installs into
+  the same folder with the same per-user/all-users choice, and replaces the old program files.
+  No uninstall is needed. The portable zip is replaced by unzipping the new one.
+- **macOS:** drag the new app onto Applications and choose Replace.
+- **Linux:** replace the AppImage file.
+
+Upgrading or uninstalling never removes user data: harness (`.tbh`) files stay where they were
+saved, and preferences, the parts library and autosave recovery files are kept in the user's
+settings/app-data locations.
+
 To build the packages without releasing, run the `Release` workflow by hand (Actions tab >
 Release > Run workflow); the files appear as workflow artifacts.
 
