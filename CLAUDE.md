@@ -63,7 +63,9 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
 - Flying leads, eyelets, ring terminals and bare ends are `FreeEnd` entities (schema 2,
   `freeEnds.json`; v1 files migrate on open), placed on the schematic like splices
   (Place > Add Flying Lead F / Add Eyelet E) and wired from their leads. Merged to `main`.
-- Canvas pan preferences on branch `canvas-pan-preferences` (not merged): Edit > Preferences picks
+- Canvas pan preferences and the v0.1.1 release prep are on branch `canvas-pan-preferences`,
+  pushed to GitHub but **not merged or pushed to `main`** (user is testing the v0.1.1 draft
+  release first; merge only when the user says so): Edit > Preferences picks
   an extra pan input (right drag, where a right-click without movement still opens the menu, or
   Space + left drag; middle drag always pans) and "Scroll wheel pans" (Ctrl+wheel zooms); pinch
   zooms. Panning is intercepted in `CanvasView::viewportEvent` before subclasses see the mouse.
