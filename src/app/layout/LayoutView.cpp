@@ -393,7 +393,7 @@ void LayoutView::mouseMoveEvent(QMouseEvent *event)
         m_preview->setLine(QLineF(m_preview->line().p1(), end));
         return;
     }
-    if (event->buttons() == Qt::NoButton && !isPanning()) {
+    if (event->buttons() == Qt::NoButton) {
         setHoveredLead(nodeLeadAt(event->pos()));
         if (m_hoveredLead.isEmpty() && m_tool == Tool::Select)
             viewport()->setCursor(bendHandleAt(event->pos()) ? Qt::SizeAllCursor : Qt::ArrowCursor);

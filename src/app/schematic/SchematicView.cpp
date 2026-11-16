@@ -206,10 +206,6 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
 
 void SchematicView::mouseMoveEvent(QMouseEvent *event)
 {
-    if (isPanning()) {
-        CanvasView::mouseMoveEvent(event);
-        return;
-    }
     if (m_wirePending && !m_wireDrawing
         && (event->pos() - m_pressPos).manhattanLength() >= QApplication::startDragDistance()) {
         m_wireDrawing = true;
@@ -271,11 +267,6 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
 
 void SchematicView::mouseReleaseEvent(QMouseEvent *event)
 {
-    if (event->button() == Qt::MiddleButton) {
-        CanvasView::mouseReleaseEvent(event);
-        viewport()->setCursor(m_tool == Tool::Wire ? Qt::CrossCursor : Qt::ArrowCursor);
-        return;
-    }
     if (m_wirePending && event->button() == Qt::LeftButton) {
         if (m_wireDrawing) {
             finishWire(mapToScene(event->pos()));

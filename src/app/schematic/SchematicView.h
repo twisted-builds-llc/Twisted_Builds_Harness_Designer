@@ -24,7 +24,7 @@ class SelectionModel;
 // lead); drag a splice's or free end's lead to start a wire from it; drag a wire sideways to move its
 // vertical run (keeps parallel wires apart); double-click text to edit it;
 // wheel zooms (over a scrolling connector it scrolls rows; Ctrl+wheel always zooms);
-// middle-drag pans. The Wire tool also starts wires from anywhere on a splice or free end.
+// panning is in CanvasView. The Wire tool also starts wires from anywhere on a splice or free end.
 class SchematicView : public CanvasView
 {
     Q_OBJECT

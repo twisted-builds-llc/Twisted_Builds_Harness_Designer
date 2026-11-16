@@ -14,4 +14,15 @@ void setDefaultUnits(Units units);
 int autosaveMinutes();
 void setAutosaveMinutes(int minutes);
 
+// Extra input that pans the schematic and layout canvases. A middle-button drag always pans.
+// Default: middle button only.
+enum class PanInput { MiddleDrag, RightDrag, SpaceDrag };
+PanInput panInput();
+void setPanInput(PanInput input);
+
+// True: the scroll wheel (two-finger scroll on a touchpad) pans the canvas and Ctrl+wheel
+// zooms. False: the wheel zooms. Default: false.
+bool wheelPans();
+void setWheelPans(bool pans);
+
 } // namespace tbh::app::preferences

@@ -15,9 +15,10 @@ QPointF snapToCanvasGrid(const QPointF &point);
 // Background and grid lines shared by the editors' scenes.
 void drawCanvasBackground(QPainter *painter, const QRectF &rect, const QPalette &palette);
 
-// Shared canvas behaviour for the schematic and layout editors: wheel zoom around the
-// cursor, middle-button panning, zoom to fit, and a one-line text editor laid over the
-// canvas.
+// Shared canvas behaviour for the schematic and layout editors: wheel and pinch zoom around
+// the cursor, panning (middle drag, plus right drag or Space + left drag and wheel panning as
+// set in Preferences), zoom to fit, and a one-line text editor laid over the canvas.
+// Panning is handled before the subclasses see the mouse events.
 class CanvasView : public QGraphicsView
 {
     Q_OBJECT
@@ -42,7 +43,6 @@ protected:
     void editText(const QRectF &sceneRect, const QString &text,
                   std::function<void(const QString &, Nav)> commit);
     void closeEditor();
-    bool isPanning() const { return m_panning; }
     // Lets subclasses use the wheel over an item (e.g. scroll rows). Return true if handled.
     virtual bool wheelOverItem(QWheelEvent *) { return false; }
     // Moves the selected items by `delta` as one undoable step. Return false if nothing
@@ -51,10 +51,9 @@ protected:
     // Keyboard navigation: selects the next/previous selectable item in reading order.
     void selectAdjacentItem(bool next);
     void keyPressEvent(QKeyEvent *event) override;
+    void keyReleaseEvent(QKeyEvent *event) override;
+    void focusOutEvent(QFocusEvent *event) override;
 
-    void mousePressEvent(QMouseEvent *event) override;
-    void mouseMoveEvent(QMouseEvent *event) override;
-    void mouseReleaseEvent(QMouseEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
     void changeEvent(QEvent *event) override;
     void scrollContentsBy(int dx, int dy) override;
@@ -65,10 +64,21 @@ protected:
 
 private:
     void fitLater();
+    void zoomBy(qreal factor);
+    // Pan handling for viewportEvent(). Return true if the event was used for panning.
+    bool panMouseEvent(QMouseEvent *event);
+    void setPanCursor(Qt::CursorShape shape);
+    void restoreCursor();
 
     bool m_fitPending = false;
-    bool m_panning = false;
+    // Button that started the current pan; Qt::NoButton when not panning.
+    Qt::MouseButton m_panButton = Qt::NoButton;
+    bool m_panMoved = false;
+    QPoint m_panPress;
     QPoint m_panLast;
+    bool m_spaceHeld = false;
+    bool m_cursorSaved = false;
+    QCursor m_savedCursor;
     InlineEdit *m_editor = nullptr;
 };
 

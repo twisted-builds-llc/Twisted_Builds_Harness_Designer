@@ -3,6 +3,7 @@
 
 #include <QDialog>
 
+class QCheckBox;
 class QComboBox;
 class QSpinBox;
 
@@ -21,6 +22,8 @@ public:
 private:
     QComboBox *m_defaultUnits;
     QSpinBox *m_autosave;
+    QComboBox *m_panInput;
+    QCheckBox *m_wheelPans;
 };
 
 } // namespace tbh::app

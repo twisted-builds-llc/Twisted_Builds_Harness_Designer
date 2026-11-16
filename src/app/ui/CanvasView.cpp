@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "ui/CanvasView.h"
 
+#include "Preferences.h"
+
+#include <QApplication>
+#include <QContextMenuEvent>
 #include <QGraphicsItem>
 #include <QKeyEvent>
 #include <QPainter>
 #include <QVarLengthArray>
 #include <QLineEdit>
+#include <QNativeGestureEvent>
 #include <QScrollBar>
 #include <QTimer>
 
@@ -136,16 +141,20 @@ CanvasView::CanvasView(QWidget *parent)
 
 void CanvasView::zoomIn()
 {
-    m_fitPending = false;
-    if (transform().m11() * 1.25 <= kMaxScale)
-        scale(1.25, 1.25);
+    zoomBy(1.25);
 }
 
 void CanvasView::zoomOut()
 {
+    zoomBy(1 / 1.25);
+}
+
+void CanvasView::zoomBy(qreal factor)
+{
     m_fitPending = false;
-    if (transform().m11() / 1.25 >= kMinScale)
-        scale(1 / 1.25, 1 / 1.25);
+    const qreal scale = transform().m11() * factor;
+    if (scale >= kMinScale && scale <= kMaxScale)
+        this->scale(factor, factor);
 }
 
 void CanvasView::zoomToFit()
@@ -194,9 +203,120 @@ bool CanvasView::event(QEvent *event)
 
 bool CanvasView::viewportEvent(QEvent *event)
 {
-    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::Wheel)
+    switch (event->type()) {
+    case QEvent::MouseButtonPress:
+    case QEvent::Wheel:
         m_fitPending = false; // the user is working in the view
+        break;
+    case QEvent::NativeGesture: {
+        auto *gesture = static_cast<QNativeGestureEvent *>(event);
+        if (gesture->gestureType() == Qt::ZoomNativeGesture) {
+            zoomBy(1 + gesture->value());
+            return true;
+        }
+        break;
+    }
+    case QEvent::ContextMenu:
+        // With right-drag panning the menu opens on a right-click release without movement
+        // (see panMouseEvent()), not when the platform sends it.
+        if (static_cast<QContextMenuEvent *>(event)->reason() == QContextMenuEvent::Mouse
+            && preferences::panInput() == preferences::PanInput::RightDrag)
+            return true;
+        break;
+    default:
+        break;
+    }
+    switch (event->type()) {
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove:
+    case QEvent::MouseButtonRelease:
+        if (panMouseEvent(static_cast<QMouseEvent *>(event)))
+            return true;
+        break;
+    default:
+        break;
+    }
     return QGraphicsView::viewportEvent(event);
+}
+
+bool CanvasView::panMouseEvent(QMouseEvent *event)
+{
+    switch (event->type()) {
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonDblClick: {
+        if (m_panButton != Qt::NoButton)
+            return true; // other buttons do nothing during a pan
+        const preferences::PanInput input = preferences::panInput();
+        const Qt::MouseButton button = event->button();
+        const bool pans = button == Qt::MiddleButton
+                          || (button == Qt::RightButton && input == preferences::PanInput::RightDrag)
+                          || (button == Qt::LeftButton && m_spaceHeld);
+        if (!pans)
+            return false;
+        closeEditor();
+        m_panButton = button;
+        m_panPress = m_panLast = event->pos();
+        // A right-click without movement still opens the context menu, so the right button
+        // pans only once it has moved.
+        m_panMoved = button != Qt::RightButton;
+        if (m_panMoved)
+            setPanCursor(Qt::ClosedHandCursor);
+        return true;
+    }
+    case QEvent::MouseMove: {
+        if (m_panButton == Qt::NoButton)
+            return m_spaceHeld; // keep the open-hand cursor (no hover feedback) while Space is held
+        if (!m_panMoved) {
+            if ((event->pos() - m_panPress).manhattanLength() < QApplication::startDragDistance())
+                return true;
+            m_panMoved = true;
+            setPanCursor(Qt::ClosedHandCursor);
+        }
+        const QPoint delta = event->pos() - m_panLast;
+        m_panLast = event->pos();
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+        return true;
+    }
+    case QEvent::MouseButtonRelease: {
+        if (m_panButton == Qt::NoButton)
+            return false;
+        if (event->button() != m_panButton)
+            return true;
+        const bool click = !m_panMoved;
+        m_panButton = Qt::NoButton;
+        if (m_spaceHeld)
+            setPanCursor(Qt::OpenHandCursor);
+        else
+            restoreCursor();
+        if (click) {
+            QContextMenuEvent menu(QContextMenuEvent::Mouse, event->pos(),
+                                   event->globalPosition().toPoint(), event->modifiers());
+            contextMenuEvent(&menu);
+        }
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+void CanvasView::setPanCursor(Qt::CursorShape shape)
+{
+    if (!m_cursorSaved) {
+        m_savedCursor = viewport()->cursor();
+        m_cursorSaved = true;
+    }
+    viewport()->setCursor(shape);
+}
+
+void CanvasView::restoreCursor()
+{
+    if (m_cursorSaved) {
+        viewport()->setCursor(m_savedCursor);
+        m_cursorSaved = false;
+    }
 }
 
 void CanvasView::showEvent(QShowEvent *event)
@@ -243,40 +363,6 @@ void CanvasView::closeEditor()
     m_editor = nullptr;
 }
 
-void CanvasView::mousePressEvent(QMouseEvent *event)
-{
-    closeEditor();
-    if (event->button() == Qt::MiddleButton) {
-        m_panning = true;
-        m_panLast = event->pos();
-        viewport()->setCursor(Qt::ClosedHandCursor);
-        return;
-    }
-    QGraphicsView::mousePressEvent(event);
-}
-
-void CanvasView::mouseMoveEvent(QMouseEvent *event)
-{
-    if (m_panning) {
-        const QPoint delta = event->pos() - m_panLast;
-        m_panLast = event->pos();
-        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
-        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
-        return;
-    }
-    QGraphicsView::mouseMoveEvent(event);
-}
-
-void CanvasView::mouseReleaseEvent(QMouseEvent *event)
-{
-    if (m_panning && event->button() == Qt::MiddleButton) {
-        m_panning = false;
-        viewport()->unsetCursor();
-        return;
-    }
-    QGraphicsView::mouseReleaseEvent(event);
-}
-
 void CanvasView::wheelEvent(QWheelEvent *event)
 {
     closeEditor();
@@ -284,11 +370,16 @@ void CanvasView::wheelEvent(QWheelEvent *event)
         event->accept();
         return;
     }
-    const qreal factor = std::pow(1.15, event->angleDelta().y() / 120.0);
-    const qreal scale = transform().m11() * factor;
-    if (scale < kMinScale || scale > kMaxScale)
-        return;
-    this->scale(factor, factor);
+    if (preferences::wheelPans() && !(event->modifiers() & Qt::ControlModifier)) {
+        // Touchpads report pixels; a mouse wheel notch (120) scrolls 60 pixels.
+        QPoint delta = event->pixelDelta();
+        if (delta.isNull())
+            delta = event->angleDelta() / 2;
+        horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+        verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+    } else {
+        zoomBy(std::pow(1.15, event->angleDelta().y() / 120.0));
+    }
     event->accept();
 }
 
@@ -327,6 +418,15 @@ void CanvasView::selectAdjacentItem(bool next)
 
 void CanvasView::keyPressEvent(QKeyEvent *event)
 {
+    if (event->key() == Qt::Key_Space && event->modifiers() == Qt::NoModifier
+        && preferences::panInput() == preferences::PanInput::SpaceDrag) {
+        if (!event->isAutoRepeat()) {
+            m_spaceHeld = true;
+            if (m_panButton == Qt::NoButton)
+                setPanCursor(Qt::OpenHandCursor);
+        }
+        return;
+    }
     switch (event->key()) {
     case Qt::Key_BracketRight:
     case Qt::Key_BracketLeft:
@@ -354,6 +454,30 @@ void CanvasView::keyPressEvent(QKeyEvent *event)
         break;
     }
     QGraphicsView::keyPressEvent(event);
+}
+
+void CanvasView::keyReleaseEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Space && m_spaceHeld) {
+        if (!event->isAutoRepeat()) {
+            m_spaceHeld = false;
+            if (m_panButton == Qt::NoButton)
+                restoreCursor();
+        }
+        return;
+    }
+    QGraphicsView::keyReleaseEvent(event);
+}
+
+void CanvasView::focusOutEvent(QFocusEvent *event)
+{
+    // The Space release may go elsewhere (e.g. to the inline editor or another window).
+    if (m_spaceHeld) {
+        m_spaceHeld = false;
+        if (m_panButton == Qt::NoButton)
+            restoreCursor();
+    }
+    QGraphicsView::focusOutEvent(event);
 }
 
 void CanvasView::changeEvent(QEvent *event)

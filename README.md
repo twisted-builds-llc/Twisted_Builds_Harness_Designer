@@ -54,7 +54,7 @@ them. That is expected; the steps below get past it.
 | Large connectors | Collapse with the header arrow, or set **Visible rows** to make the box scroll |
 | Rename | **F2** or double-click a title |
 | Find a pin or circuit | **Ctrl+F**, type, **Enter** for the next match |
-| Pan / zoom | Middle-drag / mouse wheel (**Ctrl+wheel** over a scrolling connector), **Ctrl+0** fits |
+| Pan / zoom | Middle-drag (or right-drag / **Space**+drag, set in Preferences) / mouse wheel or pinch (**Ctrl+wheel** over a scrolling connector; Preferences can make the wheel pan and **Ctrl+wheel** zoom), **Ctrl+0** fits |
 | Copy, paste, duplicate, delete | **Ctrl+C**, **Ctrl+V**, **Ctrl+D**, **Delete** |
 | Align / distribute | **Arrange** menu |
 
