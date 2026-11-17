@@ -2,11 +2,17 @@
 #include "ui/LibraryDialog.h"
 
 #include "LibraryStore.h"
+#include "io/PartsCsv.h"
 #include "ui/LibraryPartsPages.h"
 
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFile>
+#include <QFileDialog>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -159,10 +165,23 @@ LibraryDialog::LibraryDialog(const Library &library, QWidget *parent)
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel
                                              | QDialogButtonBox::RestoreDefaults,
                                          this);
+    auto *importCsv = new QPushButton(tr("Import Parts CSV..."), this);
+    auto *csvTemplate = new QPushButton(tr("Save CSV Template..."), this);
+    importCsv->setToolTip(tr("Add connector housings, terminals, seals and plugs from a CSV file, e.g. "
+                             "saved from a spreadsheet. Parts with a part number already in the library "
+                             "are replaced."));
+    csvTemplate->setToolTip(tr("Save an example CSV file with every column, to fill in a spreadsheet."));
+    connect(importCsv, &QPushButton::clicked, this, &LibraryDialog::importPartsCsvFile);
+    connect(csvTemplate, &QPushButton::clicked, this, &LibraryDialog::saveCsvTemplate);
+
     auto *layout = new QVBoxLayout(this);
     layout->addWidget(notice);
     layout->addWidget(tabs, 1);
-    layout->addWidget(buttons);
+    auto *bottom = new QHBoxLayout;
+    bottom->addWidget(importCsv);
+    bottom->addWidget(csvTemplate);
+    bottom->addWidget(buttons, 1);
+    layout->addLayout(bottom);
 
     connect(buttons, &QDialogButtonBox::accepted, this, &LibraryDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
@@ -228,6 +247,75 @@ LibraryDialog::LibraryDialog(const Library &library, QWidget *parent)
     loadSleevings();
     m_connectorParts->load(m_library.connectorParts);
     m_pinParts->load(m_library.pinParts);
+}
+
+bool LibraryDialog::importPartsCsv(const QByteArray &data, QString *summary)
+{
+    const io::PartsCsv parts = io::readPartsCsv(data);
+    if (parts.connectorParts.empty() && parts.pinParts.empty()) {
+        *summary = tr("No parts were imported.");
+        if (!parts.problems.isEmpty())
+            *summary += u'\n' + parts.problems.join(u'\n');
+        return false;
+    }
+    // Take the pages' current edits first, so the import adds to them.
+    QString error;
+    if (!m_connectorParts->store(&m_library.connectorParts, &error)
+        || !m_pinParts->store(&m_library.pinParts, &error)) {
+        *summary = tr("Fix this before importing: %1").arg(error);
+        return false;
+    }
+    int added = 0;
+    int replaced = 0;
+    io::mergeImportedParts(m_library, parts, &added, &replaced);
+    m_connectorParts->load(m_library.connectorParts);
+    m_pinParts->load(m_library.pinParts);
+    QStringList lines{tr("Imported %1 new parts and replaced %2 with the same part number.").arg(added).arg(replaced)};
+    if (!parts.problems.isEmpty()) {
+        constexpr qsizetype kShown = 20;
+        lines << tr("Skipped lines:");
+        lines << parts.problems.mid(0, kShown);
+        if (parts.problems.size() > kShown)
+            lines << tr("...and %1 more.").arg(parts.problems.size() - kShown);
+    }
+    lines << tr("Click OK to keep the imported parts.");
+    *summary = lines.join(u'\n');
+    return true;
+}
+
+void LibraryDialog::importPartsCsvFile()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Import Parts CSV"), QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation),
+        tr("CSV files (*.csv);;All files (*)"));
+    if (path.isEmpty())
+        return;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        QMessageBox::warning(this, tr("Import Parts CSV"),
+                             tr("Could not open %1: %2").arg(QDir::toNativeSeparators(path), file.errorString()));
+        return;
+    }
+    QString summary;
+    if (importPartsCsv(file.readAll(), &summary))
+        QMessageBox::information(this, tr("Import Parts CSV"), summary);
+    else
+        QMessageBox::warning(this, tr("Import Parts CSV"), summary);
+}
+
+void LibraryDialog::saveCsvTemplate()
+{
+    const QString path = QFileDialog::getSaveFileName(
+        this, tr("Save CSV Template"),
+        QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)).filePath(tr("parts-template.csv")),
+        tr("CSV files (*.csv)"));
+    if (path.isEmpty())
+        return;
+    QSaveFile file(path);
+    const QByteArray data = io::partsCsvTemplate();
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
+        QMessageBox::warning(this, tr("Save CSV Template"),
+                             tr("Could not save %1: %2").arg(QDir::toNativeSeparators(path), file.errorString()));
 }
 
 void LibraryDialog::loadTypes()

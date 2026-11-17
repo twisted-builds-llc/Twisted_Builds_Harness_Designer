@@ -2,6 +2,7 @@
 #include "ui/LibraryPartsPages.h"
 
 #include "model/PinLabels.h"
+#include "model/Queries.h"
 #include "ui/properties/PanelWidgets.h"
 
 #include <QComboBox>

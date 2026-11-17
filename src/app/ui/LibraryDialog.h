@@ -29,7 +29,14 @@ public:
 
     void accept() override;
 
+    // Adds the connector parts in CSV `data` (io::readPartsCsv) to the dialog's library and
+    // shows them. Returns a summary for the user (what was added, replaced and skipped), or
+    // false with the reason in `summary` when nothing could be imported.
+    bool importPartsCsv(const QByteArray &data, QString *summary);
+
 private:
+    void importPartsCsvFile();
+    void saveCsvTemplate();
     void loadTypes();
     void showType(int index);
     bool storeType(int index, QString *error);

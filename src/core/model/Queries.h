@@ -79,6 +79,10 @@ struct LayoutRef
     QString label;
 };
 
+// Reads a wire size as gaugeText() shows it: "18 AWG", "18", "0.5 mm²", "0.5 mm2", "0.5mm"
+// (locale or C decimal point). No unit means AWG. Empty or unreadable text gives nullopt.
+std::optional<Gauge> parseGauge(const QString &text);
+
 // Circuit ids: "C" + a number of at least three digits. The next one is one more than the
 // highest such id in use (ids typed in another form are ignored), e.g. C001 for none.
 QString circuitIdForNumber(int number);

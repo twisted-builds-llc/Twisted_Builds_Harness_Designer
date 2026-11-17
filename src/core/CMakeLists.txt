@@ -17,6 +17,7 @@ add_library(tbh_core STATIC
     io/FileFormat.h
     io/HarnessJson.h io/HarnessJson.cpp
     io/Migrations.h io/Migrations.cpp
+    io/PartsCsv.h io/PartsCsv.cpp
     io/TbhFile.h io/TbhFile.cpp
     io/ZipArchive.h io/ZipArchive.cpp
 )

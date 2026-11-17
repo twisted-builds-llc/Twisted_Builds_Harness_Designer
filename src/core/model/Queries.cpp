@@ -2,6 +2,7 @@
 #include "model/Queries.h"
 
 #include <QCoreApplication>
+#include <QLocale>
 
 #include <algorithm>
 
@@ -229,6 +230,29 @@ QString describeWire(const Harness &harness, const Wire &wire)
     const QString ends = QStringLiteral("%1 - %2").arg(describeWireEnd(harness, wire.endA),
                                                        describeWireEnd(harness, wire.endB));
     return wire.name.isEmpty() ? ends : QStringLiteral("%1 (%2)").arg(wire.name, ends);
+}
+
+std::optional<Gauge> parseGauge(const QString &text)
+{
+    QString t = text.trimmed().toLower();
+    GaugeSystem system = GaugeSystem::Awg;
+    for (const QString &suffix : {QStringLiteral("mm²"), QStringLiteral("mm2"), QStringLiteral("mm")}) {
+        if (t.endsWith(suffix)) {
+            t.chop(suffix.size());
+            system = GaugeSystem::Mm2;
+            break;
+        }
+    }
+    if (system == GaugeSystem::Awg && t.endsWith(QLatin1StringView("awg")))
+        t.chop(3);
+    t = t.trimmed();
+    bool ok = false;
+    double value = QLocale().toDouble(t, &ok);
+    if (!ok)
+        value = QLocale::c().toDouble(t, &ok);
+    if (!ok || (system == GaugeSystem::Mm2 && value <= 0))
+        return std::nullopt;
+    return Gauge{value, system};
 }
 
 QString circuitIdForNumber(int number)

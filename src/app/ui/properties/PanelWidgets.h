@@ -5,8 +5,6 @@
 
 #include "model/Harness.h"
 
-#include <optional>
-
 #include <QComboBox>
 #include <QPlainTextEdit>
 
@@ -65,8 +63,5 @@ private:
 };
 
 QString gaugeText(const Gauge &gauge);
-// Reads gaugeText() style text: "18 AWG", "18", "0.5 mm²", "0.5 mm2", "0.5mm". No unit means
-// AWG. Empty or unreadable text gives nullopt.
-std::optional<Gauge> parseGauge(const QString &text);
 
 } // namespace tbh::app

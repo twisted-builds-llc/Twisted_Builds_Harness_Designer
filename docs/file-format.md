@@ -366,3 +366,24 @@ supports are refused, never silently downgraded.
   `isCavityPlug` and clears the seal. Wires gained `circuitId`; the migration numbers
   wires without one C001, C002, ... in file order. Other v0.1.1 schema additions also go in
   schema 3.
+
+## Parts CSV import (Parts Library > Import Parts CSV...)
+
+Not part of `.tbh` files: a spreadsheet format for adding connector parts to the user's
+library (`src/core/io/PartsCsv.h`). One row per part; the first line names the columns, in
+any order (case and anything in parentheses ignored; unknown columns ignored). Comma or
+semicolon separated, quotes allowed, UTF-8. *Save CSV Template...* writes an example.
+
+| Column | Used for | Value |
+|---|---|---|
+| Type | all (required) | `housing`, `terminal`, `seal` or `plug` |
+| Part number | all (required) | replaces a library entry with the same number (and kind) |
+| Manufacturer, Description | all | text |
+| Family, Contacts | housings | text; `male`/`pins`, `female`/`sockets` or `none` |
+| Cavities | housings (required) | label pattern: `1-12`, `A1-A8, B1-B8` |
+| Terminals, Seals, Plugs | housings | part numbers separated by `;` or `,` |
+| Wire from, Wire to | terminals | `20 AWG`, `0.5 mm2`; no unit = AWG |
+| Insulation min, Insulation max | terminals, seals | outer diameter in mm |
+
+Rows with a problem are skipped and listed by line number. Imported parts are not marked
+approximate.

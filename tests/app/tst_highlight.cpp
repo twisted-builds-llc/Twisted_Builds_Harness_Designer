@@ -459,6 +459,22 @@ private slots:
         QVERIFY(!dialog.library().pinPart(PinPartKind::Terminal, u"T1"_s)->approximate);
         QVERIFY(dialog.library().connectorPart(u"DT04-2P"_s)->approximate);
 
+        // CSV import adds to the dialog's parts (replacing T1) and reports skipped lines.
+        LibraryDialog importing(lib);
+        QString summary;
+        QVERIFY(importing.importPartsCsv("Type,Part number,Wire from\nterminal,T1,18 AWG\n"
+                                         "terminal,T2,20\nrelay,R1,\n",
+                                         &summary));
+        QVERIFY(summary.contains(u"Line 4"_s));
+        auto *importedPins = qobject_cast<QTableWidget *>(named(&importing, u"Terminals, seals and plugs"_s));
+        QCOMPARE(importedPins->rowCount(), 2);
+        importing.accept();
+        QCOMPARE(importing.library().pinPart(PinPartKind::Terminal, u"T1"_s)->wireMin,
+                 std::optional<Gauge>(Gauge{18, GaugeSystem::Awg}));
+        QVERIFY(!importing.library().pinPart(PinPartKind::Terminal, u"T1"_s)->approximate);
+        QVERIFY(importing.library().pinPart(PinPartKind::Terminal, u"T2"_s));
+        QVERIFY(!importing.importPartsCsv("nothing here", &summary));
+
         // Optional look at both tabs with the shipped seed parts.
         const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR");
         if (!out.isEmpty()) {

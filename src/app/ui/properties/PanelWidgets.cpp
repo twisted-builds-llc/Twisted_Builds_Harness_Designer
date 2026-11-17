@@ -5,7 +5,6 @@
 
 #include <QHBoxLayout>
 #include <QLineEdit>
-#include <QLocale>
 #include <QPainter>
 #include <QPixmap>
 
@@ -98,29 +97,6 @@ QString gaugeText(const Gauge &gauge)
     const QString value = QString::number(gauge.value);
     return gauge.system == GaugeSystem::Awg ? QStringLiteral("%1 AWG").arg(value)
                                             : QStringLiteral("%1 mm²").arg(value);
-}
-
-std::optional<Gauge> parseGauge(const QString &text)
-{
-    QString t = text.trimmed().toLower();
-    GaugeSystem system = GaugeSystem::Awg;
-    for (const QString &suffix : {u"mm²"_s, u"mm2"_s, u"mm"_s}) {
-        if (t.endsWith(suffix)) {
-            t.chop(suffix.size());
-            system = GaugeSystem::Mm2;
-            break;
-        }
-    }
-    if (system == GaugeSystem::Awg && t.endsWith(u"awg"_s))
-        t.chop(3);
-    t = t.trimmed();
-    bool ok = false;
-    double value = QLocale().toDouble(t, &ok);
-    if (!ok)
-        value = QLocale::c().toDouble(t, &ok);
-    if (!ok || (system == GaugeSystem::Mm2 && value <= 0))
-        return std::nullopt;
-    return Gauge{value, system};
 }
 
 GaugeEditor::GaugeEditor(QWidget *parent)
