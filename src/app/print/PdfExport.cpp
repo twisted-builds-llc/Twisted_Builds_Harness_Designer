@@ -309,6 +309,10 @@ std::vector<TableBlock> pinoutBlocks(const Harness &harness)
             heading << table.partNumber;
         if (!table.description.isEmpty())
             heading << table.description;
+        if (!table.backshellPartNumber.isEmpty())
+            heading << Tr::tr("backshell %1").arg(table.backshellPartNumber);
+        if (!table.strainReliefPartNumber.isEmpty())
+            heading << Tr::tr("strain relief %1").arg(table.strainReliefPartNumber);
         block.heading = heading.join(QStringLiteral(" — "));
         block.columns = columns;
         for (const bom::PinoutRow &r : table.rows) {

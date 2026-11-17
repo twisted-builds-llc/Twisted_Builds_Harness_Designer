@@ -60,6 +60,8 @@ QString categoryName(bom::PartCategory c)
     switch (c) {
     case bom::PartCategory::Connector:
         return QCoreApplication::translate("tbh::app::BomView", "Connector");
+    case bom::PartCategory::Backshell:
+        return QCoreApplication::translate("tbh::app::BomView", "Backshell");
     case bom::PartCategory::Terminal:
         return QCoreApplication::translate("tbh::app::BomView", "Terminal");
     case bom::PartCategory::Seal:

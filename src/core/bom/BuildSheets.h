@@ -38,6 +38,8 @@ struct PinoutTable
     QString partNumber;
     QString description; // connector description, or "Splice"
     std::vector<PinoutRow> rows;
+    QString backshellPartNumber; // connectors
+    QString strainReliefPartNumber;
 };
 
 // Connectors (every pin, in pin order; each pin's wires in model order), then splices that

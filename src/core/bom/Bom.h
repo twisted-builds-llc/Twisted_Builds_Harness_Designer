@@ -49,7 +49,7 @@ struct SleevingLine
     double lengthWithWasteMm = 0; // lengthMm * (1 + wasteFactorSleevingPercent / 100)
 };
 
-enum class PartCategory { Connector, Terminal, Seal, CavityPlug, Splice, Label, Tie };
+enum class PartCategory { Connector, Backshell, Terminal, Seal, CavityPlug, Splice, Label, Tie };
 
 // Parts counted from connectors, pins and wire ends. An empty part number groups the
 // items that lack one; those lines are flagged in the UI.

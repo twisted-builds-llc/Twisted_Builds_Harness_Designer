@@ -137,6 +137,16 @@ private slots:
         QCOMPARE(findPart(bom, PartCategory::Tie, u"TIE-1"_s)->quantity, 1);
         // Labels and ties come after the other parts.
         QCOMPARE(bom.parts.back().category, PartCategory::Tie);
+
+        // A backshell and its strain relief tie on the ECU; the tie joins the layout ties.
+        h.connectors[0].backshellPartNumber = u"BS-1"_s;
+        h.connectors[0].strainReliefPartNumber = u"TIE-1"_s;
+        const Bom withBackshell = buildBom(h, bomLibrary());
+        QCOMPARE(findPart(withBackshell, PartCategory::Backshell, u"BS-1"_s)->quantity, 1);
+        QCOMPARE(findPart(withBackshell, PartCategory::Backshell, u"BS-1"_s)->references, QStringList{u"ECU"_s});
+        QCOMPARE(findPart(withBackshell, PartCategory::Tie, u"TIE-1"_s)->quantity, 2);
+        // Backshells right after the connectors.
+        QCOMPARE(withBackshell.parts[2].category, PartCategory::Backshell);
     }
 
     void flagged()

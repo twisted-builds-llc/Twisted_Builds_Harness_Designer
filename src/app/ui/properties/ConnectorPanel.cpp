@@ -558,6 +558,8 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     , m_partNumber(new QLineEdit(this))
     , m_housings(partCompleter(new QStandardItemModel(this), m_partNumber))
     , m_manufacturer(new QLineEdit(this))
+    , m_backshell(new QLineEdit(this))
+    , m_strainRelief(new QLineEdit(this))
     , m_description(new QLineEdit(this))
     , m_gender(new QComboBox(this))
     , m_notes(new CommitTextEdit(this))
@@ -613,6 +615,14 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     form->addRow(tr("&Manufacturer:"), m_manufacturer);
     form->addRow(tr("&Description:"), m_description);
     form->addRow(tr("&Gender:"), m_gender);
+    m_backshell->setAccessibleName(tr("Backshell part number"));
+    m_backshell->setPlaceholderText(tr("none"));
+    m_strainRelief->setAccessibleName(tr("Strain relief part number"));
+    m_strainRelief->setPlaceholderText(tr("none"));
+    m_strainRelief->setToolTip(tr("Strain relief at the connector, e.g. the zip tie or clamp on its backshell. "
+                                  "Counted in the BOM with the other ties."));
+    form->addRow(tr("&Backshell:"), m_backshell);
+    form->addRow(tr("&Strain relief:"), m_strainRelief);
     form->addRow(tr("&Notes:"), m_notes);
     form->addRow(tr("Pins:"), pinsRow);
     form->addRow(tr("Display:"), displayRow);
@@ -645,7 +655,7 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     layout->addWidget(m_table, 1);
     layout->addWidget(m_wiredMessage);
 
-    for (QLineEdit *edit : {m_label, m_partNumber, m_manufacturer, m_description})
+    for (QLineEdit *edit : {m_label, m_partNumber, m_manufacturer, m_description, m_backshell, m_strainRelief})
         connect(edit, &QLineEdit::editingFinished, this, &ConnectorPanel::commitInfo);
     connect(m_gender, &QComboBox::activated, this, &ConnectorPanel::commitInfo);
     m_notes->onCommit = [this] { commitInfo(); };
@@ -684,11 +694,13 @@ void ConnectorPanel::refresh()
     const Connector *c = m_document->model()->find<Connector>(m_id);
     if (!c)
         return;
-    const QSignalBlocker b1(m_label), b2(m_partNumber), b3(m_manufacturer), b4(m_description), b5(m_gender),
+    const QSignalBlocker b0(m_backshell), b00(m_strainRelief), b1(m_label), b2(m_partNumber), b3(m_manufacturer), b4(m_description), b5(m_gender),
         b6(m_pinCount), b7(m_collapsed), b8(m_visibleRows);
     m_label->setText(c->label);
     m_partNumber->setText(c->partNumber);
     m_manufacturer->setText(c->manufacturer);
+    m_backshell->setText(c->backshellPartNumber);
+    m_strainRelief->setText(c->strainReliefPartNumber);
     m_description->setText(c->description);
     m_gender->setCurrentIndex(m_gender->findData(int(c->gender)));
     m_notes->setTextIfDifferent(c->notes);
@@ -707,6 +719,8 @@ void ConnectorPanel::commitInfo()
     updated.label = m_label->text();
     updated.partNumber = m_partNumber->text();
     updated.manufacturer = m_manufacturer->text();
+    updated.backshellPartNumber = m_backshell->text().trimmed();
+    updated.strainReliefPartNumber = m_strainRelief->text().trimmed();
     updated.description = m_description->text();
     updated.gender = Gender(m_gender->currentData().toInt());
     updated.notes = m_notes->toPlainText();

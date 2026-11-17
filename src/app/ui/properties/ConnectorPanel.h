@@ -106,6 +106,8 @@ private:
     QLineEdit *m_partNumber;
     QCompleter *m_housings; // library housings for m_partNumber
     QLineEdit *m_manufacturer;
+    QLineEdit *m_backshell;
+    QLineEdit *m_strainRelief;
     QLineEdit *m_description;
     QComboBox *m_gender;
     CommitTextEdit *m_notes;

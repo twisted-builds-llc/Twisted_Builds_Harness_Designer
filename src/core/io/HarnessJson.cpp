@@ -288,6 +288,8 @@ Connector readConnector(ObjectReader r)
     c.description = r.string("description");
     c.gender = r.enumValue("gender", kGenders, Gender::None);
     c.notes = r.string("notes");
+    c.backshellPartNumber = r.string("backshellPartNumber");
+    c.strainReliefPartNumber = r.string("strainReliefPartNumber");
     const QJsonArray pins = r.array("pins");
     const QString pinsContext = r.context() + QStringLiteral(".pins");
     for (qsizetype i = 0; i < pins.size(); ++i) {
@@ -596,6 +598,8 @@ QJsonObject writeConnector(const Connector &c)
     o[u"description"] = c.description;
     o[u"gender"] = enumToString(kGenders, c.gender);
     o[u"notes"] = c.notes;
+    o[u"backshellPartNumber"] = c.backshellPartNumber;
+    o[u"strainReliefPartNumber"] = c.strainReliefPartNumber;
     QJsonArray pins;
     for (const Pin &p : c.pins)
         pins.append(writePin(p));

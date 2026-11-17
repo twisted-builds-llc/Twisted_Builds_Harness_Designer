@@ -67,6 +67,8 @@ QString categoryName(PartCategory c)
     switch (c) {
     case PartCategory::Connector:
         return Tr::tr("Connector");
+    case PartCategory::Backshell:
+        return Tr::tr("Backshell");
     case PartCategory::Terminal:
         return Tr::tr("Terminal");
     case PartCategory::Seal:

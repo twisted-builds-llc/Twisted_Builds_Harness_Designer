@@ -100,7 +100,8 @@ std::vector<PinoutTable> pinoutTables(const Harness &harness)
 {
     std::vector<PinoutTable> tables;
     for (const Connector &c : harness.connectors) {
-        PinoutTable table{c.label, c.partNumber, c.description, {}};
+        PinoutTable table{c.label, c.partNumber, c.description, {}, c.backshellPartNumber,
+                          c.strainReliefPartNumber};
         for (const Pin &p : c.pins) {
             const PinRef ref{c.id, p.id};
             const size_t before = table.rows.size();

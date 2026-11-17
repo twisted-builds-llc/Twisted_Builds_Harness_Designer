@@ -98,6 +98,7 @@ Loading fails with a message if:
 ```json
 [
   {
+    "backshellPartNumber": "",
     "description": "",
     "gender": "female",
     "id": "c-ecu",
@@ -122,6 +123,9 @@ Loading fails with a message if:
 ```
 
 - `gender`: `none` | `male` | `female`.
+- `backshellPartNumber`, `strainReliefPartNumber` (schema 3, may be empty): the connector's
+  backshell and the strain relief fitted at it (e.g. a zip tie or clamp on the backshell),
+  counted in the BOM (strain relief with the layout ties).
 - Pin order in the array is the display order. Pin `label` is free text.
 - `isCavityPlug`: the cavity is fitted with a blind plug; `plugPartNumber` is that plug
   (schema 3). The BOM counts plugs from `plugPartNumber` and, if set, a seal from

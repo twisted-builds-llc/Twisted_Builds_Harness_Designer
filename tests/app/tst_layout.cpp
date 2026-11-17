@@ -4,6 +4,7 @@
 #include "SelectionModel.h"
 #include "calc/WireLength.h"
 #include "commands/EditOps.h"
+#include "commands/EntityCommands.h"
 #include "commands/HarnessCommands.h"
 #include "io/HarnessJson.h"
 #include "io/TbhFile.h"
@@ -638,6 +639,23 @@ private slots:
         view.deleteSelection();
         QVERIFY(!model->find<LayoutAccessory>(id));
         QVERIFY(!view.layoutScene()->accessoryItem(id));
+
+        // A zip tie at branch n2 goes on the trunk: s1 carries w1 and w2 (s2 and s3 one
+        // each); n2 is s1's end B, 300 mm along.
+        const QString tie = view.addTieAtNode(u"n2"_s);
+        QCOMPARE(model->find<LayoutAccessory>(tie)->kind, AccessoryKind::Tie);
+        QCOMPARE(model->find<LayoutAccessory>(tie)->segmentId, u"s1"_s);
+        QCOMPARE(model->find<LayoutAccessory>(tie)->offsetMm, 300.0);
+        QVERIFY(!visibleEditor(view.viewport())); // ties have no text to type
+        LayoutAccessory withPart = *model->find<LayoutAccessory>(tie);
+        withPart.partNumber = u"TIE-8"_s;
+        document.undoStack()->push(new UpdateEntityCommand<LayoutAccessory>(model, withPart, u"part"_s));
+        // The next tie, behind the ECU (n1, s1's end A), takes the same part number.
+        const QString second = view.addTieAtNode(u"n1"_s);
+        QCOMPARE(model->find<LayoutAccessory>(second)->offsetMm, 0.0);
+        QCOMPARE(model->find<LayoutAccessory>(second)->partNumber, u"TIE-8"_s);
+        QVERIFY(view.addTieAtNode(u"nope"_s).isEmpty());
+        verifyLoadable(model->harness());
     }
 
     void removingLayoutItemsRemovesTheirAccessories()

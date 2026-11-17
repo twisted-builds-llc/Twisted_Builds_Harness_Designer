@@ -92,6 +92,8 @@ struct Connector {
     Gender gender = Gender::None;
     QString notes;
     std::vector<Pin> pins; // ordered, kMinPins..kMaxPins
+    QString backshellPartNumber;     // empty = none
+    QString strainReliefPartNumber;  // e.g. the zip tie or clamp on the backshell; empty = none
     QJsonObject extra;
 
     bool operator==(const Connector &) const = default;

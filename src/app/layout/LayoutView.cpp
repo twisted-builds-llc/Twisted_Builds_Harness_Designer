@@ -3,6 +3,7 @@
 
 #include "Document.h"
 #include "SelectionModel.h"
+#include "calc/WireLength.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "layout/LayoutScene.h"
@@ -209,13 +210,30 @@ QString LayoutView::addAccessoryAt(const QString &segmentId, const QPointF &scen
     LayoutSegmentItem *item = m_scene->segmentItem(segmentId);
     if (!segment || !item)
         return {};
+    return addAccessory(segmentId,
+                        segment->lengthMm > 0 ? std::round(item->parameterNear(scenePos) * segment->lengthMm * 10) / 10
+                                              : 0,
+                        kind);
+}
+
+QString LayoutView::addAccessory(const QString &segmentId, double offsetMm, AccessoryKind kind)
+{
+    HarnessModel *model = m_document->model();
+    if (!model->find<LayoutSegment>(segmentId))
+        return {};
     LayoutAccessory accessory;
     accessory.id = newId();
     accessory.kind = kind;
     accessory.segmentId = segmentId;
-    accessory.offsetMm = segment->lengthMm > 0
-                             ? std::round(item->parameterNear(scenePos) * segment->lengthMm * 10) / 10
-                             : 0;
+    accessory.offsetMm = offsetMm;
+    // The same label stock or tie as the last one, so a run of them needs no retyping.
+    const auto &existing = model->harness().accessories;
+    for (auto it = existing.rbegin(); it != existing.rend(); ++it) {
+        if (it->kind == kind) {
+            accessory.partNumber = it->partNumber;
+            break;
+        }
+    }
     const QString id = accessory.id;
     m_document->undoStack()->push(new AddEntityCommand<LayoutAccessory>(
         model, std::move(accessory), {}, kind == AccessoryKind::Label ? tr("Add label") : tr("Add tie")));
@@ -225,6 +243,21 @@ QString LayoutView::addAccessoryAt(const QString &segmentId, const QPointF &scen
     if (kind == AccessoryKind::Label)
         editAccessoryText(id);
     return id;
+}
+
+QString LayoutView::addTieAtNode(const QString &nodeId)
+{
+    const Harness &h = m_document->model()->harness();
+    const auto usage = calc::wiresBySegment(h, calc::LayoutGraph(h));
+    const LayoutSegment *best = nullptr;
+    for (const LayoutSegment &s : h.layoutSegments) {
+        if ((s.nodeA == nodeId || s.nodeB == nodeId)
+            && (!best || usage.value(s.id).size() > usage.value(best->id).size()))
+            best = &s;
+    }
+    if (!best)
+        return {};
+    return addAccessory(best->id, best->nodeA == nodeId ? 0 : best->lengthMm, AccessoryKind::Tie);
 }
 
 void LayoutView::editAccessoryText(const QString &accessoryId)
@@ -847,14 +880,22 @@ void LayoutView::contextMenuEvent(QContextMenuEvent *event)
             menu.addAction(tr("Edit Length"), this, [this, id] { editSegmentLength(id); });
             menu.addAction(tr("Add Label Here"), this,
                            [this, id, scenePos] { addAccessoryAt(id, scenePos, AccessoryKind::Label); });
+            menu.addAction(tr("Add Zip Tie Here"), this,
+                           [this, id, scenePos] { addAccessoryAt(id, scenePos, AccessoryKind::Tie); });
             QAction *straighten = menu.addAction(tr("Straighten Segment"), this, [this, id] { straightenSegment(id); });
             straighten->setEnabled(segment->segment().bend.has_value());
         } else if (item->type() == LayoutNodeItemType) {
             const auto *node = static_cast<LayoutNodeItem *>(item);
-            if (node->node().type != LayoutNodeType::Splice || node->legCount() != 2)
-                break;
             const QString id = node->id();
-            menu.addAction(tr("Position Along Bundle..."), this, [this, id] { editPositionAlongRun(id); });
+            const bool alongRun = node->node().type == LayoutNodeType::Splice && node->legCount() == 2;
+            if (alongRun)
+                menu.addAction(tr("Position Along Bundle..."), this, [this, id] { editPositionAlongRun(id); });
+            if (node->legCount() > 0)
+                menu.addAction(node->node().type == LayoutNodeType::Branch ? tr("Add Zip Tie at Branch")
+                                                                          : tr("Add Zip Tie Here"),
+                               this, [this, id] { addTieAtNode(id); });
+            if (menu.isEmpty())
+                break;
         } else {
             continue;
         }

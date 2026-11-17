@@ -63,8 +63,14 @@ public:
     // Adds a label or tie on segment `segmentId` at the point nearest `scenePos` and selects
     // it; a label's text editor opens at once. Returns the new accessory's id.
     QString addAccessoryAt(const QString &segmentId, const QPointF &scenePos, AccessoryKind kind);
+    // Adds a label or tie `offsetMm` along segment `segmentId`, with the part number of the
+    // last one of its kind, selects it and, for a label, opens its text editor.
+    QString addAccessory(const QString &segmentId, double offsetMm, AccessoryKind kind);
     // Types a label's text in place.
     void editAccessoryText(const QString &accessoryId);
+    // Adds a zip tie at node `nodeId` (e.g. strain relief at a branch point): on the segment
+    // there that carries the most wires, at the node's end. Returns the tie's id.
+    QString addTieAtNode(const QString &nodeId);
     // A splice drawn as a stub off a point on a loom goes inside that loom, `distanceMm`
     // from the point (loomPositionForStub()); the stub is removed. One undo step. False,
     // with nothing changed, when the stub does not qualify.

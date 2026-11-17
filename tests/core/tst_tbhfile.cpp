@@ -34,6 +34,8 @@ Harness sampleHarness()
     ecu.partNumber = u"PN-1"_s;
     ecu.manufacturer = u"Maker"_s;
     ecu.gender = Gender::Female;
+    ecu.backshellPartNumber = u"BS-1"_s;
+    ecu.strainReliefPartNumber = u"TIE-4"_s;
     for (int i = 1; i <= 3; ++i) {
         Pin p;
         p.id = u"ecu-p%1"_s.arg(i);

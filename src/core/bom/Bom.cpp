@@ -164,6 +164,10 @@ Bom buildBom(const Harness &harness, const Library &library)
     for (const Connector &c : harness.connectors) {
         parts.add(PartCategory::Connector, c.partNumber, c.description.isEmpty() ? c.manufacturer : c.description,
                   c.label);
+        if (!c.backshellPartNumber.trimmed().isEmpty())
+            parts.add(PartCategory::Backshell, c.backshellPartNumber, {}, c.label);
+        if (!c.strainReliefPartNumber.trimmed().isEmpty())
+            parts.add(PartCategory::Tie, c.strainReliefPartNumber, {}, c.label);
         for (const Pin &p : c.pins) {
             const QString reference = QStringLiteral("%1 : %2").arg(c.label, p.label);
             if (p.isCavityPlug) {
