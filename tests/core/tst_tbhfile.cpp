@@ -52,6 +52,7 @@ Harness sampleHarness()
     sensor.label = u"SENSOR"_s;
     sensor.gender = Gender::Male;
     sensor.pins.push_back(Pin{u"s-p1"_s, u"+"_s, u"5V"_s, {}, u"SEAL-1"_s, false, {}, u"note"_s, {}});
+    sensor.factory = true;
     h.connectors = {ecu, sensor};
 
     h.splices.push_back(Splice{u"sp1"_s, u"S1"_s, u"SPL-1"_s, {}});
@@ -74,6 +75,7 @@ Harness sampleHarness()
     toSplice.endB = SpliceRef{u"sp1"_s};
     toSplice.baseColor = u"BLK"_s;
     toSplice.gauge = {0.5, GaugeSystem::Mm2};
+    toSplice.factory = true;
 
     Wire toRing;
     toRing.id = u"w3"_s;
@@ -81,7 +83,8 @@ Harness sampleHarness()
     toRing.endB = FreeEndRef{u"fe-ring"_s};
     toRing.baseColor = u"BLK"_s;
     h.wires = {pinToPin, toSplice, toRing};
-    h.freeEnds = {FreeEnd{u"fe-ring"_s, FreeEndKind::RingTerminal, u"GND"_s, u"RING-M6"_s, {}}};
+    h.freeEnds = {FreeEnd{u"fe-ring"_s, FreeEndKind::RingTerminal, u"GND"_s, u"RING-M6"_s, {}},
+                  FreeEnd{u"fe-cut"_s, FreeEndKind::Cut, {}, {}, {}}};
 
     h.layoutNodes = {
         LayoutNode{u"n1"_s, LayoutNodeType::Connector, u"c-ecu"_s, QPointF(0, 0), {}},

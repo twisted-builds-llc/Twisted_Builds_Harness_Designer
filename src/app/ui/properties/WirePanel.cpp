@@ -9,6 +9,7 @@
 #include "ui/Format.h"
 #include "ui/properties/PanelWidgets.h"
 
+#include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QDoubleValidator>
@@ -40,6 +41,7 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     , m_lengthDetail(new QLabel(this))
     , m_lengthOverride(new QLineEdit(this))
     , m_overrideUnits(new QLabel(this))
+    , m_factory(new QCheckBox(tr("&Factory wire (already there, not built)"), this))
 {
     m_title->setWordWrap(true);
     QFont titleFont = m_title->font();
@@ -92,6 +94,9 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     form->addRow(tr("Cut length:"), m_length);
     form->addRow(m_lengthDetail);
     form->addRow(tr("Length override:"), row(m_lengthOverride, m_overrideUnits));
+    m_factory->setToolTip(tr("Part of the existing (factory) harness: drawn dashed, and left out of "
+                             "the BOM, cut list and pinouts. Right-click a wire to cut it for an add-on."));
+    form->addRow(m_factory);
 
     m_endA = makeEndEditor(tr("End A"));
     m_endB = makeEndEditor(tr("End B"));
@@ -159,6 +164,10 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
         if (!text.isEmpty())
             mm = unitsToMm(QLocale().toDouble(text), m_document->model()->harness().info.units);
         apply([&](Wire &w) { w.lengthOverrideMm = mm; }, tr("Set length override"));
+    });
+
+    connect(m_factory, &QCheckBox::clicked, this, [this](bool on) {
+        apply([&](Wire &w) { w.factory = on; }, on ? tr("Mark as factory wire") : tr("Mark as add-on wire"));
     });
 
     HarnessModel *model = document->model();
@@ -299,6 +308,16 @@ void WirePanel::refresh()
         m_lengthOverride->setPlaceholderText(tr("(multiple)"));
     }
 
+    {
+        const QSignalBlocker block(m_factory);
+        if (same([](const Wire &w) { return w.factory; })) {
+            m_factory->setTristate(false);
+            m_factory->setChecked(first.factory);
+        } else {
+            m_factory->setCheckState(Qt::PartiallyChecked);
+        }
+    }
+
     refreshLength(wires);
 
     m_endA.box->setVisible(single);
@@ -351,6 +370,7 @@ FreeEndEditor::FreeEndEditor(Document *document, QWidget *parent)
     m_kind->addItem(tr("Eyelet"), int(FreeEndKind::Eyelet));
     m_kind->addItem(tr("Ring terminal"), int(FreeEndKind::RingTerminal));
     m_kind->addItem(tr("Bare end"), int(FreeEndKind::Bare));
+    m_kind->addItem(tr("Cut (wire cut here)"), int(FreeEndKind::Cut));
     auto *form = new QFormLayout(this);
     form->setContentsMargins(0, 0, 0, 0);
     form->addRow(tr("End type:"), m_kind);

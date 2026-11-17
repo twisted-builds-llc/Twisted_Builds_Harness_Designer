@@ -43,7 +43,9 @@ struct PinoutTable
 };
 
 // Connectors (every pin, in pin order; each pin's wires in model order), then splices that
-// have wires. A wire with both ends on the same item has a row for each end.
+// have wires. A wire with both ends on the same item has a row for each end. Factory wires
+// are left out; a factory connector lists only its pins with other wires, and none at all
+// without them.
 std::vector<PinoutTable> pinoutTables(const Harness &harness);
 
 } // namespace tbh::bom

@@ -8,6 +8,7 @@
 
 #include <functional>
 
+class QCheckBox;
 class QComboBox;
 class QGroupBox;
 class QLabel;
@@ -65,6 +66,7 @@ private:
     void refreshLength(const std::vector<Wire> &wires);
     QLineEdit *m_lengthOverride;
     QLabel *m_overrideUnits;
+    QCheckBox *m_factory;
     EndEditor m_endA;
     EndEditor m_endB;
 };

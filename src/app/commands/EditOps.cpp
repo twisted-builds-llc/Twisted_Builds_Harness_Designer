@@ -700,6 +700,88 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
     const CircuitTextFill fill = fillEmptyCircuitText(after, {wireId});
     new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
     addFillUpdates(model, after, fill, macro.get(), {}, wireId);
+    // A cut end only marks where a wire was cut; without wires it means nothing.
+    if (const auto *free = std::get_if<FreeEndRef>(&oldEnd)) {
+        const FreeEnd *item = model->find<FreeEnd>(free->freeEndId);
+        if (item && item->kind == FreeEndKind::Cut && wiresOnFreeEnd(after, item->id).empty()) {
+            clearLayoutRefs(model, {item->id}, macro.get());
+            new RemoveEntityCommand<FreeEnd>(model, item->id, {}, macro.get());
+        }
+    }
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId, QPointF cutA,
+                                      QPointF cutB, const QString &sheetId, QString *newWireId)
+{
+    const Wire *current = model->find<Wire>(wireId);
+    if (!current)
+        return nullptr;
+    const Harness &h = model->harness();
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Cut wire"));
+
+    FreeEnd endA, endB;
+    for (auto [end, position] : {std::pair{&endA, cutA}, std::pair{&endB, cutB}}) {
+        end->id = newId();
+        end->kind = FreeEndKind::Cut;
+        SchematicPlacement placement;
+        placement.position = position;
+        placement.sheetId = sheetId;
+        new AddEntityCommand<FreeEnd>(model, *end, {{end->id, placement}}, {}, macro.get());
+    }
+
+    Wire first = *current;
+    first.endB = FreeEndRef{endA.id};
+    first.routeSegmentIds.clear();
+    first.lengthOverrideMm.reset();
+    Wire second = first;
+    second.id = newId();
+    second.circuitId = nextCircuitId(h);
+    second.endA = FreeEndRef{endB.id};
+    second.endB = current->endB;
+    // The second piece is drawn on the sheets the wire was; a dragged route no longer fits.
+    Placements secondPlacements;
+    if (const SchematicPlacement *sheets = model->placement(Schematic::wireSheetKey(wireId)))
+        secondPlacements[Schematic::wireSheetKey(second.id)] = *sheets;
+    if (model->placement(wireId))
+        new SetPlacementsCommand(model, {{wireId, std::nullopt}}, {}, macro.get());
+    new UpdateEntityCommand<Wire>(model, first, {}, macro.get());
+    new AddEntityCommand<Wire>(model, second, std::move(secondPlacements), {}, macro.get());
+    if (newWireId)
+        *newWireId = second.id;
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> replaceFreeEndWithSplice(HarnessModel *model, const QString &freeEndId,
+                                                       Splice splice)
+{
+    if (!model->find<FreeEnd>(freeEndId))
+        return nullptr;
+    const Harness &h = model->harness();
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Replace with splice"));
+    Placements placements;
+    if (const SchematicPlacement *placement = model->placement(freeEndId))
+        placements[splice.id] = *placement;
+    const SpliceRef ref{splice.id};
+    new AddEntityCommand<Splice>(model, splice, std::move(placements), {}, macro.get());
+    for (const Wire &w : h.wires) {
+        Wire updated = w;
+        for (WireEnd *end : {&updated.endA, &updated.endB}) {
+            if (const auto *free = std::get_if<FreeEndRef>(end); free && free->freeEndId == freeEndId)
+                *end = ref;
+        }
+        if (updated != w)
+            new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
+    }
+    for (const LayoutNode &n : h.layoutNodes) {
+        if (n.refId != freeEndId)
+            continue;
+        LayoutNode node = n;
+        node.type = LayoutNodeType::Splice;
+        node.refId = splice.id;
+        new UpdateEntityCommand<LayoutNode>(model, node, {}, macro.get());
+    }
+    new RemoveEntityCommand<FreeEnd>(model, freeEndId, {}, macro.get());
     return macro;
 }
 

@@ -595,6 +595,7 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     , m_manufacturer(new QLineEdit(this))
     , m_backshell(new QLineEdit(this))
     , m_strainRelief(new QLineEdit(this))
+    , m_factory(new QCheckBox(tr("&Factory connector (already there, not built)"), this))
     , m_description(new QLineEdit(this))
     , m_gender(new QComboBox(this))
     , m_notes(new CommitTextEdit(this))
@@ -662,6 +663,9 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
                                   "Counted in the BOM with the other ties."));
     form->addRow(tr("&Backshell:"), m_backshell);
     form->addRow(tr("&Strain relief:"), m_strainRelief);
+    m_factory->setToolTip(tr("Part of the existing (factory) harness: drawn dashed, and only the terminals "
+                             "of add-on wires in it are counted in the BOM."));
+    form->addRow(m_factory);
     form->addRow(tr("&Notes:"), m_notes);
     form->addRow(tr("Pins:"), pinsRow);
     form->addRow(tr("Display:"), displayRow);
@@ -697,6 +701,7 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     for (QLineEdit *edit : {m_label, m_partNumber, m_manufacturer, m_description, m_backshell, m_strainRelief})
         connect(edit, &QLineEdit::editingFinished, this, &ConnectorPanel::commitInfo);
     connect(m_gender, &QComboBox::activated, this, &ConnectorPanel::commitInfo);
+    connect(m_factory, &QCheckBox::clicked, this, &ConnectorPanel::commitInfo);
     m_notes->onCommit = [this] { commitInfo(); };
     connect(m_pinCount, &QSpinBox::valueChanged, this, [this](int count) {
         if (!changePinCount(this, m_document, m_id, count))
@@ -734,7 +739,8 @@ void ConnectorPanel::refresh()
     if (!c)
         return;
     const QSignalBlocker b0(m_backshell), b00(m_strainRelief), b1(m_label), b2(m_partNumber), b3(m_manufacturer), b4(m_description), b5(m_gender),
-        b6(m_pinCount), b7(m_collapsed), b8(m_visibleRows);
+        b6(m_pinCount), b7(m_collapsed), b8(m_visibleRows), b9(m_factory);
+    m_factory->setChecked(c->factory);
     m_label->setText(c->label);
     m_partNumber->setText(c->partNumber);
     m_manufacturer->setText(c->manufacturer);
@@ -762,6 +768,7 @@ void ConnectorPanel::commitInfo()
     updated.strainReliefPartNumber = m_strainRelief->text().trimmed();
     updated.description = m_description->text();
     updated.gender = Gender(m_gender->currentData().toInt());
+    updated.factory = m_factory->isChecked();
     updated.notes = m_notes->toPlainText();
     if (updated.partNumber.trimmed() != current->partNumber.trimmed()) {
         if (const ConnectorPart *housing = m_document->model()->library().connectorPart(updated.partNumber)) {

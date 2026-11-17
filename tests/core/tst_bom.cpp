@@ -103,6 +103,40 @@ private slots:
         QVERIFY(bom.parts[1].partNumber.isEmpty());
     }
 
+    void factoryItemsAreNotCounted()
+    {
+        // An add-on to a factory harness: SENSOR is a factory connector; w1, w2 and w3 are
+        // factory wires, so splice S1 and the ring terminal (only factory wires) exist too.
+        // w4 (ECU 3 to SENSOR 2, override 1000 mm) and w5 (ECU 4 to LAMP, unrouted) are built.
+        Harness h = bomSample();
+        h.connectors[1].factory = true;
+        for (Wire &w : h.wires)
+            w.factory = w.id == u"w1"_s || w.id == u"w2"_s || w.id == u"w3"_s;
+        h.freeEnds.push_back(FreeEnd{u"cut"_s, FreeEndKind::Cut, {}, u"X-1"_s, {}});
+        const Bom bom = buildBom(h, bomLibrary());
+
+        QCOMPARE(bom.cutList.size(), size_t(2));
+        QCOMPARE(bom.cutList[0].wireId, u"w4"_s);
+        QCOMPARE(bom.cutList[1].wireId, u"w5"_s);
+        QCOMPARE(bom.wires.size(), size_t(1)); // the red group (w1, w2) is all factory
+        QCOMPARE(bom.wires[0].pieces, 2);
+        QCOMPARE(bom.wires[0].lengthMm, 1000.0); // w4's override; w5 unrouted
+        QCOMPARE(bom.wires[0].piecesWithoutLength, 1);
+
+        QCOMPARE(findPart(bom, PartCategory::Connector, u"ECU-PN"_s)->quantity, 1);
+        QCOMPARE(findPart(bom, PartCategory::Connector, {})->references, (QStringList{u"LAMP"_s}));
+        // Terminals only where a built wire lands: ecu3 (T-1), SENSOR pin 2 (T-2, in the
+        // factory housing), and ecu4, lamp1 without a part number.
+        QCOMPARE(findPart(bom, PartCategory::Terminal, u"T-1"_s)->quantity, 1);
+        QCOMPARE(findPart(bom, PartCategory::Terminal, u"T-2"_s)->references, (QStringList{u"SENSOR : 2"_s}));
+        QCOMPARE(findPart(bom, PartCategory::Terminal, {})->quantity, 2);
+        QVERIFY(!findPart(bom, PartCategory::Terminal, u"RING-6"_s)); // only w3, a factory wire
+        QVERIFY(!findPart(bom, PartCategory::Terminal, u"X-1"_s));    // cut ends never count
+        QVERIFY(!findPart(bom, PartCategory::Seal, u"S-1"_s));        // ecu1, ecu2: factory wires
+        QCOMPARE(findPart(bom, PartCategory::CavityPlug, u"PLUG-1"_s)->quantity, 1);
+        QVERIFY(!findPart(bom, PartCategory::Splice, u"SPL-1"_s));
+    }
+
     void labelsAndTies()
     {
         Harness h = bomSample();

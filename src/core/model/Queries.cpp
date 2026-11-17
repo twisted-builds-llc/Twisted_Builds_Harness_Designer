@@ -82,6 +82,8 @@ QString freeEndKindName(FreeEndKind kind)
         return Tr::tr("Ring terminal");
     case FreeEndKind::Bare:
         return Tr::tr("Bare end");
+    case FreeEndKind::Cut:
+        return Tr::tr("Cut");
     }
     return {};
 }

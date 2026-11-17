@@ -131,10 +131,24 @@ std::unique_ptr<QUndoCommand> setDistanceAlongRun(HarnessModel *model, const QSt
                                                   const QString &fromSegmentId, double distanceMm);
 
 // Moves one end of a wire to `newEnd` (re-attach); any manual route is dropped. The old
-// end's item (e.g. a free end) stays. Empty circuit text is filled across the wire as in
-// addWire(). Returns null if nothing changes or both ends would be the same item.
+// end's item (e.g. a free end) stays, except a cut end left without wires, which is removed.
+// Empty circuit text is filled across the wire as in addWire(). Returns null if nothing
+// changes or both ends would be the same item.
 std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wireId, bool endB,
                                          const WireEnd &newEnd);
+
+// Cuts a wire in two, as when an existing (factory) wire is cut to splice in an add-on: the
+// wire keeps end A and now ends on a new cut end at `cutA`; a copy with a new id and the next
+// circuit id runs from a second cut end at `cutB` to the old end B. Both cut ends are placed
+// on `sheetId`. Routes and length overrides are dropped (each piece is shorter). Returns null
+// if there is no such wire. `newWireId`, if given, receives the id of the second piece.
+std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId, QPointF cutA,
+                                      QPointF cutB, const QString &sheetId, QString *newWireId = nullptr);
+
+// Replaces a free end (e.g. a cut end) with `splice` where it is: on the schematic, in the
+// layout, and at the ends of its wires. Returns null if there is no such free end.
+std::unique_ptr<QUndoCommand> replaceFreeEndWithSplice(HarnessModel *model, const QString &freeEndId,
+                                                       Splice splice);
 
 // Replaces a free end with `updated`. A kind change also changes the type of its layout
 // node (eyelet or flying lead). Returns null if nothing changes.

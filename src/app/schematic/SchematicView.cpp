@@ -1265,6 +1265,18 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
                        [this, pin] { connectPinByName(pin); });
         menu.addSeparator();
     }
+    const QPointF scenePos = mapToScene(event->pos());
+    if (item && item->type() == WireItemType) {
+        const QString wireId = static_cast<WireItem *>(item)->id();
+        menu.addAction(tr("Cut Wire Here"), this, [this, wireId, scenePos] { cutWireAt(wireId, scenePos); });
+        menu.addSeparator();
+    }
+    if (item && item->type() == FreeEndItemType
+        && static_cast<FreeEndItem *>(item)->freeEnd().kind == FreeEndKind::Cut) {
+        const QString freeEndId = static_cast<FreeEndItem *>(item)->id();
+        menu.addAction(tr("Replace Cut with Splice"), this, [this, freeEndId] { replaceWithSplice(freeEndId); });
+        menu.addSeparator();
+    }
     if (!s.connectors.isEmpty() || !s.splices.isEmpty() || !s.freeEnds.isEmpty() || !s.notes.isEmpty()) {
         addMoveToSheetActions(menu.addMenu(tr("Move to Sheet")));
     }
@@ -1272,6 +1284,46 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
         addShowOnSheetActions(menu.addMenu(tr("Also Show on Sheet")));
     addExistingItemActions(menu.addMenu(tr("Add Existing Item to This Sheet")));
     menu.exec(event->globalPos());
+}
+
+void SchematicView::cutWireAt(const QString &wireId, const QPointF &scenePos)
+{
+    const Wire *wire = m_document->model()->find<Wire>(wireId);
+    if (!wire)
+        return;
+    // The cut ends sit either side of the point, the one for end A on end A's side.
+    constexpr qreal kGap = 40;
+    const QPointF at = SchematicScene::snapped(scenePos);
+    bool endAOnLeft = true;
+    if (const PlacedItem *a = m_scene->placedItem(wireEndItemId(wire->endA)))
+        endAOnLeft = a->scenePos().x() <= at.x();
+    else if (const PlacedItem *b = m_scene->placedItem(wireEndItemId(wire->endB)))
+        endAOnLeft = b->scenePos().x() > at.x();
+    const QPointF left = SchematicScene::snapped(at - QPointF(kGap, 0));
+    const QPointF right = SchematicScene::snapped(at + QPointF(kGap, 0));
+    QString secondId;
+    auto command = cutWire(m_document->model(), wireId, endAOnLeft ? left : right, endAOnLeft ? right : left,
+                           m_scene->currentSheet(), &secondId);
+    if (!command)
+        return;
+    m_document->undoStack()->push(command.release());
+    Selection selection;
+    selection.wires = {wireId, secondId};
+    m_selection->setSelection(selection);
+}
+
+void SchematicView::replaceWithSplice(const QString &freeEndId)
+{
+    Splice splice;
+    splice.id = newId();
+    splice.label = uniqueLabel(QStringLiteral("S"), true);
+    const QString id = splice.id;
+    if (auto command = replaceFreeEndWithSplice(m_document->model(), freeEndId, std::move(splice))) {
+        m_document->undoStack()->push(command.release());
+        Selection selection;
+        selection.splices.insert(id);
+        m_selection->setSelection(selection);
+    }
 }
 
 void SchematicView::connectPinByName(const PinRef &pin)

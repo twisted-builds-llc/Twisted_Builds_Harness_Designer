@@ -129,6 +129,34 @@ private slots:
         QCOMPARE(splice.rows[1].otherEnd, u"Ring terminal"_s); // w3 ends A at the splice
     }
 
+    void factoryItemsAreLeftOut()
+    {
+        // An add-on to a factory harness: SENSOR and LAMP are factory connectors, and only
+        // w4 (ECU 3 to SENSOR 2) is built. w1, w2, w3 and w5 are factory wires.
+        Harness h = bomSample();
+        h.connectors[1].factory = true;
+        h.connectors[1].backshellPartNumber = u"BS-1"_s;
+        h.connectors[2].factory = true;
+        for (Wire &w : h.wires)
+            w.factory = w.id != u"w4"_s;
+        const auto tables = pinoutTables(h);
+        // ECU, then SENSOR with its one add-on wire; LAMP and splice S1 have no built wires.
+        QCOMPARE(tables.size(), size_t(2));
+
+        const PinoutTable &ecu = tables[0];
+        QCOMPARE(ecu.rows.size(), size_t(5)); // every pin of a connector being built
+        QVERIFY(ecu.rows[0].wireId.isEmpty()); // w1 is a factory wire
+        QCOMPARE(ecu.rows[2].wireId, u"w4"_s);
+        QVERIFY(ecu.rows[3].wireId.isEmpty()); // w5
+
+        const PinoutTable &sensor = tables[1];
+        QCOMPARE(sensor.title, u"SENSOR"_s);
+        QCOMPARE(sensor.rows.size(), size_t(1)); // pin 1 has only a factory wire
+        QCOMPARE(sensor.rows[0].pin, u"2"_s);
+        QCOMPARE(sensor.rows[0].otherEnd, u"ECU : 3"_s);
+        QVERIFY(sensor.backshellPartNumber.isEmpty()); // already fitted
+    }
+
     void splicesWithoutWiresAreLeftOut()
     {
         Harness h = sample();

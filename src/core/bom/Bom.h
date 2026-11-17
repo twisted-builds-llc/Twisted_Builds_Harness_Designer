@@ -78,13 +78,17 @@ struct Bom
 // - Wire: every wire is one cut piece; its cut length is calc::wireLength() (override wins).
 // - Sleeving: each segment with sleeving adds its full length (v1 coverage is full).
 // - Connectors: one per connector, grouped by part number.
-// - Terminals: one per pin that has at least one wire (pin terminal P/N), plus one per
+// - Terminals: one per pin that has at least one (non-factory) wire (pin terminal P/N), plus one per
 //   eyelet or ring-terminal free end, however many wires it takes (its terminal P/N; flying
 //   leads and bare ends with a terminal P/N count too).
 // - Seals: one per wired pin with a seal P/N.
 // - Cavity plugs: one per pin marked as a cavity plug; its part number is taken from the
 //   pin's seal P/N field.
 // - Splices: one per splice, grouped by part number.
+// - Factory items (Wire::factory, Connector::factory) already exist and are not counted:
+//   factory wires are left out of the wire lines and cut list; a factory connector counts
+//   only the terminals and seals of pins that have a non-factory wire. Splices and free
+//   ends whose wires are all factory wires are not counted either; cut ends never are.
 Bom buildBom(const Harness &harness, const Library &library);
 
 } // namespace tbh::bom

@@ -57,7 +57,8 @@ constexpr EnumName<GaugeSystem> kGaugeSystems[] = {
 constexpr EnumName<FreeEndKind> kFreeEndKinds[] = {{FreeEndKind::FlyingLead, "flyingLead"},
                                                    {FreeEndKind::Eyelet, "eyelet"},
                                                    {FreeEndKind::RingTerminal, "ringTerminal"},
-                                                   {FreeEndKind::Bare, "bare"}};
+                                                   {FreeEndKind::Bare, "bare"},
+                                                   {FreeEndKind::Cut, "cut"}};
 constexpr EnumName<EndType> kEndTypes[] = {{EndType::Pin, "pin"},
                                            {EndType::Splice, "splice"},
                                            {EndType::FlyingLead, "flyingLead"},
@@ -290,6 +291,7 @@ Connector readConnector(ObjectReader r)
     c.notes = r.string("notes");
     c.backshellPartNumber = r.string("backshellPartNumber");
     c.strainReliefPartNumber = r.string("strainReliefPartNumber");
+    c.factory = r.boolean("factory", false);
     const QJsonArray pins = r.array("pins");
     const QString pinsContext = r.context() + QStringLiteral(".pins");
     for (qsizetype i = 0; i < pins.size(); ++i) {
@@ -329,6 +331,7 @@ Wire readWire(ObjectReader r)
     w.wireTypeId = r.string("wireTypeId");
     w.conductorKind = r.enumValue("conductorKind", kConductorKinds, ConductorKind::Single);
     w.lengthOverrideMm = r.optionalNumber("lengthOverrideMm");
+    w.factory = r.boolean("factory", false);
     const QJsonArray route = r.array("routeSegmentIds");
     for (qsizetype i = 0; i < route.size(); ++i) {
         if (!route[i].isString())
@@ -600,6 +603,10 @@ QJsonObject writeConnector(const Connector &c)
     o[u"notes"] = c.notes;
     o[u"backshellPartNumber"] = c.backshellPartNumber;
     o[u"strainReliefPartNumber"] = c.strainReliefPartNumber;
+    if (c.factory)
+        o[u"factory"] = true;
+    else
+        o.remove(u"factory");
     QJsonArray pins;
     for (const Pin &p : c.pins)
         pins.append(writePin(p));
@@ -642,6 +649,10 @@ QJsonObject writeWire(const Wire &w)
         o[u"lengthOverrideMm"] = *w.lengthOverrideMm;
     else
         o.remove(u"lengthOverrideMm");
+    if (w.factory)
+        o[u"factory"] = true;
+    else
+        o.remove(u"factory");
     QJsonArray route;
     for (const QString &id : w.routeSegmentIds)
         route.append(id);

@@ -165,6 +165,7 @@ public:
 
     int type() const override { return FreeEndItemType; }
     QString id() const { return m_end.id; }
+    const FreeEnd &freeEnd() const { return m_end; }
     void setFreeEnd(const FreeEnd &end);
     void setHighlighted(bool on);
     // Tip of the lead on the side facing `towards` (scene coords).

@@ -108,6 +108,7 @@ private:
     QLineEdit *m_manufacturer;
     QLineEdit *m_backshell;
     QLineEdit *m_strainRelief;
+    QCheckBox *m_factory;
     QLineEdit *m_description;
     QComboBox *m_gender;
     CommitTextEdit *m_notes;

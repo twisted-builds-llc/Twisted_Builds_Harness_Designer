@@ -123,6 +123,10 @@ Loading fails with a message if:
 ```
 
 - `gender`: `none` | `male` | `female`.
+- `factory` (schema 3, optional, default `false`, written only when `true`): the connector is
+  part of an existing (factory) harness: drawn dashed, not counted in the BOM except the
+  terminals and seals of pins with non-factory wires, and left off pinouts unless such pins
+  exist.
 - `backshellPartNumber`, `strainReliefPartNumber` (schema 3, may be empty): the connector's
   backshell and the strain relief fitted at it (e.g. a zip tie or clamp on the backshell),
   counted in the BOM (strain relief with the layout ties).
@@ -162,6 +166,8 @@ Loading fails with a message if:
   get `C` + the next number (three digits or more); it is free text and may be edited.
   Duplicates load fine and are reported in the Problems panel.
 - `conductorKind`: only `single` in schema 1.
+- `factory` (schema 3, optional, default `false`, written only when `true`): the wire is part
+  of an existing (factory) harness: drawn dashed, left out of the BOM, cut list and pinouts.
 
 ## `splices.json`
 
@@ -178,7 +184,8 @@ more wires end on it.
 [ { "id": "fe1", "kind": "ringTerminal", "label": "GND", "terminalPartNumber": "RING-M6" } ]
 ```
 
-- `kind`: `flyingLead` | `eyelet` | `ringTerminal` | `bare`.
+- `kind`: `flyingLead` | `eyelet` | `ringTerminal` | `bare` | `cut` (schema 3: where a wire
+  was cut, e.g. a factory wire cut to splice in an add-on; never counted in the BOM).
 
 ## `layout.json`
 
@@ -381,7 +388,8 @@ supports are refused, never silently downgraded.
   number in `sealPartNumber`; the 2 to 3 migration moves it to `plugPartNumber` on pins with
   `isCavityPlug` and clears the seal. Wires gained `circuitId`; the migration numbers
   wires without one C001, C002, ... in file order. Other v0.1.1 schema additions also go in
-  schema 3.
+  schema 3: `factory` on connectors and wires and the `cut` free end kind (no migration;
+  absent means not factory).
 
 ## Parts CSV import (Parts Library > Import Parts CSV...)
 

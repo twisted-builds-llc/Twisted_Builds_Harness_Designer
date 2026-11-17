@@ -102,18 +102,27 @@ std::vector<PinoutTable> pinoutTables(const Harness &harness)
     for (const Connector &c : harness.connectors) {
         PinoutTable table{c.label, c.partNumber, c.description, {}, c.backshellPartNumber,
                           c.strainReliefPartNumber};
+        if (c.factory) { // already fitted
+            table.backshellPartNumber.clear();
+            table.strainReliefPartNumber.clear();
+        }
         for (const Pin &p : c.pins) {
             const PinRef ref{c.id, p.id};
             const size_t before = table.rows.size();
             for (const Wire &w : harness.wires) {
+                if (w.factory)
+                    continue;
                 for (const bool atEndA : {true, false}) {
                     const auto *end = std::get_if<PinRef>(atEndA ? &w.endA : &w.endB);
                     if (end && *end == ref)
                         table.rows.push_back(wireRow(harness, w, atEndA));
                 }
             }
-            if (table.rows.size() == before)
+            if (table.rows.size() == before) {
+                if (c.factory)
+                    continue; // only the add-on wires of a factory connector are built
                 table.rows.emplace_back();
+            }
             for (size_t i = before; i < table.rows.size(); ++i) {
                 table.rows[i].pin = p.label;
                 table.rows[i].circuit = p.circuitText;
@@ -121,11 +130,14 @@ std::vector<PinoutTable> pinoutTables(const Harness &harness)
                 table.rows[i].plugPartNumber = p.plugPartNumber;
             }
         }
-        tables.push_back(std::move(table));
+        if (!c.factory || !table.rows.empty())
+            tables.push_back(std::move(table));
     }
     for (const Splice &s : harness.splices) {
         PinoutTable table{s.label, s.partNumber, Tr::tr("Splice"), {}};
         for (const Wire &w : harness.wires) {
+            if (w.factory)
+                continue;
             for (const bool atEndA : {true, false}) {
                 const auto *end = std::get_if<SpliceRef>(atEndA ? &w.endA : &w.endB);
                 if (end && end->spliceId == s.id)

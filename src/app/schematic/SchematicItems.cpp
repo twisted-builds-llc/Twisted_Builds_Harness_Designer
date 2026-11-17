@@ -7,6 +7,7 @@
 
 #include <QApplication>
 #include <QFontMetricsF>
+#include <QCoreApplication>
 #include <QPainter>
 #include <QPainterPathStroker>
 #include <QStyleOptionGraphicsItem>
@@ -15,6 +16,15 @@
 #include <cmath>
 
 namespace tbh::app {
+
+namespace {
+// Translation context for this file (picked up by lupdate).
+class Tr
+{
+    Q_DECLARE_TR_FUNCTIONS(tbh::app::SchematicItems)
+};
+} // namespace
+
 
 namespace {
 
@@ -274,7 +284,8 @@ void ConnectorItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *opt
     const QRectF body = bodyRect();
     const qreal lod = option->levelOfDetailFromTransform(painter->worldTransform());
 
-    painter->setPen(QPen(border, 1));
+    // A factory connector (already there, not built) has a dashed outline.
+    painter->setPen(m_connector.factory ? QPen(text, 1.5, Qt::DashLine) : QPen(border, 1));
     painter->setBrush(base);
     painter->drawRoundedRect(body, 4, 4);
 
@@ -298,9 +309,11 @@ void ConnectorItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *opt
         font.setPixelSize(10);
         painter->setFont(font);
         painter->setPen(mix(text, base, 0.35));
+        QString subtitle = m_connector.partNumber;
+        if (m_connector.factory)
+            subtitle = subtitle.isEmpty() ? Tr::tr("Factory") : Tr::tr("Factory - %1").arg(subtitle);
         painter->drawText(QRectF(24, 26, kWidth - 124, 16), Qt::AlignLeft | Qt::AlignVCenter,
-                          painter->fontMetrics().elidedText(m_connector.partNumber, Qt::ElideRight,
-                                                            int(kWidth - 124)));
+                          painter->fontMetrics().elidedText(subtitle, Qt::ElideRight, int(kWidth - 124)));
 
         // Collapse arrow.
         painter->setPen(Qt::NoPen);
@@ -590,6 +603,15 @@ void FreeEndItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWi
         painter->setBrush(Qt::NoBrush);
         painter->drawEllipse(QPointF(0, 0), 7.5, 7.5);
         break;
+    case FreeEndKind::Cut:
+        // The wire broken by a gap with two slashes: --//--
+        painter->setPen(QPen(text, 2, Qt::SolidLine, Qt::FlatCap));
+        painter->drawLine(QPointF(-kHalfWidth, 0), QPointF(-5, 0));
+        painter->drawLine(QPointF(5, 0), QPointF(kHalfWidth, 0));
+        painter->setPen(QPen(text, 2, Qt::SolidLine, Qt::RoundCap));
+        for (qreal x : {-3.5, 3.5})
+            painter->drawLine(QPointF(x - 3, 7), QPointF(x + 3, -7));
+        break;
     }
 
     QFont font = painter->font();
@@ -752,18 +774,28 @@ void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
     QColor base = wireColor(m_wire.baseColor);
     if (!base.isValid())
         base = mix(pal.color(QPalette::Text), pal.color(QPalette::Base), 0.4);
+    // A factory wire (already there, not built) is drawn dashed and faded.
+    painter->save();
+    if (m_wire.factory)
+        painter->setOpacity(0.6);
+    auto wirePen = [&](const QColor &color, qreal width) {
+        QPen pen(color, width, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin);
+        if (m_wire.factory)
+            pen.setDashPattern({4 * kPenWidth / width, 2 * kPenWidth / width}); // same dashes at every width
+        return pen;
+    };
     // Thin outline keeps white/black wires visible on either theme.
-    painter->setPen(QPen(mix(pal.color(QPalette::Text), pal.color(QPalette::Base), 0.5), kPenWidth + 1.5,
-                         Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
+    painter->setPen(wirePen(mix(pal.color(QPalette::Text), pal.color(QPalette::Base), 0.5), kPenWidth + 1.5));
     painter->drawPath(m_path);
-    painter->setPen(QPen(base, kPenWidth, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
+    painter->setPen(wirePen(base, kPenWidth));
     painter->drawPath(m_path);
     const QColor stripe = wireColor(m_wire.stripeColor);
     if (stripe.isValid()) {
         // A tracer: one thin continuous stripe along the middle of the wire, as on real wire.
-        painter->setPen(QPen(stripe, kPenWidth * 0.4, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin));
+        painter->setPen(wirePen(stripe, kPenWidth * 0.4));
         painter->drawPath(m_path);
     }
+    painter->restore();
     if (isOffSheet()) {
         // A flag pointing away from the wire: the wire continues on another sheet.
         const QRectF r = m_tagRect;

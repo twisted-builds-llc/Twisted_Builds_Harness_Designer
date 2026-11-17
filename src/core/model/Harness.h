@@ -35,7 +35,8 @@ double mmToUnits(double mm, Units units);
 double unitsToMm(double value, Units units);
 enum class Gender { None, Male, Female };
 enum class GaugeSystem { Awg, Mm2 };
-enum class FreeEndKind { FlyingLead, Eyelet, RingTerminal, Bare };
+// Cut: where an existing (factory) wire was cut, e.g. to splice an add-on harness into it.
+enum class FreeEndKind { FlyingLead, Eyelet, RingTerminal, Bare, Cut };
 // End types used to look up strip/terminal allowances.
 enum class EndType { Pin, Splice, FlyingLead, Eyelet, RingTerminal, Bare };
 // Only Single in v1; twisted pair / shielded / multi-conductor come later (section 5.6).
@@ -94,6 +95,7 @@ struct Connector {
     std::vector<Pin> pins; // ordered, kMinPins..kMaxPins
     QString backshellPartNumber;     // empty = none
     QString strainReliefPartNumber;  // e.g. the zip tie or clamp on the backshell; empty = none
+    bool factory = false; // already exists (factory harness): drawn dimmed, not built or counted
     QJsonObject extra;
 
     bool operator==(const Connector &) const = default;
@@ -136,6 +138,7 @@ struct Wire {
     std::optional<double> lengthOverrideMm;
     std::vector<QString> routeSegmentIds; // manual route override, empty = automatic
     QString circuitId; // unique circuit number for build prints, e.g. "C001" (nextCircuitId)
+    bool factory = false; // already exists (factory harness): drawn dimmed, not cut or counted
     QJsonObject extra;
 
     bool operator==(const Wire &) const = default;

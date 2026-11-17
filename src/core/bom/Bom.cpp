@@ -78,6 +78,8 @@ Bom buildBom(const Harness &harness, const Library &library)
     using WireKey = std::tuple<QString, QString, int, double, QString>;
     std::map<WireKey, size_t> wireIndex;
     for (const Wire &w : harness.wires) {
+        if (w.factory)
+            continue;
         const calc::WireLength length = calc::wireLength(harness, graph, w);
         const WireType *type = library.wireType(w.wireTypeId);
         const QString typeName = type ? type->name : QString();
@@ -152,16 +154,38 @@ Bom buildBom(const Harness &harness, const Library &library)
     for (SleevingLine &line : bom.sleeving)
         line.lengthWithWasteMm = line.lengthMm * (1.0 + settings.wasteFactorSleevingPercent / 100.0);
 
-    // Parts.
+    // Parts. Only wires to be built (not factory wires) need terminals, seals and splices.
     QSet<QString> wiredPins;
+    QSet<QString> endsWithFactoryWires; // splices and free ends
+    QSet<QString> endsWithBuiltWires;
     for (const Wire &w : harness.wires) {
         for (const WireEnd *end : {&w.endA, &w.endB}) {
-            if (const auto *pin = std::get_if<PinRef>(end))
-                wiredPins.insert(pin->connectorId + QLatin1Char('/') + pin->pinId);
+            if (const auto *pin = std::get_if<PinRef>(end)) {
+                if (!w.factory)
+                    wiredPins.insert(pin->connectorId + QLatin1Char('/') + pin->pinId);
+            } else {
+                (w.factory ? endsWithFactoryWires : endsWithBuiltWires).insert(wireEndItemId(*end));
+            }
         }
     }
+    // Splices and free ends whose wires are all factory wires already exist.
+    auto alreadyExists = [&](const QString &id) {
+        return endsWithFactoryWires.contains(id) && !endsWithBuiltWires.contains(id);
+    };
     PartCounter parts;
     for (const Connector &c : harness.connectors) {
+        if (c.factory) {
+            // The housing is already there; add-on wires in its cavities still need terminals.
+            for (const Pin &p : c.pins) {
+                if (p.isCavityPlug || !wiredPins.contains(c.id + QLatin1Char('/') + p.id))
+                    continue;
+                const QString reference = QStringLiteral("%1 : %2").arg(c.label, p.label);
+                parts.add(PartCategory::Terminal, p.terminalPartNumber, {}, reference);
+                if (!p.sealPartNumber.trimmed().isEmpty())
+                    parts.add(PartCategory::Seal, p.sealPartNumber, {}, reference);
+            }
+            continue;
+        }
         parts.add(PartCategory::Connector, c.partNumber, c.description.isEmpty() ? c.manufacturer : c.description,
                   c.label);
         if (!c.backshellPartNumber.trimmed().isEmpty())
@@ -184,12 +208,17 @@ Bom buildBom(const Harness &harness, const Library &library)
         }
     }
     for (const FreeEnd &f : harness.freeEnds) {
+        if (f.kind == FreeEndKind::Cut || alreadyExists(f.id))
+            continue;
         const bool needsTerminal = f.kind == FreeEndKind::Eyelet || f.kind == FreeEndKind::RingTerminal;
         if (needsTerminal || !f.terminalPartNumber.trimmed().isEmpty())
             parts.add(PartCategory::Terminal, f.terminalPartNumber, {}, describeFreeEnd(f));
     }
-    for (const Splice &s : harness.splices)
+    for (const Splice &s : harness.splices) {
+        if (alreadyExists(s.id))
+            continue;
         parts.add(PartCategory::Splice, s.partNumber, {}, s.label);
+    }
     for (const LayoutAccessory &a : harness.accessories) {
         parts.add(a.kind == AccessoryKind::Label ? PartCategory::Label : PartCategory::Tie, a.partNumber, {},
                   a.text);

@@ -585,6 +585,64 @@ private slots:
         QVERIFY(f.model()->harness() == before);
     }
 
+    // Cutting a factory wire and splicing an add-on into it (ECU at x 0, SENSOR at x 600).
+    void cutWireThenSpliceTheCutEnds()
+    {
+        Fixture f;
+        Harness start = placedSample();
+        start.wires[0].factory = true; // w1: ECU 1 to SENSOR 1
+        start.wires[0].routeSegmentIds = {u"seg1"_s, u"seg2"_s};
+        f.reset(start);
+        const Harness before = f.model()->harness();
+        auto loadable = [&] {
+            QString error;
+            QVERIFY2(io::deserializeHarness(io::serializeHarness(f.model()->harness()), &error), qPrintable(error));
+        };
+
+        f.view.cutWireAt(u"w1"_s, QPointF(300, 40));
+        const Harness &h = f.model()->harness();
+        QCOMPARE(h.wires.size(), before.wires.size() + 1);
+        const Wire &first = *f.model()->find<Wire>(u"w1"_s);
+        const Wire &second = h.wires.back();
+        QCOMPARE(first.endA, before.wires[0].endA);
+        QCOMPARE(second.endB, before.wires[0].endB);
+        QVERIFY(first.routeSegmentIds.empty()); // each piece routes on its own
+        QVERIFY(second.factory);                // both pieces stay factory wires
+        QVERIFY(!second.circuitId.isEmpty());
+        QVERIFY(second.circuitId != first.circuitId);
+        const QString cutA = std::get<FreeEndRef>(first.endB).freeEndId;
+        const QString cutB = std::get<FreeEndRef>(second.endA).freeEndId;
+        QCOMPARE(f.model()->find<FreeEnd>(cutA)->kind, FreeEndKind::Cut);
+        QCOMPARE(f.model()->find<FreeEnd>(cutB)->kind, FreeEndKind::Cut);
+        // End A's cut end is on end A's (ECU's) side of the cut.
+        QVERIFY(f.model()->placement(cutA)->position.x() < 300);
+        QVERIFY(f.model()->placement(cutB)->position.x() > 300);
+        QCOMPARE(f.selection.selection().wires, (QSet<QString>{u"w1"_s, second.id}));
+        loadable();
+
+        // One cut end becomes a splice where it was; the other piece is re-attached to it,
+        // which removes its now unused cut end.
+        const QPointF cutAPosition = f.model()->placement(cutA)->position;
+        f.view.replaceWithSplice(cutA);
+        QVERIFY(!f.model()->find<FreeEnd>(cutA));
+        QCOMPARE(h.splices.size(), before.splices.size() + 1);
+        const QString spliceId = h.splices.back().id;
+        QCOMPARE(h.splices.back().label, u"S2"_s);
+        QCOMPARE(f.model()->find<Wire>(u"w1"_s)->endB, WireEnd(SpliceRef{spliceId}));
+        QCOMPARE(f.model()->placement(spliceId)->position, cutAPosition);
+        f.document.undoStack()->push(setWireEnd(f.model(), second.id, false, SpliceRef{spliceId}).release());
+        QVERIFY(!f.model()->find<FreeEnd>(cutB));
+        QCOMPARE(h.freeEnds.size(), before.freeEnds.size());
+        loadable();
+
+        for (int i = 0; i < 3; ++i)
+            f.document.undoStack()->undo();
+        QVERIFY(f.model()->harness() == before);
+        for (int i = 0; i < 3; ++i)
+            f.document.undoStack()->redo();
+        QVERIFY(!f.model()->find<FreeEnd>(cutB));
+    }
+
     void shrinkingPinsRemovesTheirWires()
     {
         Fixture f;
@@ -1115,6 +1173,19 @@ private slots:
         f.view.centerOn(QPointF(350, 120));
         f.view.scale(2, 2);
         f.view.grab().save(imageDir() + u"/schematic-free-ends.png"_s);
+
+        // A factory harness (dashed) cut and spliced into an add-on.
+        Harness addOn = placedSample();
+        addOn.connectors[1].factory = true;
+        addOn.wires[0].factory = true;
+        addOn.wires[0].baseColor = u"GRN"_s;
+        addOn.wires[0].gauge = {18, GaugeSystem::Awg};
+        f.reset(addOn);
+        f.view.cutWireAt(u"w1"_s, QPointF(510, 56)); // between ECU and SENSOR
+        f.view.replaceWithSplice(std::get<FreeEndRef>(f.model()->find<Wire>(u"w1"_s)->endB).freeEndId);
+        f.view.resize(1400, 900);
+        f.view.zoomToFit();
+        f.view.grab().save(imageDir() + u"/schematic-cut-factory.png"_s);
         f.view.resetTransform();
 
         // Whole window, dark theme, with a wire and then a connector selected.

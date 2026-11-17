@@ -53,6 +53,7 @@ EndType endType(const Harness &harness, const WireEnd &end)
     case FreeEndKind::RingTerminal:
         return EndType::RingTerminal;
     case FreeEndKind::Bare:
+    case FreeEndKind::Cut: // a cut wire end is stripped like a bare end
         return EndType::Bare;
     }
     Q_UNREACHABLE_RETURN(EndType::Bare);

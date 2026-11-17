@@ -78,6 +78,11 @@ public:
     // Shows the sheet holding the far end of an off-sheet wire, with the wire selected.
     void goToOtherSheet(const QString &wireId);
 
+    // Cuts a wire at a schematic point (two cut ends either side) / replaces a cut end with
+    // a new splice, so an add-on can be spliced in. One undo step each.
+    void cutWireAt(const QString &wireId, const QPointF &scenePos);
+    void replaceWithSplice(const QString &freeEndId);
+
 signals:
     void statusMessage(const QString &message);
 
