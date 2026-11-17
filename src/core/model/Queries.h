@@ -79,6 +79,8 @@ struct LayoutRef
     QString label;
 };
 
+// "18 AWG", "0.5 mm²".
+QString gaugeText(const Gauge &gauge);
 // Reads a wire size as gaugeText() shows it: "18 AWG", "18", "0.5 mm²", "0.5 mm2", "0.5mm"
 // (locale or C decimal point). No unit means AWG. Empty or unreadable text gives nullopt.
 std::optional<Gauge> parseGauge(const QString &text);

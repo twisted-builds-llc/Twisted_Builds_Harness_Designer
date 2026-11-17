@@ -4,6 +4,7 @@
 // Small editor widgets shared by the properties panels.
 
 #include "model/Harness.h"
+#include "model/Queries.h" // gaugeText()
 
 #include <QComboBox>
 #include <QPlainTextEdit>
@@ -62,6 +63,5 @@ private:
     QComboBox *m_system;
 };
 
-QString gaugeText(const Gauge &gauge);
 
 } // namespace tbh::app

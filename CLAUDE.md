@@ -73,8 +73,7 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
 - **Current work: v0.1.1 feature set** (touch pinch/pan, pin table bulk edit, plug column, circuit
   IDs, connect-from-pin, connector/terminal/seal library, layout labels, backshells/strain relief).
   Plan, decisions and progress: `docs/V0.1.1_PLAN.md` - read it and keep its checkboxes current.
-- Still open (not in any finished milestone): connector/terminal/seal autofill library (5.7),
-  UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
+- Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
   translations for languages other than English.
 - User preferences: inches by default (mm/cm optional, set in Edit > Preferences); work on a
   branch per milestone and merge/push to `main` only when the user says so.

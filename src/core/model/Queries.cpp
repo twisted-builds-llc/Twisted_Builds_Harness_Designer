@@ -232,6 +232,13 @@ QString describeWire(const Harness &harness, const Wire &wire)
     return wire.name.isEmpty() ? ends : QStringLiteral("%1 (%2)").arg(wire.name, ends);
 }
 
+QString gaugeText(const Gauge &gauge)
+{
+    const QString value = QString::number(gauge.value);
+    return gauge.system == GaugeSystem::Awg ? QStringLiteral("%1 AWG").arg(value)
+                                            : QStringLiteral("%1 mm²").arg(value);
+}
+
 std::optional<Gauge> parseGauge(const QString &text)
 {
     QString t = text.trimmed().toLower();

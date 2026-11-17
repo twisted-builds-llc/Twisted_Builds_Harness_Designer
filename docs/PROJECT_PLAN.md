@@ -137,8 +137,9 @@ Wires reference a `conductorKind` that is `single` in v1. Leave room for `twiste
 - **Wire types**: id, name (e.g. "GXL", "TXL"), per-gauge **outer diameter** table
 - **Sleeving catalog**: id, name/type (braided, split loom, heat shrink...), size label,
   nominal inner diameter (and fully-recovered diameter for heat shrink)
-- **Connectors / terminals / seals**: part numbers and descriptions for autofill
-  (not built yet: M4 delivered wire types and sleeving; autofill is still open)
+- **Connectors / terminals / seals / plugs**: housings with cavity labels and compatible
+  parts, terminal wire size and insulation ranges; autofill in the connector panel, CSV
+  import, fit warnings (built for v0.1.1, see `docs/V0.1.1_PLAN.md` step 3)
 - Seed values shipped in `resources/default-library/` are **approximate defaults and must be
   labeled as such in the UI**; users are expected to verify against manufacturer datasheets.
   Do not present seeded numbers as authoritative.

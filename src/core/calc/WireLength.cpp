@@ -2,6 +2,7 @@
 #include "calc/WireLength.h"
 
 #include "calc/Bundle.h"
+#include "calc/PartFit.h"
 #include "model/Queries.h"
 
 #include <QCoreApplication>
@@ -265,6 +266,7 @@ std::vector<Problem> findProblems(const Harness &harness, const Library &library
         problems.push_back({Problem::Kind::UnroutedWire, w.id,
                             Tr::tr("Wire %1 is not routed: %2.").arg(describeWire(harness, w), reason)});
     }
+    addPartProblems(harness, library, problems);
     QHash<QString, int> circuitUses;
     for (const Wire &w : harness.wires) {
         const QString id = w.circuitId.trimmed();

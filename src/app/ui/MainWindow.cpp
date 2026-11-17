@@ -303,7 +303,13 @@ void MainWindow::createDocks()
     connect(problems, &ProblemsPanel::problemActivated, this,
             [this](calc::Problem::Kind kind, const QString &id) {
                 Selection selection;
-                if (kind == calc::Problem::Kind::UnroutedWire
+                if (kind == calc::Problem::Kind::PartMismatch) {
+                    if (m_document->model()->find<Connector>(id))
+                        selection.connectors.insert(id);
+                    else
+                        selection.freeEnds.insert(id);
+                    showEditor(m_schematic);
+                } else if (kind == calc::Problem::Kind::UnroutedWire
                     || kind == calc::Problem::Kind::DuplicateCircuitId) {
                     selection.wires.insert(id);
                     showEditor(m_schematic);

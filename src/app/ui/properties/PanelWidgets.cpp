@@ -92,13 +92,6 @@ void WireColorCombo::setMixed()
     lineEdit()->setPlaceholderText(tr("(multiple)"));
 }
 
-QString gaugeText(const Gauge &gauge)
-{
-    const QString value = QString::number(gauge.value);
-    return gauge.system == GaugeSystem::Awg ? QStringLiteral("%1 AWG").arg(value)
-                                            : QStringLiteral("%1 mm²").arg(value);
-}
-
 GaugeEditor::GaugeEditor(QWidget *parent)
     : QWidget(parent)
     , m_value(new QComboBox(this))

@@ -102,7 +102,9 @@ std::optional<double> spliceRunLengthMm(const Harness &harness, const QString &s
 
 struct Problem
 {
-    enum class Kind { UnroutedWire, SegmentWithoutLength, SleevingTooSmall, DuplicateCircuitId };
+    // PartMismatch: itemId is the connector or free end whose part does not suit its wire
+    // or housing (see calc/PartFit.h).
+    enum class Kind { UnroutedWire, SegmentWithoutLength, SleevingTooSmall, DuplicateCircuitId, PartMismatch };
     Kind kind;
     QString itemId; // wire or segment id
     QString message;
@@ -110,7 +112,8 @@ struct Problem
 
 // Issues the user should fix: unrouted wires, segments without a length, assigned
 // sleeving too small for its bundle (needs the effective library), and circuit ids used by
-// more than one wire (one problem per id, on its second wire).
+// more than one wire (one problem per id, on its second wire), and connector parts that do
+// not suit their wires or housing (partProblems()).
 std::vector<Problem> findProblems(const Harness &harness, const Library &library);
 
 } // namespace tbh::calc
