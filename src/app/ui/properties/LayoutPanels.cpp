@@ -379,7 +379,9 @@ AccessoryPanel::AccessoryPanel(Document *document, QWidget *parent)
     form->addRow(tr("&Kind:"), m_kind);
     form->addRow(tr("&Part number:"), m_partNumber);
     form->addRow(m_labelFields);
-    form->addRow(tr("&Distance:"), distanceRow);
+    auto *distanceLabel = new QLabel(tr("&Distance:"), this);
+    distanceLabel->setBuddy(m_distance);
+    form->addRow(distanceLabel, distanceRow);
     form->addRow(m_distanceNote);
     form->addRow(tr("&Notes:"), m_notes);
     auto *layout = new QVBoxLayout(this);

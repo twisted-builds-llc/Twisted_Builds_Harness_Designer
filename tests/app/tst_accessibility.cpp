@@ -17,6 +17,7 @@
 #include <QAccessible>
 #include <QComboBox>
 #include <QDir>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QSettings>
@@ -60,6 +61,18 @@ QStringList unnamedInputs(QWidget *root)
     return missing;
 }
 
+// Visible labels with a "&" shortcut but no buddy: Qt draws the "&" instead of a shortcut.
+QStringList labelsShowingAmpersand(QWidget *root)
+{
+    QStringList bad;
+    for (QLabel *label : root->findChildren<QLabel *>()) {
+        if (label->isVisible() && label->textFormat() != Qt::RichText && !label->buddy()
+            && label->text().contains(u'&') && !label->text().contains(u"&&"_s))
+            bad << label->text();
+    }
+    return bad;
+}
+
 } // namespace
 
 class TestAccessibility : public QObject
@@ -96,6 +109,9 @@ private slots:
             const QStringList missing = unnamedInputs(&window);
             QVERIFY2(missing.isEmpty(), qPrintable(QStringLiteral("%1: %2").arg(QLatin1StringView(state),
                                                                                missing.join(u", "_s))));
+            const QStringList ampersands = labelsShowingAmpersand(&window);
+            QVERIFY2(ampersands.isEmpty(), qPrintable(QStringLiteral("%1: %2").arg(QLatin1StringView(state),
+                                                                                  ampersands.join(u", "_s))));
         };
         check("nothing selected");
         Selection s;

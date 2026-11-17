@@ -15,6 +15,7 @@
 #include <QAbstractItemView>
 #include <QCompleter>
 #include <QRegularExpression>
+#include <QScreen>
 #include <QStandardItemModel>
 #include <QTimer>
 #include <QToolButton>
@@ -353,9 +354,43 @@ void showCompletions(QCompleter *completer, const QString &prefix)
     completer->complete();
 }
 
+// Qt keeps a completer list on screen using the field's width, before the list's minimum
+// width (set in showCompletions) makes it wider. Pull the widened list back onto the field's
+// screen as it opens, so it does not run off the edge onto another monitor.
+class KeepPopupOnScreen : public QObject
+{
+public:
+    explicit KeepPopupOnScreen(QCompleter *completer)
+        : QObject(completer)
+        , m_completer(completer)
+    {
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() == QEvent::Show && m_completer->widget()) {
+            auto *popup = static_cast<QWidget *>(watched);
+            const QRect screen = m_completer->widget()->screen()->availableGeometry();
+            QRect geometry = popup->geometry();
+            geometry.setWidth(std::min(geometry.width(), screen.width()));
+            if (geometry.right() > screen.right())
+                geometry.moveRight(screen.right());
+            if (geometry.left() < screen.left())
+                geometry.moveLeft(screen.left());
+            if (geometry != popup->geometry())
+                popup->setGeometry(geometry);
+        }
+        return false;
+    }
+
+private:
+    QCompleter *m_completer;
+};
+
 QCompleter *partCompleter(QStandardItemModel *items, QWidget *parent)
 {
     auto *completer = new QCompleter(items, parent);
+    completer->popup()->installEventFilter(new KeepPopupOnScreen(completer));
     completer->setCompletionRole(Qt::UserRole);
     completer->setCaseSensitivity(Qt::CaseInsensitive);
     completer->setFilterMode(Qt::MatchContains);
@@ -611,7 +646,11 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
 
     auto *form = new QFormLayout;
     form->addRow(tr("&Label:"), m_label);
-    form->addRow(tr("&Part number:"), partNumberRow);
+    // A row holding a layout gets no buddy, so the label is made here to keep its shortcut
+    // (otherwise Qt shows the "&" itself).
+    auto *partNumberLabel = new QLabel(tr("&Part number:"), this);
+    partNumberLabel->setBuddy(m_partNumber);
+    form->addRow(partNumberLabel, partNumberRow);
     form->addRow(tr("&Manufacturer:"), m_manufacturer);
     form->addRow(tr("&Description:"), m_description);
     form->addRow(tr("&Gender:"), m_gender);
