@@ -79,14 +79,13 @@ private slots:
 
     void failureIsReported()
     {
-        // The recovery folder is replaced by a plain file: writing must fail, and say so.
+        // A folder sits where the recovery file goes: writing must fail, and say so. (The
+        // recovery folder itself cannot be removed here: Windows keeps the session's open
+        // lock file in it.)
         Document document;
         Autosave autosave(&document);
         rename(document, u"Unprotected"_s);
-        QDir(Autosave::recoveryDirectory()).removeRecursively();
-        QFile blocker(Autosave::recoveryDirectory());
-        QVERIFY(blocker.open(QIODevice::WriteOnly));
-        blocker.close();
+        QVERIFY(QDir().mkpath(autosave.recoveryFile()));
         QSignalSpy failed(&autosave, &Autosave::saveFailed);
         QSignalSpy saved(&autosave, &Autosave::saved);
         QString error;
@@ -95,7 +94,7 @@ private slots:
         QCOMPARE(failed.size(), 1);
         QCOMPARE(failed.front().front().toString(), error);
         QCOMPARE(saved.size(), 0);
-        QFile::remove(Autosave::recoveryDirectory());
+        QDir(autosave.recoveryFile()).removeRecursively();
     }
 
     void ownSessionIsNotOffered()
