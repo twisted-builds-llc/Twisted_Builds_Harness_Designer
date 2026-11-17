@@ -775,6 +775,22 @@ qreal WireItem::runX() const
     return m_runX.value_or((stubEnd(m_a).x() + stubEnd(m_b).x()) / 2);
 }
 
+std::optional<qreal> WireItem::runDistance(const QPointF &scenePos) const
+{
+    const qreal top = std::min(m_a.point.y(), m_b.point.y());
+    const qreal bottom = std::max(m_a.point.y(), m_b.point.y());
+    if (isOffSheet() || bottom - top < 1e-6 || scenePos.y() < top || scenePos.y() > bottom)
+        return std::nullopt;
+    return std::abs(scenePos.x() - runX());
+}
+
+QVariant WireItem::itemChange(GraphicsItemChange change, const QVariant &value)
+{
+    if (change == ItemSelectedHasChanged)
+        setZValue(value.toBool() ? kSelectedZ : 0);
+    return QGraphicsItem::itemChange(change, value);
+}
+
 QRectF WireItem::boundingRect() const
 {
     return m_path.boundingRect().united(m_tagRect).adjusted(-6, -6, 6, 6);

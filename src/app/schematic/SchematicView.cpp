@@ -103,6 +103,26 @@ SchematicView::DropTarget SchematicView::targetAt(const QPointF &scenePos) const
     return target;
 }
 
+WireItem *SchematicView::wireToDragAt(const QPoint &viewPos) const
+{
+    const QPointF scenePos = mapToScene(viewPos);
+    WireItem *best = nullptr;
+    std::optional<qreal> bestDistance;
+    for (QGraphicsItem *item : items(viewPos)) { // topmost first: it wins ties
+        if (item->type() != WireItemType)
+            continue;
+        auto *wire = static_cast<WireItem *>(item);
+        if (!best)
+            best = wire;
+        const std::optional<qreal> distance = wire->runDistance(scenePos);
+        if (distance && (!bestDistance || *distance < *bestDistance)) {
+            best = wire;
+            bestDistance = distance;
+        }
+    }
+    return best;
+}
+
 bool SchematicView::isLeadAt(const QPointF &scenePos) const
 {
     for (QGraphicsItem *item : m_scene->items(scenePos)) {
@@ -197,7 +217,17 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
         return;
     }
 
+    if (item && item->type() == WireItemType) {
+        // Wires overlap where they share a pin row or run: grab the one whose vertical run
+        // (what a drag moves) is under the mouse, not just the topmost. Raised above the
+        // others for the press so the view selects it too.
+        WireItem *grabbed = wireToDragAt(event->pos());
+        grabbed->setZValue(WireItem::kSelectedZ + 0.1);
+        item = grabbed;
+    }
     CanvasView::mousePressEvent(event);
+    if (item && item->type() == WireItemType)
+        item->setZValue(item->isSelected() ? WireItem::kSelectedZ : 0);
     if (item && item->type() == WireItemType && m_tool == Tool::Select
         && !static_cast<WireItem *>(item)->isOffSheet()) {
         auto *wire = static_cast<WireItem *>(item);

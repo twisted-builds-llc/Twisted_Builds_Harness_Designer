@@ -108,6 +108,8 @@ private:
     };
 
     DropTarget targetAt(const QPointF &scenePos) const;
+    // Of the wires under `viewPos`, the one whose vertical run is nearest (topmost if none).
+    WireItem *wireToDragAt(const QPoint &viewPos) const;
     // True over a pin lead or splice lead (drag handles for wires).
     bool isLeadAt(const QPointF &scenePos) const;
     void setHover(const DropTarget &target);

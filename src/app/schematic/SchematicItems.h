@@ -210,6 +210,12 @@ public:
     void setRunX(qreal x);
     // Scene x of the vertical run as drawn.
     qreal runX() const;
+    // Horizontal distance from `scenePos` to the vertical run, if `scenePos` is level with it
+    // (none for a straight or off-sheet wire). Picks which of several wires under the
+    // mouse a drag moves.
+    std::optional<qreal> runDistance(const QPointF &scenePos) const;
+    // Selected wires are drawn above the others.
+    static constexpr qreal kSelectedZ = 0.5;
 
     // Off-sheet: the other end is on another sheet. The wire is drawn as a lead out of `a`
     // to a tag reading `tag` (e.g. "J3 : 2 (Dash)"); setRoute() turns it back to normal.
@@ -228,6 +234,9 @@ public:
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
+
+protected:
+    QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
 
 private:
     Wire m_wire;

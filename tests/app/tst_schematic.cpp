@@ -1075,6 +1075,62 @@ private slots:
         QCOMPARE(f.scene()->connectorItem(id)->pos(), QPointF(600, 0));
     }
 
+    // Where wires lie on top of each other, a drag grabs the wire whose vertical run is under
+    // the mouse, not the topmost one whose horizontal leg passes there, and a stack of runs
+    // comes apart one wire per drag.
+    void draggingOverlappingWiresGrabsTheRunUnderTheMouse()
+    {
+        Fixture f;
+        Harness h;
+        h.connectors = {makeConnector(u"A"_s, 3), makeConnector(u"B"_s, 3)};
+        h.schematic.placements[h.connectors[0].id] = SchematicPlacement{QPointF(0, 0), false, 0, {}};
+        h.schematic.placements[h.connectors[1].id] = SchematicPlacement{QPointF(600, 0), false, 0, {}};
+        auto add = [&](const QString &id, int pinA, int pinB) {
+            Wire w;
+            w.id = id;
+            w.endA = PinRef{h.connectors[0].id, h.connectors[0].pins[size_t(pinA)].id};
+            w.endB = PinRef{h.connectors[1].id, h.connectors[1].pins[size_t(pinB)].id};
+            h.wires.push_back(w);
+        };
+        // All runs default to x 450 (see draggingWireMovesItsVerticalRun). Rows are at
+        // y 56, 76 and 96: w1 runs 56..96, w2 96..56, w3 is straight along 76, w4 runs
+        // 56..76 and is the topmost wire.
+        add(u"w1"_s, 0, 2);
+        add(u"w2"_s, 2, 0);
+        add(u"w3"_s, 1, 1);
+        add(u"w4"_s, 0, 1);
+        f.reset(h);
+        auto runs = [&] {
+            QList<qreal> x;
+            for (const QString &id : {u"w1"_s, u"w2"_s, u"w3"_s, u"w4"_s})
+                x << f.scene()->wireItem(id)->runX();
+            return x;
+        };
+        QCOMPARE(runs(), (QList<qreal>{450, 450, 450, 450}));
+
+        // Drag 40 px right from (450, 61), 5 px below row 1, three times.
+        auto drag = [&] {
+            const QPoint grab = f.toView(QPointF(450, 61));
+            const QPoint drop = f.toView(QPointF(490, 61));
+            QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, grab);
+            QTest::mouseMove(f.view.viewport(), grab + QPoint(10, 0));
+            QTest::mouseMove(f.view.viewport(), drop);
+            QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, drop);
+        };
+        // The topmost run there (w4) moves first, to 450 + 40 = 490.
+        drag();
+        QCOMPARE(runs(), (QList<qreal>{450, 450, 450, 490}));
+        QCOMPARE(f.selection.selection().wires, QSet<QString>{u"w4"_s});
+        // w4's horizontal leg still crosses (450, 61); w2's run under it is grabbed instead.
+        drag();
+        QCOMPARE(runs(), (QList<qreal>{450, 490, 450, 490}));
+        QCOMPARE(f.selection.selection().wires, QSet<QString>{u"w2"_s});
+        QCOMPARE(f.scene()->wireItem(u"w2"_s)->zValue(), WireItem::kSelectedZ); // drawn on top
+        QCOMPARE(f.scene()->wireItem(u"w4"_s)->zValue(), 0.0);
+        drag();
+        QCOMPARE(runs(), (QList<qreal>{490, 490, 450, 490}));
+    }
+
     void draggingWireMovesItsVerticalRun()
     {
         Fixture f;
