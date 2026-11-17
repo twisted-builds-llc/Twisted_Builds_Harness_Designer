@@ -681,14 +681,16 @@ std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString
 }
 
 std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wireId, bool endB,
-                                         const WireEnd &newEnd)
+                                         const WireEnd &newEnd, WireLead lead)
 {
     const Wire *current = model->find<Wire>(wireId);
     if (!current)
         return nullptr;
     const WireEnd &oldEnd = endB ? current->endB : current->endA;
     const WireEnd &otherEnd = endB ? current->endA : current->endB;
-    if (newEnd == oldEnd || newEnd == otherEnd)
+    if (std::holds_alternative<PinRef>(newEnd))
+        lead = WireLead::Auto; // pins have one lead
+    if ((newEnd == oldEnd && lead == (endB ? current->leadB : current->leadA)) || newEnd == otherEnd)
         return nullptr;
 
     auto macro = std::make_unique<QUndoCommand>(Tr::tr("Re-attach wire"));
@@ -696,6 +698,7 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
     Wire &updated = *std::find_if(after.wires.begin(), after.wires.end(),
                                   [&](const Wire &w) { return w.id == wireId; });
     (endB ? updated.endB : updated.endA) = newEnd;
+    (endB ? updated.leadB : updated.leadA) = lead;
     updated.routeSegmentIds.clear();
     const CircuitTextFill fill = fillEmptyCircuitText(after, {wireId});
     new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
@@ -739,6 +742,11 @@ std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId
     second.circuitId = nextCircuitId(h);
     second.endA = FreeEndRef{endB.id};
     second.endB = current->endB;
+    second.leadB = current->leadB;
+    // Each piece leaves its cut end on the lead facing away from the other cut end, so an
+    // add-on drawn from the open lead stays clear of it.
+    first.leadB = cutA.x() <= cutB.x() ? WireLead::Left : WireLead::Right;
+    second.leadA = first.leadB == WireLead::Left ? WireLead::Right : WireLead::Left;
     // The second piece is drawn on the sheets the wire was; a dragged route no longer fits.
     Placements secondPlacements;
     if (const SchematicPlacement *sheets = model->placement(Schematic::wireSheetKey(wireId)))

@@ -168,6 +168,10 @@ Loading fails with a message if:
 - `conductorKind`: only `single` in schema 1.
 - `factory` (schema 3, optional, default `false`, written only when `true`): the wire is part
   of an existing (factory) harness: drawn dashed, left out of the BOM, cut list and pinouts.
+- `leadA` / `leadB` (schema 3, optional, default `auto`, written only when not `auto`):
+  `left` | `right`, the lead of the splice or free end at that end the wire leaves from on
+  the schematic (the item's own left/right). `auto`: a splice wire meets the dot, a free end
+  wire the lead facing the wire's other end. Ignored on pin ends.
 
 ## `splices.json`
 
@@ -388,8 +392,8 @@ supports are refused, never silently downgraded.
   number in `sealPartNumber`; the 2 to 3 migration moves it to `plugPartNumber` on pins with
   `isCavityPlug` and clears the seal. Wires gained `circuitId`; the migration numbers
   wires without one C001, C002, ... in file order. Other v0.1.1 schema additions also go in
-  schema 3: `factory` on connectors and wires and the `cut` free end kind (no migration;
-  absent means not factory).
+  schema 3: `factory` on connectors and wires, the `cut` free end kind and wire
+  `leadA`/`leadB` (no migration; absent means not factory and `auto` leads).
 
 ## Parts CSV import (Parts Library > Import Parts CSV...)
 

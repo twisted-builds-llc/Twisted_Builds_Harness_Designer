@@ -132,10 +132,11 @@ std::unique_ptr<QUndoCommand> setDistanceAlongRun(HarnessModel *model, const QSt
 
 // Moves one end of a wire to `newEnd` (re-attach); any manual route is dropped. The old
 // end's item (e.g. a free end) stays, except a cut end left without wires, which is removed.
-// Empty circuit text is filled across the wire as in addWire(). Returns null if nothing
-// changes or both ends would be the same item.
+// Empty circuit text is filled across the wire as in addWire(). `lead` is the splice or free
+// end lead it uses; the same end with another lead moves the wire to that lead. Returns null
+// if nothing changes or both ends would be the same item.
 std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wireId, bool endB,
-                                         const WireEnd &newEnd);
+                                         const WireEnd &newEnd, WireLead lead = WireLead::Auto);
 
 // Cuts a wire in two, as when an existing (factory) wire is cut to splice in an add-on: the
 // wire keeps end A and now ends on a new cut end at `cutA`; a copy with a new id and the next

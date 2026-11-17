@@ -66,6 +66,8 @@ constexpr EnumName<EndType> kEndTypes[] = {{EndType::Pin, "pin"},
                                            {EndType::RingTerminal, "ringTerminal"},
                                            {EndType::Bare, "bare"}};
 constexpr EnumName<ConductorKind> kConductorKinds[] = {{ConductorKind::Single, "single"}};
+constexpr EnumName<WireLead> kWireLeads[] = {
+    {WireLead::Auto, "auto"}, {WireLead::Left, "left"}, {WireLead::Right, "right"}};
 constexpr EnumName<LayoutNodeType> kLayoutNodeTypes[] = {{LayoutNodeType::Connector, "connector"},
                                                          {LayoutNodeType::Branch, "branch"},
                                                          {LayoutNodeType::Splice, "splice"},
@@ -332,6 +334,8 @@ Wire readWire(ObjectReader r)
     w.conductorKind = r.enumValue("conductorKind", kConductorKinds, ConductorKind::Single);
     w.lengthOverrideMm = r.optionalNumber("lengthOverrideMm");
     w.factory = r.boolean("factory", false);
+    w.leadA = r.enumValue("leadA", kWireLeads, WireLead::Auto);
+    w.leadB = r.enumValue("leadB", kWireLeads, WireLead::Auto);
     const QJsonArray route = r.array("routeSegmentIds");
     for (qsizetype i = 0; i < route.size(); ++i) {
         if (!route[i].isString())
@@ -653,6 +657,12 @@ QJsonObject writeWire(const Wire &w)
         o[u"factory"] = true;
     else
         o.remove(u"factory");
+    for (auto [key, lead] : {std::pair{u"leadA"_s, w.leadA}, std::pair{u"leadB"_s, w.leadB}}) {
+        if (lead == WireLead::Auto)
+            o.remove(key);
+        else
+            o[key] = enumToString(kWireLeads, lead);
+    }
     QJsonArray route;
     for (const QString &id : w.routeSegmentIds)
         route.append(id);

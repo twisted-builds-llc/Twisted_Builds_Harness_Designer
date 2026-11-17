@@ -41,6 +41,9 @@ enum class FreeEndKind { FlyingLead, Eyelet, RingTerminal, Bare, Cut };
 enum class EndType { Pin, Splice, FlyingLead, Eyelet, RingTerminal, Bare };
 // Only Single in v1; twisted pair / shielded / multi-conductor come later (section 5.6).
 enum class ConductorKind { Single };
+// Which lead of a splice or free end a wire end uses on the schematic (in the item's own
+// left/right). Auto: a splice wire meets the dot, a free end wire the lead facing it.
+enum class WireLead { Auto, Left, Right };
 enum class LayoutNodeType { Connector, Branch, Splice, FlyingLead, Eyelet };
 // Only Full in v1 (sleeving covers the whole segment).
 enum class SleevingCoverage { Full };
@@ -139,6 +142,8 @@ struct Wire {
     std::vector<QString> routeSegmentIds; // manual route override, empty = automatic
     QString circuitId; // unique circuit number for build prints, e.g. "C001" (nextCircuitId)
     bool factory = false; // already exists (factory harness): drawn dimmed, not cut or counted
+    WireLead leadA = WireLead::Auto; // splice/free end lead each end uses; ignored on pins
+    WireLead leadB = WireLead::Auto;
     QJsonObject extra;
 
     bool operator==(const Wire &) const = default;

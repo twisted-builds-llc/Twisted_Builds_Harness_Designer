@@ -294,6 +294,7 @@ Anchor SchematicScene::endAnchor(const Wire &wire, bool endB) const
 {
     const WireEnd &end = endB ? wire.endB : wire.endA;
     const WireEnd &other = endB ? wire.endA : wire.endB;
+    const WireLead lead = endB ? wire.leadB : wire.leadA;
     // The other end's position means nothing on another sheet: face right, towards the tag.
     const bool sameSheet = wireSheets(m_model->harness(), wire).drawnOn(m_sheet);
     const QPointF towards = sameSheet ? endReference(other) : endReference(end) + QPointF(1e5, 0);
@@ -302,9 +303,9 @@ Anchor SchematicScene::endAnchor(const Wire &wire, bool endB) const
             return item->pinAnchor(item->rowOfPin(pin->pinId), towards);
     } else if (const auto *splice = std::get_if<SpliceRef>(&end)) {
         if (auto *item = m_splices.value(splice->spliceId))
-            return item->anchor();
+            return item->anchor(lead);
     } else if (auto *item = m_freeEnds.value(std::get<FreeEndRef>(end).freeEndId)) {
-        return item->anchor(towards);
+        return item->anchor(towards, lead);
     }
     return {};
 }

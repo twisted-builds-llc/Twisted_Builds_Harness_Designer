@@ -104,13 +104,14 @@ private:
         int row = -1;
         SpliceItem *splice = nullptr;
         FreeEndItem *freeEnd = nullptr;
+        WireLead lead = WireLead::Auto; // splice or free end lead under the point
     };
 
     DropTarget targetAt(const QPointF &scenePos) const;
     // True over a pin lead or splice lead (drag handles for wires).
     bool isLeadAt(const QPointF &scenePos) const;
     void setHover(const DropTarget &target);
-    void beginWire(const WireEnd &start, const QPoint &pressPos);
+    void beginWire(const WireEnd &start, const QPoint &pressPos, WireLead lead = WireLead::Auto);
     void updateWirePreview(const QPointF &scenePos);
     void finishWire(const QPointF &scenePos);
     void cancelWire();
@@ -154,6 +155,7 @@ private:
     bool m_wireDrawing = false;
     QPoint m_pressPos;
     WireEnd m_wireStart;
+    WireLead m_wireStartLead = WireLead::Auto;
     QGraphicsPathItem *m_preview = nullptr;
     ConnectorItem *m_hoverConnector = nullptr;
     SpliceItem *m_hoverSplice = nullptr;

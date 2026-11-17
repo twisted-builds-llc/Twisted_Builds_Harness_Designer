@@ -90,11 +90,13 @@ SchematicView::DropTarget SchematicView::targetAt(const QPointF &scenePos) const
         if (item->type() == SpliceItemType) {
             target.splice = static_cast<SpliceItem *>(item);
             target.end = SpliceRef{target.splice->id()};
+            target.lead = target.splice->leadAt(item->mapFromScene(scenePos));
             return target;
         }
         if (item->type() == FreeEndItemType) {
             target.freeEnd = static_cast<FreeEndItem *>(item);
             target.end = FreeEndRef{target.freeEnd->id()};
+            target.lead = target.freeEnd->leadAt(item->mapFromScene(scenePos));
             return target;
         }
     }
@@ -185,11 +187,13 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
         }
     } else if (item && item->type() == SpliceItemType
                && (m_tool == Tool::Wire || static_cast<SpliceItem *>(item)->isStubAt(item->mapFromScene(scenePos)))) {
-        beginWire(SpliceRef{static_cast<SpliceItem *>(item)->id()}, event->pos());
+        auto *splice = static_cast<SpliceItem *>(item);
+        beginWire(SpliceRef{splice->id()}, event->pos(), splice->leadAt(item->mapFromScene(scenePos)));
         return;
     } else if (item && item->type() == FreeEndItemType
                && (m_tool == Tool::Wire || static_cast<FreeEndItem *>(item)->isStubAt(item->mapFromScene(scenePos)))) {
-        beginWire(FreeEndRef{static_cast<FreeEndItem *>(item)->id()}, event->pos());
+        auto *freeEnd = static_cast<FreeEndItem *>(item);
+        beginWire(FreeEndRef{freeEnd->id()}, event->pos(), freeEnd->leadAt(item->mapFromScene(scenePos)));
         return;
     }
 
@@ -234,9 +238,9 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
         if (target.connector)
             end = target.connector->pinAnchor(target.row, from);
         else if (target.splice)
-            end = target.splice->anchor();
+            end = target.splice->anchor(target.lead);
         else if (target.freeEnd)
-            end = target.freeEnd->anchor(from);
+            end = target.freeEnd->anchor(from, target.lead);
         if (wire)
             m_preview->setPath(WireItem::routePath(m_scene->endAnchor(*wire, !m_reattachEndB), end));
         return;
@@ -384,11 +388,12 @@ void SchematicView::keyPressEvent(QKeyEvent *event)
 
 // ---- wire drawing ---------------------------------------------------------------
 
-void SchematicView::beginWire(const WireEnd &start, const QPoint &pressPos)
+void SchematicView::beginWire(const WireEnd &start, const QPoint &pressPos, WireLead lead)
 {
     m_wirePending = true;
     m_wireDrawing = false;
     m_wireStart = start;
+    m_wireStartLead = lead;
     m_pressPos = pressPos;
 }
 
@@ -399,9 +404,9 @@ Anchor SchematicView::startAnchor(const QPointF &towards) const
             return item->pinAnchor(item->rowOfPin(pin->pinId), towards);
     } else if (const auto *splice = std::get_if<SpliceRef>(&m_wireStart)) {
         if (auto *item = m_scene->spliceItem(splice->spliceId))
-            return item->anchor();
+            return item->anchor(m_wireStartLead);
     } else if (auto *item = m_scene->freeEndItem(std::get<FreeEndRef>(m_wireStart).freeEndId)) {
-        return item->anchor(towards);
+        return item->anchor(towards, m_wireStartLead);
     }
     return {};
 }
@@ -414,9 +419,9 @@ void SchematicView::updateWirePreview(const QPointF &scenePos)
     if (target.connector)
         end = target.connector->pinAnchor(target.row, startAnchor(scenePos).point);
     else if (target.splice)
-        end = target.splice->anchor();
+        end = target.splice->anchor(target.lead);
     else if (target.freeEnd)
-        end = target.freeEnd->anchor(startAnchor(scenePos).point);
+        end = target.freeEnd->anchor(startAnchor(scenePos).point, target.lead);
     m_preview->setPath(WireItem::routePath(startAnchor(end.point), end));
 }
 
@@ -424,11 +429,14 @@ void SchematicView::finishWire(const QPointF &scenePos)
 {
     const DropTarget target = targetAt(scenePos);
     const WireEnd start = m_wireStart;
+    const WireLead startLead = m_wireStartLead;
     cancelWire();
     if (target.end && *target.end == start)
         return; // dropped back on the start
 
     Wire wire = newWire(start);
+    wire.leadA = startLead;
+    wire.leadB = target.lead; // Auto on a pin or empty space
     const QString id = wire.id;
     QUndoStack *stack = m_document->undoStack();
     stack->beginMacro(tr("Add wire"));
@@ -497,7 +505,7 @@ void SchematicView::finishReattach(const QPointF &scenePos)
     const DropTarget target = targetAt(scenePos);
     QUndoStack *stack = m_document->undoStack();
     if (target.end) {
-        if (auto command = setWireEnd(m_document->model(), wireId, endB, *target.end))
+        if (auto command = setWireEnd(m_document->model(), wireId, endB, *target.end, target.lead))
             stack->push(command.release());
     } else {
         // Dropped on empty space: the end moves to a new flying lead there.

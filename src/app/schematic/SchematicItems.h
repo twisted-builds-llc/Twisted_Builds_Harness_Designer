@@ -136,10 +136,13 @@ public:
     QString id() const { return m_splice.id; }
     void setSplice(const Splice &splice);
     void setHighlighted(bool on);
-    Anchor anchor() const { return {scenePos(), 0}; }
+    // The dot (Auto), or the tip of the left or right lead.
+    Anchor anchor(WireLead lead = WireLead::Auto) const;
     // True if `itemPos` is on one of the short leads left and right of the dot, which
     // start a wire when dragged (the dot itself moves the splice).
     bool isStubAt(const QPointF &itemPos) const;
+    // The lead at `itemPos`, Auto if none.
+    WireLead leadAt(const QPointF &itemPos) const;
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
@@ -168,9 +171,11 @@ public:
     const FreeEnd &freeEnd() const { return m_end; }
     void setFreeEnd(const FreeEnd &end);
     void setHighlighted(bool on);
-    // Tip of the lead on the side facing `towards` (scene coords).
-    Anchor anchor(const QPointF &towards) const;
+    // Tip of `lead`, or for Auto of the lead on the side facing `towards` (scene coords).
+    Anchor anchor(const QPointF &towards, WireLead lead = WireLead::Auto) const;
     bool isStubAt(const QPointF &itemPos) const;
+    // The lead at `itemPos`, Auto if none.
+    WireLead leadAt(const QPointF &itemPos) const;
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;

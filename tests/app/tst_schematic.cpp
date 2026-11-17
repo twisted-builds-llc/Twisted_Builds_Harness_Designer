@@ -643,6 +643,102 @@ private slots:
         QVERIFY(!f.model()->find<FreeEnd>(cutB));
     }
 
+    // A wire keeps the splice lead it was drawn from or dropped on, even when it heads off to
+    // the other side (several wires on one side of a splice, connectors on both sides).
+    void wireKeepsTheSpliceLeadItUses()
+    {
+        Fixture f;
+        f.reset(placedSample()); // splice sp at (400, 200), SENSOR at x 600, LAMP at (600, 300)
+        f.view.show();
+        QTest::qWait(20);
+        f.view.resetTransform();
+        f.view.centerOn(QPointF(450, 200));
+        const Harness &h = f.model()->harness();
+        SpliceItem *splice = f.scene()->spliceItem(u"sp"_s);
+        // Middle of the left lead: x = -(kRadius + 1 + kStubLength / 2) = -(6 + 1 + 7) = -14.
+        const QPoint leftLead = f.toView(splice->mapToScene(QPointF(-14, 0)));
+        // Left lead tip: x = 400 - (6 + 1 + 14) = 379.
+        const QPointF leftTip(379, 200);
+        auto drag = [&](QPoint from, QPoint to) {
+            QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, from);
+            QTest::mouseMove(f.view.viewport(), from - QPoint(20, 0));
+            QTest::mouseMove(f.view.viewport(), to);
+            QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, to);
+        };
+
+        // From the splice's left lead to SENSOR pin 2, which is to the right.
+        ConnectorItem *sensor = f.scene()->connectorItem(u"sensor"_s);
+        const size_t wires = h.wires.size();
+        drag(leftLead, f.toView(sensor->mapToScene(sensor->circuitCellRect(1).center())));
+        QCOMPARE(h.wires.size(), wires + 1);
+        QCOMPARE(h.wires.back().endA, WireEnd(SpliceRef{u"sp"_s}));
+        QCOMPARE(h.wires.back().leadA, WireLead::Left);
+        QCOMPARE(f.scene()->endAnchor(h.wires.back(), false).point, leftTip);
+
+        // From LAMP pin 1 (to the right) dropped on the splice's left lead.
+        ConnectorItem *lamp = f.scene()->connectorItem(u"lamp"_s);
+        drag(f.toView(lamp->mapToScene(lamp->circuitCellRect(0).center())), leftLead);
+        QCOMPARE(h.wires.size(), wires + 2);
+        QCOMPARE(h.wires.back().endB, WireEnd(SpliceRef{u"sp"_s}));
+        QCOMPARE(h.wires.back().leadB, WireLead::Left);
+        QCOMPARE(f.scene()->endAnchor(h.wires.back(), true).point, leftTip);
+
+        // Dropped on the dot instead: Auto, the wire meets the dot as before.
+        drag(f.toView(lamp->mapToScene(lamp->circuitCellRect(0).center())), f.toView(splice->scenePos()));
+        QCOMPARE(h.wires.back().leadB, WireLead::Auto);
+        QCOMPARE(f.scene()->endAnchor(h.wires.back(), true).point, QPointF(400, 200));
+
+        // Re-attaching an end to the other lead of the same splice moves it there (one undo step).
+        const QString wireId = h.wires.back().id;
+        f.document.undoStack()->push(
+            setWireEnd(f.model(), wireId, true, SpliceRef{u"sp"_s}, WireLead::Right).release());
+        QCOMPARE(f.model()->find<Wire>(wireId)->leadB, WireLead::Right);
+        QVERIFY(!setWireEnd(f.model(), wireId, true, SpliceRef{u"sp"_s}, WireLead::Right)); // no change
+        f.document.undoStack()->undo();
+        QCOMPARE(f.model()->find<Wire>(wireId)->leadB, WireLead::Auto);
+    }
+
+    // An add-on drawn from a cut end's open lead stays on that lead, even when it heads off
+    // past the factory piece's side (it used to jump to the lead the factory piece uses).
+    void wireFromCutEndKeepsTheOpenLead()
+    {
+        Fixture f;
+        Harness start = placedSample();
+        start.wires[0].factory = true; // w1: ECU 1 (x 0) to SENSOR 1 (x 600)
+        f.reset(start);
+        f.view.cutWireAt(u"w1"_s, QPointF(300, 40));
+        const Harness &h = f.model()->harness();
+        const QString secondId = h.wires.back().id;
+        const QString cutB = std::get<FreeEndRef>(h.wires.back().endA).freeEndId; // SENSOR side
+        FreeEndItem *cut = f.scene()->freeEndItem(cutB);
+        const QPointF at = cut->scenePos();
+        // Each piece uses the lead facing away from the other cut end; SENSOR's piece the right.
+        // Lead tips: x = at.x -/+ (kHalfWidth + kStubLength) = at.x -/+ (12 + 14) = at.x -/+ 26.
+        QCOMPARE(h.wires.back().leadA, WireLead::Right);
+        QCOMPARE(f.model()->find<Wire>(u"w1"_s)->leadB, WireLead::Left);
+        QCOMPARE(f.scene()->endAnchor(h.wires.back(), false).point, at + QPointF(26, 0));
+
+        // Drag from the open (left) lead, x = -19, onto LAMP (x 600, right of the cut).
+        f.view.show();
+        QTest::qWait(20);
+        f.view.resetTransform();
+        f.view.centerOn(at);
+        const QPoint lead = f.toView(cut->mapToScene(QPointF(-19, 0)));
+        ConnectorItem *lamp = f.scene()->connectorItem(u"lamp"_s);
+        const QPoint pin = f.toView(lamp->mapToScene(lamp->circuitCellRect(0).center()));
+        const size_t wires = h.wires.size();
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, lead);
+        QTest::mouseMove(f.view.viewport(), lead - QPoint(20, 0));
+        QTest::mouseMove(f.view.viewport(), pin);
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, pin);
+        QCOMPARE(h.wires.size(), wires + 1);
+        const Wire &addOn = h.wires.back();
+        QCOMPARE(addOn.endA, WireEnd(FreeEndRef{cutB}));
+        QCOMPARE(f.scene()->endAnchor(addOn, false).point, at - QPointF(26, 0));
+        // The factory piece keeps its lead.
+        QCOMPARE(f.scene()->endAnchor(*f.model()->find<Wire>(secondId), false).point, at + QPointF(26, 0));
+    }
+
     void shrinkingPinsRemovesTheirWires()
     {
         Fixture f;

@@ -457,10 +457,26 @@ QRectF SpliceItem::stubRect(bool right)
     return right ? QRectF(kRadius + 1, -5, kStubLength, 10) : QRectF(-kRadius - 1 - kStubLength, -5, kStubLength, 10);
 }
 
+Anchor SpliceItem::anchor(WireLead lead) const
+{
+    if (lead == WireLead::Auto)
+        return {scenePos(), 0};
+    const bool right = lead == WireLead::Right;
+    const qreal x = kRadius + 1 + kStubLength;
+    return {mapToScene(QPointF(right ? x : -x, 0)), right ? 1 : -1};
+}
+
 bool SpliceItem::isStubAt(const QPointF &itemPos) const
 {
     return (stubRect(false).contains(itemPos) || stubRect(true).contains(itemPos))
            && std::hypot(itemPos.x(), itemPos.y()) > kRadius + 1;
+}
+
+WireLead SpliceItem::leadAt(const QPointF &itemPos) const
+{
+    if (!isStubAt(itemPos))
+        return WireLead::Auto;
+    return itemPos.x() > 0 ? WireLead::Right : WireLead::Left;
 }
 
 QPainterPath SpliceItem::shape() const
@@ -522,9 +538,9 @@ void FreeEndItem::setHighlighted(bool on)
     update();
 }
 
-Anchor FreeEndItem::anchor(const QPointF &towards) const
+Anchor FreeEndItem::anchor(const QPointF &towards, WireLead lead) const
 {
-    const bool right = mapFromScene(towards).x() >= 0;
+    const bool right = lead == WireLead::Auto ? mapFromScene(towards).x() >= 0 : lead == WireLead::Right;
     const qreal x = kHalfWidth + kStubLength;
     return {mapToScene(QPointF(right ? x : -x, 0)), right ? 1 : -1};
 }
@@ -537,6 +553,13 @@ QRectF FreeEndItem::stubRect(bool right)
 bool FreeEndItem::isStubAt(const QPointF &itemPos) const
 {
     return stubRect(false).contains(itemPos) || stubRect(true).contains(itemPos);
+}
+
+WireLead FreeEndItem::leadAt(const QPointF &itemPos) const
+{
+    if (!isStubAt(itemPos))
+        return WireLead::Auto;
+    return itemPos.x() > 0 ? WireLead::Right : WireLead::Left;
 }
 
 QRectF FreeEndItem::boundingRect() const

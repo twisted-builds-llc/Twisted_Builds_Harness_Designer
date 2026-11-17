@@ -76,12 +76,14 @@ Harness sampleHarness()
     toSplice.baseColor = u"BLK"_s;
     toSplice.gauge = {0.5, GaugeSystem::Mm2};
     toSplice.factory = true;
+    toSplice.leadB = WireLead::Left;
 
     Wire toRing;
     toRing.id = u"w3"_s;
     toRing.endA = SpliceRef{u"sp1"_s};
     toRing.endB = FreeEndRef{u"fe-ring"_s};
     toRing.baseColor = u"BLK"_s;
+    toRing.leadA = WireLead::Right;
     h.wires = {pinToPin, toSplice, toRing};
     h.freeEnds = {FreeEnd{u"fe-ring"_s, FreeEndKind::RingTerminal, u"GND"_s, u"RING-M6"_s, {}},
                   FreeEnd{u"fe-cut"_s, FreeEndKind::Cut, {}, {}, {}}};

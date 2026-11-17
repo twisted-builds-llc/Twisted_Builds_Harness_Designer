@@ -75,7 +75,8 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   Connect Pin To, connector/terminal/seal/plug library with seed data, CSV import and fit
   warnings, layout labels with covers, zip ties, backshells/strain relief, cutting a wire
   (Cut Wire Here / Replace Cut with Splice) and factory wires/connectors left out of the
-  BOM for add-on harnesses; schema 3). Tagged
+  BOM for add-on harnesses; wires remember the splice/free end lead they use, `Wire::leadA/leadB`;
+  schema 3). Tagged
   `v0.1.1` from that branch for a draft release the user is testing. **Not merged to `main`**:
   merge only when the user says so. Details and decisions: `docs/V0.1.1_PLAN.md`.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
