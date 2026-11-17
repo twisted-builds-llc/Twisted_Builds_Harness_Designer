@@ -355,6 +355,7 @@ void SchematicScene::onAdded(EntityKind kind, const QString &id)
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
     case EntityKind::BomExtra:
+    case EntityKind::LayoutAccessory:
         break;
     case EntityKind::Note:
         addNote(*m_model->find<Note>(id));
@@ -383,6 +384,7 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
     case EntityKind::BomExtra:
+    case EntityKind::LayoutAccessory:
         break;
     case EntityKind::Note:
         if (NoteItem *item = m_notes.value(id)) {
@@ -426,6 +428,7 @@ void SchematicScene::onRemoved(EntityKind kind, const QString &id)
     case EntityKind::LayoutNode:
     case EntityKind::LayoutSegment:
     case EntityKind::BomExtra:
+    case EntityKind::LayoutAccessory:
         break;
     case EntityKind::Note:
         delete m_notes.take(id);

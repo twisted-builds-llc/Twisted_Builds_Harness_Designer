@@ -7,7 +7,7 @@
 
 namespace tbh {
 
-enum class EntityKind { Connector, Wire, Splice, FreeEnd, LayoutNode, LayoutSegment, Note, BomExtra };
+enum class EntityKind { Connector, Wire, Splice, FreeEnd, LayoutNode, LayoutSegment, Note, BomExtra, LayoutAccessory };
 
 template<typename T>
 constexpr EntityKind entityKindOf();
@@ -27,6 +27,8 @@ template<>
 constexpr EntityKind entityKindOf<Note>() { return EntityKind::Note; }
 template<>
 constexpr EntityKind entityKindOf<BomExtra>() { return EntityKind::BomExtra; }
+template<>
+constexpr EntityKind entityKindOf<LayoutAccessory>() { return EntityKind::LayoutAccessory; }
 
 // Owns the Harness being edited. Views read from it and react to its signals;
 // they never mutate it directly but push QUndoCommands that call the mutators.
@@ -53,7 +55,8 @@ public:
     void setInfo(const HarnessInfo &info);
     void setSettings(const Settings &settings);
 
-    // T is Connector, Wire, Splice, FreeEnd, LayoutNode, LayoutSegment, Note or BomExtra.
+    // T is Connector, Wire, Splice, FreeEnd, LayoutNode, LayoutSegment, Note, BomExtra or
+    // LayoutAccessory.
     template<typename T>
     const T *find(const QString &id) const;
     template<typename T>

@@ -189,6 +189,12 @@ more wires end on it.
       "sleevingCoverage": "full", "sleevingId": "", "bend": { "x": 0.5, "y": 0.25 }
     }
   ],
+  "accessories": [
+    {
+      "coverLengthMm": 38.1, "coverSleevingId": "seed-hs2-3-8", "id": "acc1", "kind": "label",
+      "notes": "", "offsetMm": 50.8, "partNumber": "LBL-1", "segmentId": "seg1", "text": "ECU-A"
+    }
+  ],
   "notes": [
     { "id": "note1", "position": { "x": -40, "y": 120 }, "text": "Signal is blue, not yellow" }
   ]
@@ -216,6 +222,12 @@ more wires end on it.
   `layout.json` and `schematic.json`.
 - `bend` and `notes` (here and in `schematic.json`) were added without a `schemaVersion`
   change: files without them load as before.
+- `accessories` (schema 3): things fitted along the loom and counted in the BOM. `kind`:
+  `label` (an identification label; `text` is what is printed on it, `coverSleevingId` +
+  `coverLengthMm` an optional protective cover such as clear heat shrink, counted in the
+  sleeving totals) or `tie` (zip tie / strain relief; no cover). Each sits on `segmentId`,
+  `offsetMm` from the segment's `nodeA` along its entered length. `partNumber`, `notes` free
+  text. The segment must exist.
 
 ## `schematic.json`
 

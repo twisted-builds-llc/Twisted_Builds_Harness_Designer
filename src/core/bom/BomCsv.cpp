@@ -75,6 +75,10 @@ QString categoryName(PartCategory c)
         return Tr::tr("Cavity plug");
     case PartCategory::Splice:
         return Tr::tr("Splice");
+    case PartCategory::Label:
+        return Tr::tr("Label");
+    case PartCategory::Tie:
+        return Tr::tr("Tie / strain relief");
     }
     return {};
 }
@@ -137,10 +141,10 @@ QString sectionToCsv(const Bom &bom, CsvSection section, Units units)
                         !c.cutMm ? Tr::tr("not routed") : (c.overridden ? Tr::tr("manual length") : QString())});
         break;
     case CsvSection::Sleeving:
-        csv += row({Tr::tr("Type"), Tr::tr("Size"), Tr::tr("Segments"), Tr::tr("Length (%1)").arg(u),
+        csv += row({Tr::tr("Type"), Tr::tr("Size"), Tr::tr("Pieces"), Tr::tr("Length (%1)").arg(u),
                     Tr::tr("Length with waste (%1)").arg(u)});
         for (const SleevingLine &s : bom.sleeving)
-            csv += row({s.family, s.known ? s.sizeLabel : Tr::tr("(not in library)"), QString::number(s.segments),
+            csv += row({s.family, s.known ? s.sizeLabel : Tr::tr("(not in library)"), QString::number(s.pieces),
                         length(s.lengthMm, units), length(s.lengthWithWasteMm, units)});
         break;
     case CsvSection::Parts:

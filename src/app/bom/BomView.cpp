@@ -68,6 +68,10 @@ QString categoryName(bom::PartCategory c)
         return QCoreApplication::translate("tbh::app::BomView", "Cavity plug");
     case bom::PartCategory::Splice:
         return QCoreApplication::translate("tbh::app::BomView", "Splice");
+    case bom::PartCategory::Label:
+        return QCoreApplication::translate("tbh::app::BomView", "Label");
+    case bom::PartCategory::Tie:
+        return QCoreApplication::translate("tbh::app::BomView", "Tie / strain relief");
     }
     return {};
 }
@@ -84,7 +88,7 @@ BomView::BomView(Document *document, QWidget *parent)
     , m_cutList(makeTable({tr("Circuit ID"), tr("Wire"), tr("End A"), tr("End B"), tr("Color"), tr("Gauge"), tr("Wire type"),
                            tr("Cut length"), tr("Note")},
                           this))
-    , m_sleeving(makeTable({tr("Type"), tr("Size"), tr("Segments"), tr("Length"), tr("With waste")}, this))
+    , m_sleeving(makeTable({tr("Type"), tr("Size"), tr("Pieces"), tr("Length"), tr("With waste")}, this))
     , m_parts(makeTable({tr("Category"), tr("Part number"), tr("Description"), tr("Qty"), tr("Used at")}, this))
     , m_extras(makeTable({tr("Part number"), tr("Description"), tr("Qty"), tr("Unit"), tr("Notes")}, this))
 {
@@ -236,7 +240,7 @@ void BomView::refresh()
             flag(family, tr("This sleeving is not in the parts library."));
         m_sleeving->setItem(r, 0, family);
         m_sleeving->setItem(r, 1, cell(s.known ? s.sizeLabel : tr("(not in library)")));
-        m_sleeving->setItem(r, 2, cell(QString::number(s.segments), true));
+        m_sleeving->setItem(r, 2, cell(QString::number(s.pieces), true));
         m_sleeving->setItem(r, 3, cell(formatLength(s.lengthMm, units), true));
         m_sleeving->setItem(r, 4, cell(formatLength(s.lengthWithWasteMm, units), true));
     }

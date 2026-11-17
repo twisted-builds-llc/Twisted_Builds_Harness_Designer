@@ -92,6 +92,20 @@ Harness sampleHarness()
         LayoutSegment{u"seg2"_s, u"n2"_s, u"n3"_s, 0.1, {}, u"sleeve-x"_s, SleevingCoverage::Full, std::nullopt, {}},
         LayoutSegment{u"seg3"_s, u"n2"_s, u"n4"_s, 75.0, {}, {}, SleevingCoverage::Full, QPointF(0.5, -0.25), {}},
     };
+    LayoutAccessory label;
+    label.id = u"acc1"_s;
+    label.segmentId = u"seg1"_s;
+    label.offsetMm = 50.8;
+    label.text = u"ECU-A"_s;
+    label.partNumber = u"LBL-1"_s;
+    label.coverSleevingId = u"hs-clear"_s;
+    label.coverLengthMm = 38.1;
+    LayoutAccessory tie;
+    tie.id = u"acc2"_s;
+    tie.kind = AccessoryKind::Tie;
+    tie.segmentId = u"seg3"_s;
+    tie.notes = u"at the branch"_s;
+    h.accessories = {label, tie};
     // Layout notes first: files list layout.json notes before schematic.json notes.
     h.notes = {Note{u"note1"_s, NoteCanvas::Layout, u"Signal is blue, not yellow"_s, QPointF(-40, 120.5), {}},
                Note{u"note2"_s, NoteCanvas::Schematic, u"Check ECU pinout rev B"_s, QPointF(500, -80), {}}};
@@ -173,6 +187,7 @@ private slots:
         QVERIFY(loaded->splices == original.splices);
         QVERIFY(loaded->layoutNodes == original.layoutNodes);
         QVERIFY(loaded->layoutSegments == original.layoutSegments);
+        QVERIFY(loaded->accessories == original.accessories);
         QVERIFY(loaded->notes == original.notes);
         QVERIFY(loaded->otherEntries == original.otherEntries);
         QVERIFY(loaded->schematic == original.schematic);
@@ -353,6 +368,16 @@ private slots:
         QVERIFY(withWire([](QJsonObject &w) {
                     w[u"routeSegmentIds"] = QJsonArray{u"nope"_s};
                 }).contains(u"nope"));
+        // An accessory on a missing segment.
+        QVERIFY(readErrorAfter([](io::ZipEntries &e) {
+                    QJsonObject layout = QJsonDocument::fromJson(e.at(u"layout.json"_s)).object();
+                    QJsonArray accessories = layout[u"accessories"].toArray();
+                    QJsonObject a = accessories[0].toObject();
+                    a[u"segmentId"] = u"nope"_s;
+                    accessories[0] = a;
+                    layout[u"accessories"] = accessories;
+                    e[u"layout.json"_s] = toBytes(layout);
+                }).contains(u"acc1"));
     }
 
     // Schema 2 had no plug part number: a cavity plug's part number was typed in the seal

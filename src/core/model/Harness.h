@@ -194,6 +194,26 @@ struct LayoutSegment {
 enum class NoteCanvas { Schematic, Layout };
 
 // Free text on a canvas. Drawing only.
+// Something fitted along the loom, counted in the BOM: an identification label (with an
+// optional protective cover such as clear heat shrink) or a tie / strain relief. It sits on
+// a layout segment, `offsetMm` from the segment's nodeA along its entered length.
+enum class AccessoryKind { Label, Tie };
+
+struct LayoutAccessory {
+    QString id;
+    AccessoryKind kind = AccessoryKind::Label;
+    QString segmentId;
+    double offsetMm = 0.0;
+    QString text;            // labels: what is printed on it
+    QString partNumber;      // label stock, tie part
+    QString coverSleevingId; // labels: protective cover (library sleeving id), empty = none
+    double coverLengthMm = 0.0;
+    QString notes;
+    QJsonObject extra;
+
+    bool operator==(const LayoutAccessory &) const = default;
+};
+
 struct Note {
     QString id;
     NoteCanvas canvas = NoteCanvas::Layout;
@@ -395,6 +415,7 @@ struct Harness {
     std::vector<FreeEnd> freeEnds;
     std::vector<LayoutNode> layoutNodes;
     std::vector<LayoutSegment> layoutSegments;
+    std::vector<LayoutAccessory> accessories; // layout.json "accessories"
     std::vector<Note> notes; // both canvases; layout.json and schematic.json hold their own
     Schematic schematic;
     Library library; // embedded library entries (library.json)

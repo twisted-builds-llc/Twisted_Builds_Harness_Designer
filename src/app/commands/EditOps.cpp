@@ -372,9 +372,26 @@ std::unique_ptr<QUndoCommand> updateWires(HarnessModel *model, const std::vector
     return macro;
 }
 
+namespace {
+
+// Removes the accessories in `ids` and those on `segmentIds`, from the back so recorded
+// indices restore the original order on undo.
+void removeAccessories(HarnessModel *model, const QSet<QString> &ids, const QSet<QString> &segmentIds,
+                       QUndoCommand *macro)
+{
+    const auto &accessories = model->harness().accessories;
+    for (auto it = accessories.rbegin(); it != accessories.rend(); ++it) {
+        if (ids.contains(it->id) || segmentIds.contains(it->segmentId))
+            new RemoveEntityCommand<LayoutAccessory>(model, it->id, {}, macro);
+    }
+}
+
+} // namespace
+
 std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<QString> &nodeIds,
                                                 const QSet<QString> &segmentIds,
-                                                const QSet<QString> &noteIds)
+                                                const QSet<QString> &noteIds,
+                                                const QSet<QString> &accessoryIds)
 {
     const Harness &h = model->harness();
     QSet<QString> segments = segmentIds;
@@ -392,6 +409,7 @@ std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<
             new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
         }
     }
+    removeAccessories(model, accessoryIds, segments, macro.get());
     // Remove from the back so recorded indices restore the original order on undo.
     for (auto it = h.layoutSegments.rbegin(); it != h.layoutSegments.rend(); ++it) {
         if (segments.contains(it->id))
@@ -438,8 +456,18 @@ std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString 
     second.extra = {};
     if (newSegmentId)
         *newSegmentId = second.id;
+    const double splitMm = first.lengthMm;
+    const QString secondId = second.id;
     new UpdateEntityCommand<LayoutSegment>(model, std::move(first), {}, macro.get());
     new AddEntityCommand<LayoutSegment>(model, std::move(second), {}, {}, macro.get());
+    for (const LayoutAccessory &a : h.accessories) {
+        if (a.segmentId != segmentId || a.offsetMm <= splitMm || splitMm <= 0)
+            continue;
+        LayoutAccessory moved = a;
+        moved.segmentId = secondId;
+        moved.offsetMm = a.offsetMm - splitMm;
+        new UpdateEntityCommand<LayoutAccessory>(model, std::move(moved), {}, macro.get());
+    }
     return macro;
 }
 
@@ -640,6 +668,7 @@ std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString
             new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
         }
     }
+    removeAccessories(model, {}, between, macro.get());
     // Remove from the back so recorded indices restore the original order on undo.
     for (auto it = h.layoutSegments.rbegin(); it != h.layoutSegments.rend(); ++it) {
         if (between.contains(it->id))

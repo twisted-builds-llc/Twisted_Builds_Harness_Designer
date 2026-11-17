@@ -71,7 +71,7 @@ private slots:
         const Bom bom = buildBom(bomSample(), bomLibrary());
         QCOMPARE(bom.sleeving.size(), size_t(3));
         QCOMPARE(bom.sleeving[0].sizeLabel, u"1/4 in"_s);
-        QCOMPARE(bom.sleeving[0].segments, 2);
+        QCOMPARE(bom.sleeving[0].pieces, 2);
         QCOMPARE(bom.sleeving[0].lengthMm, 750.0);          // 300 + 450
         QCOMPARE(bom.sleeving[0].lengthWithWasteMm, 787.5); // 750 * 1.05
         QCOMPARE(bom.sleeving[1].lengthWithWasteMm, 126.0); // 120 * 1.05
@@ -101,6 +101,42 @@ private slots:
         QCOMPARE(bom.parts.front().category, PartCategory::Connector);
         QCOMPARE(bom.parts.front().partNumber, u"ECU-PN"_s);
         QVERIFY(bom.parts[1].partNumber.isEmpty());
+    }
+
+    void labelsAndTies()
+    {
+        Harness h = bomSample();
+        auto add = [&](const QString &id, AccessoryKind kind, const QString &segment, const QString &text,
+                       const QString &partNumber, const QString &cover, double coverMm) {
+            LayoutAccessory a;
+            a.id = id;
+            a.kind = kind;
+            a.segmentId = segment;
+            a.text = text;
+            a.partNumber = partNumber;
+            a.coverSleevingId = cover;
+            a.coverLengthMm = coverMm;
+            h.accessories.push_back(a);
+        };
+        add(u"a1"_s, AccessoryKind::Label, u"seg1"_s, u"ECU"_s, u"LBL-1"_s, u"hs"_s, 40);
+        add(u"a2"_s, AccessoryKind::Label, u"seg2"_s, u"SENSOR"_s, u"LBL-1"_s, u"hs"_s, 40);
+        add(u"a3"_s, AccessoryKind::Label, u"seg2"_s, u"LOGO"_s, u"LBL-2"_s, {}, 0); // no cover
+        add(u"a4"_s, AccessoryKind::Tie, u"seg3"_s, {}, u"TIE-1"_s, u"pet-6"_s, 99); // ties have no cover
+        const Bom bom = buildBom(h, bomLibrary());
+        // Shrink "hs": seg3 120 + two covers 40 + 40 = 200 mm in 3 pieces; with waste 210.
+        QCOMPARE(bom.sleeving[1].sleevingId, u"hs"_s);
+        QCOMPARE(bom.sleeving[1].pieces, 3);
+        QCOMPARE(bom.sleeving[1].lengthMm, 200.0);
+        QCOMPARE(bom.sleeving[1].lengthWithWasteMm, 210.0);
+        // PET is unchanged by the tie: 2 pieces, 750 mm.
+        QCOMPARE(bom.sleeving[0].pieces, 2);
+        QCOMPARE(bom.sleeving[0].lengthMm, 750.0);
+        QCOMPARE(findPart(bom, PartCategory::Label, u"LBL-1"_s)->quantity, 2);
+        QCOMPARE(findPart(bom, PartCategory::Label, u"LBL-1"_s)->references, (QStringList{u"ECU"_s, u"SENSOR"_s}));
+        QCOMPARE(findPart(bom, PartCategory::Label, u"LBL-2"_s)->quantity, 1);
+        QCOMPARE(findPart(bom, PartCategory::Tie, u"TIE-1"_s)->quantity, 1);
+        // Labels and ties come after the other parts.
+        QCOMPARE(bom.parts.back().category, PartCategory::Tie);
     }
 
     void flagged()

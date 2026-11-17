@@ -29,6 +29,10 @@ const std::vector<Note> &HarnessModel::items<Note>() const { return m_harness.no
 template<>
 std::vector<BomExtra> &HarnessModel::items<BomExtra>() { return m_harness.bomExtras; }
 template<>
+std::vector<LayoutAccessory> &HarnessModel::items<LayoutAccessory>() { return m_harness.accessories; }
+template<>
+const std::vector<LayoutAccessory> &HarnessModel::items<LayoutAccessory>() const { return m_harness.accessories; }
+template<>
 const std::vector<BomExtra> &HarnessModel::items<BomExtra>() const { return m_harness.bomExtras; }
 template<>
 const std::vector<LayoutNode> &HarnessModel::items<LayoutNode>() const { return m_harness.layoutNodes; }
@@ -144,6 +148,7 @@ std::vector<QString> HarnessModel::placementKeys(EntityKind kind, const QString 
     case EntityKind::LayoutSegment:
     case EntityKind::Note:
     case EntityKind::BomExtra:
+    case EntityKind::LayoutAccessory:
         return {};
     }
     return {};
@@ -195,6 +200,7 @@ TBH_INSTANTIATE(LayoutNode)
 TBH_INSTANTIATE(LayoutSegment)
 TBH_INSTANTIATE(Note)
 TBH_INSTANTIATE(BomExtra)
+TBH_INSTANTIATE(LayoutAccessory)
 #undef TBH_INSTANTIATE
 
 } // namespace tbh

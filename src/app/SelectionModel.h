@@ -18,11 +18,12 @@ struct Selection {
     QSet<QString> layoutSegments;
     QSet<QString> notes;
     QSet<QString> bomExtras;
+    QSet<QString> accessories;
 
     bool isEmpty() const
     {
         return connectors.isEmpty() && splices.isEmpty() && freeEnds.isEmpty() && wires.isEmpty() && layoutNodes.isEmpty()
-               && layoutSegments.isEmpty() && notes.isEmpty() && bomExtras.isEmpty();
+               && layoutSegments.isEmpty() && notes.isEmpty() && bomExtras.isEmpty() && accessories.isEmpty();
     }
     QSet<QString> &ids(EntityKind kind)
     {
@@ -43,6 +44,8 @@ struct Selection {
             return notes;
         case EntityKind::BomExtra:
             return bomExtras;
+        case EntityKind::LayoutAccessory:
+            return accessories;
         }
         Q_UNREACHABLE_RETURN(wires);
     }

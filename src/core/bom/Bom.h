@@ -44,12 +44,12 @@ struct SleevingLine
     QString family;
     QString sizeLabel;
     bool known = true;   // false: id not in the library
-    int segments = 0;
+    int pieces = 0; // segments covered, plus label covers
     double lengthMm = 0;
     double lengthWithWasteMm = 0; // lengthMm * (1 + wasteFactorSleevingPercent / 100)
 };
 
-enum class PartCategory { Connector, Terminal, Seal, CavityPlug, Splice };
+enum class PartCategory { Connector, Terminal, Seal, CavityPlug, Splice, Label, Tie };
 
 // Parts counted from connectors, pins and wire ends. An empty part number groups the
 // items that lack one; those lines are flagged in the UI.

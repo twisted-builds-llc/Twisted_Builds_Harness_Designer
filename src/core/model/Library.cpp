@@ -127,6 +127,8 @@ Library usedLibraryEntries(const Harness &harness, const Library &library)
     QSet<QString> sleevings;
     for (const LayoutSegment &s : harness.layoutSegments)
         sleevings.insert(s.sleevingId);
+    for (const LayoutAccessory &a : harness.accessories)
+        sleevings.insert(a.coverSleevingId);
     QSet<QString> connectors;
     QSet<QString> terminals, seals, plugs;
     for (const Connector &c : harness.connectors) {

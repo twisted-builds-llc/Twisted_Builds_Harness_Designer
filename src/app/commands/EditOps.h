@@ -64,11 +64,13 @@ std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connect
 std::unique_ptr<QUndoCommand> updateWires(HarnessModel *model, const std::vector<Wire> &wires,
                                           const QString &text);
 
-// Removes layout nodes, segments and notes. Segments on removed nodes go too; wires whose
-// manual route used a removed segment fall back to automatic routing.
+// Removes layout nodes, segments, notes and accessories. Segments on removed nodes go too,
+// and accessories on removed segments; wires whose manual route used a removed segment fall
+// back to automatic routing.
 std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<QString> &nodeIds,
                                                 const QSet<QString> &segmentIds,
-                                                const QSet<QString> &noteIds = {});
+                                                const QSet<QString> &noteIds = {},
+                                                const QSet<QString> &accessoryIds = {});
 
 // Sets a note's text (trimmed). Empty text deletes the note. Returns null if the note is
 // missing or nothing changes.
@@ -76,7 +78,7 @@ std::unique_ptr<QUndoCommand> setNoteText(HarnessModel *model, const QString &no
 
 // Joins branch point `branchId` into node `intoId`: its segments are re-attached to
 // `intoId`, segments between the two are removed (manual routes through them fall back to
-// automatic), and the branch point is deleted. Returns null unless `branchId` is a branch
+// automatic, their accessories are removed), and the branch point is deleted. Returns null unless `branchId` is a branch
 // point and `intoId` another existing node.
 std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString &branchId,
                                               const QString &intoId);
@@ -85,7 +87,8 @@ std::unique_ptr<QUndoCommand> mergeBranchInto(HarnessModel *model, const QString
 // in the middle of a sleeved run): the segment keeps its id and now runs nodeA-node, and a
 // new segment runs node-nodeB. Both keep the label and sleeving. The entered length is
 // split at `fraction` (0..1 from nodeA), and each half gets its drawing bend. Manual routes
-// through the segment fall back to automatic. Returns null unless the segment exists and
+// through the segment fall back to automatic. Accessories on it stay where they are along
+// the run: those past the split move to the new segment. Returns null unless the segment exists and
 // the node exists with no segments; the new segment's id goes to `newSegmentId`.
 std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString &segmentId,
                                              const QString &nodeId, double fraction,

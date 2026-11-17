@@ -120,28 +120,34 @@ Bom buildBom(const Harness &harness, const Library &library)
     for (WireLine &line : bom.wires)
         line.lengthWithWasteMm = line.lengthMm * (1.0 + settings.wasteFactorWirePercent / 100.0);
 
-    // Sleeving.
+    // Sleeving: covered segments and label covers.
     std::map<QString, size_t> sleevingIndex;
-    for (const LayoutSegment &s : harness.layoutSegments) {
-        if (s.sleevingId.isEmpty())
-            continue;
-        auto it = sleevingIndex.find(s.sleevingId);
+    auto addSleeving = [&](const QString &sleevingId, double lengthMm) {
+        if (sleevingId.isEmpty())
+            return;
+        auto it = sleevingIndex.find(sleevingId);
         if (it == sleevingIndex.end()) {
-            it = sleevingIndex.emplace(s.sleevingId, bom.sleeving.size()).first;
+            it = sleevingIndex.emplace(sleevingId, bom.sleeving.size()).first;
             SleevingLine line;
-            line.sleevingId = s.sleevingId;
-            if (const Sleeving *entry = library.sleeving(s.sleevingId)) {
+            line.sleevingId = sleevingId;
+            if (const Sleeving *entry = library.sleeving(sleevingId)) {
                 line.family = entry->family;
                 line.sizeLabel = entry->sizeLabel;
             } else {
                 line.known = false;
-                line.family = s.sleevingId;
+                line.family = sleevingId;
             }
             bom.sleeving.push_back(line);
         }
         SleevingLine &line = bom.sleeving[it->second];
-        ++line.segments;
-        line.lengthMm += s.lengthMm;
+        ++line.pieces;
+        line.lengthMm += lengthMm;
+    };
+    for (const LayoutSegment &s : harness.layoutSegments)
+        addSleeving(s.sleevingId, s.lengthMm);
+    for (const LayoutAccessory &a : harness.accessories) {
+        if (a.kind == AccessoryKind::Label)
+            addSleeving(a.coverSleevingId, a.coverLengthMm);
     }
     for (SleevingLine &line : bom.sleeving)
         line.lengthWithWasteMm = line.lengthMm * (1.0 + settings.wasteFactorSleevingPercent / 100.0);
@@ -180,6 +186,10 @@ Bom buildBom(const Harness &harness, const Library &library)
     }
     for (const Splice &s : harness.splices)
         parts.add(PartCategory::Splice, s.partNumber, {}, s.label);
+    for (const LayoutAccessory &a : harness.accessories) {
+        parts.add(a.kind == AccessoryKind::Label ? PartCategory::Label : PartCategory::Tie, a.partNumber, {},
+                  a.text);
+    }
     bom.parts = parts.take();
 
     bom.extras = harness.bomExtras;

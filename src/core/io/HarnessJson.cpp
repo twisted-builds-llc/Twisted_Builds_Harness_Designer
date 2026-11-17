@@ -45,6 +45,8 @@ struct EnumName
     const char *name;
 };
 
+constexpr EnumName<AccessoryKind> kAccessoryKinds[] = {{AccessoryKind::Label, "label"},
+                                                       {AccessoryKind::Tie, "tie"}};
 constexpr EnumName<PinPartKind> kPinPartKinds[] = {{PinPartKind::Terminal, "terminal"},
                                                    {PinPartKind::Seal, "seal"},
                                                    {PinPartKind::Plug, "plug"}};
@@ -392,6 +394,22 @@ LayoutSegment readLayoutSegment(ObjectReader r)
     return s;
 }
 
+LayoutAccessory readAccessory(ObjectReader r)
+{
+    LayoutAccessory a;
+    a.id = r.id();
+    a.kind = r.enumValue("kind", kAccessoryKinds, AccessoryKind::Label);
+    a.segmentId = r.id("segmentId");
+    a.offsetMm = r.number("offsetMm", 0.0);
+    a.text = r.string("text");
+    a.partNumber = r.string("partNumber");
+    a.coverSleevingId = r.string("coverSleevingId");
+    a.coverLengthMm = r.number("coverLengthMm", 0.0);
+    a.notes = r.string("notes");
+    a.extra = r.extra();
+    return a;
+}
+
 Note readNote(ObjectReader r, NoteCanvas canvas)
 {
     Note n;
@@ -477,6 +495,7 @@ void checkIntegrity(const Harness &h)
     uniqueIds(h.notes, Tr::tr("note"));
     uniqueIds(h.wires, Tr::tr("wire"));
     uniqueIds(h.bomExtras, Tr::tr("BOM row"));
+    uniqueIds(h.accessories, Tr::tr("layout accessory"));
 
     auto checkEnd = [&](const Wire &w, const WireEnd &end) {
         if (const auto *pin = std::get_if<PinRef>(&end)) {
@@ -542,6 +561,12 @@ void checkIntegrity(const Harness &h)
             fail(Tr::tr("Layout segment \"%1\" starts and ends at the same node.").arg(s.id));
         if (s.lengthMm < 0)
             fail(Tr::tr("Layout segment \"%1\" has a negative length.").arg(s.id));
+    }
+    for (const LayoutAccessory &a : h.accessories) {
+        if (!segments.contains(a.segmentId))
+            fail(Tr::tr("Layout accessory \"%1\" is on a missing segment.").arg(a.id));
+        if (a.offsetMm < 0 || a.coverLengthMm < 0)
+            fail(Tr::tr("Layout accessory \"%1\" has a negative length.").arg(a.id));
     }
 }
 
@@ -652,6 +677,21 @@ QJsonObject writeLayoutNode(const LayoutNode &n)
         o[u"sharedSpliceIds"] = shared;
     }
     o[u"position"] = QJsonObject{{u"x"_s, n.position.x()}, {u"y"_s, n.position.y()}};
+    return o;
+}
+
+QJsonObject writeAccessory(const LayoutAccessory &a)
+{
+    QJsonObject o = a.extra;
+    o[u"id"] = a.id;
+    o[u"kind"] = enumToString(kAccessoryKinds, a.kind);
+    o[u"segmentId"] = a.segmentId;
+    o[u"offsetMm"] = a.offsetMm;
+    o[u"text"] = a.text;
+    o[u"partNumber"] = a.partNumber;
+    o[u"coverSleevingId"] = a.coverSleevingId;
+    o[u"coverLengthMm"] = a.coverLengthMm;
+    o[u"notes"] = a.notes;
     return o;
 }
 
@@ -1044,13 +1084,19 @@ ZipEntries serializeHarness(const Harness &h)
     QJsonArray segments;
     for (const LayoutSegment &s : h.layoutSegments)
         segments.append(writeLayoutSegment(s));
+    QJsonArray accessories;
+    for (const LayoutAccessory &a : h.accessories)
+        accessories.append(writeAccessory(a));
     // Each canvas file holds its own notes.
     QJsonArray layoutNotes;
     QJsonArray schematicNotes;
     for (const Note &n : h.notes)
         (n.canvas == NoteCanvas::Layout ? layoutNotes : schematicNotes).append(writeNote(n));
     entries[QString(kLayoutEntry)] =
-        QJsonDocument(QJsonObject{{u"nodes"_s, nodes}, {u"segments"_s, segments}, {u"notes"_s, layoutNotes}})
+        QJsonDocument(QJsonObject{{u"nodes"_s, nodes},
+                                  {u"segments"_s, segments},
+                                  {u"accessories"_s, accessories},
+                                  {u"notes"_s, layoutNotes}})
             .toJson(QJsonDocument::Indented);
     entries[QString(kSchematicEntry)] =
         QJsonDocument(writeSchematic(h.schematic, schematicNotes)).toJson(QJsonDocument::Indented);
@@ -1113,6 +1159,8 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
             h.layoutSegments = readArray<LayoutSegment>(layout.array("segments"),
                                                         QStringLiteral("layout.segments"),
                                                         readLayoutSegment);
+            h.accessories = readArray<LayoutAccessory>(layout.array("accessories"),
+                                                       QStringLiteral("layout.accessories"), readAccessory);
             h.notes = readArray<Note>(layout.array("notes"), QStringLiteral("layout.notes"),
                                       [](ObjectReader r) { return readNote(std::move(r), NoteCanvas::Layout); });
             // Unknown top-level keys in layout.json are not preserved in v1.

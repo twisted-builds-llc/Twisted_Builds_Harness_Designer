@@ -109,6 +109,20 @@ QLineEdit *visibleEditor(QWidget *viewport)
 
 } // namespace
 
+namespace {
+
+LayoutAccessory accessory(const QString &id, const QString &segmentId, double offsetMm)
+{
+    LayoutAccessory a;
+    a.id = id;
+    a.segmentId = segmentId;
+    a.offsetMm = offsetMm;
+    a.text = id;
+    return a;
+}
+
+} // namespace
+
 class TestLayout : public QObject
 {
     Q_OBJECT
@@ -536,6 +550,7 @@ private slots:
         h.layoutSegments.push_back(LayoutSegment{u"s6"_s, u"n7"_s, u"n6"_s, 200, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
         h.layoutSegments.push_back(LayoutSegment{u"s7"_s, u"n6"_s, u"n2"_s, 10, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
         h.wires[0].routeSegmentIds = {u"s1"_s, u"s7"_s, u"s6"_s}; // not a real path; only checks clearing
+        h.accessories = {accessory(u"a1"_s, u"s7"_s, 5), accessory(u"a2"_s, u"s6"_s, 20)};
         model.reset(h);
         QUndoStack stack;
         QVERIFY(!mergeBranchInto(&model, u"n1"_s, u"n2"_s)); // n1 is a connector
@@ -546,6 +561,27 @@ private slots:
         QVERIFY(!model.find<LayoutSegment>(u"s7"_s));
         QCOMPARE(model.find<LayoutSegment>(u"s6"_s)->nodeB, u"n2"_s);
         QVERIFY(model.find<Wire>(u"w1"_s)->routeSegmentIds.empty());
+        // The label on s7 went with it; the one on s6 stays.
+        QVERIFY(!model.find<LayoutAccessory>(u"a1"_s));
+        QVERIFY(model.find<LayoutAccessory>(u"a2"_s));
+        verifyLoadable(model.harness());
+        stack.undo();
+        QVERIFY(model.harness() == h);
+    }
+
+    void removingLayoutItemsRemovesTheirAccessories()
+    {
+        HarnessModel model;
+        Harness h = sample();
+        h.accessories = {accessory(u"a1"_s, u"s1"_s, 10), accessory(u"a2"_s, u"s2"_s, 10),
+                         accessory(u"a3"_s, u"s2"_s, 30)};
+        model.reset(h);
+        QUndoStack stack;
+        // s1 removed with its label; a3 removed by id; a2 stays.
+        stack.push(removeLayoutItems(&model, {}, {u"s1"_s}, {}, {u"a3"_s}).release());
+        QVERIFY(!model.find<LayoutAccessory>(u"a1"_s));
+        QVERIFY(model.find<LayoutAccessory>(u"a2"_s));
+        QVERIFY(!model.find<LayoutAccessory>(u"a3"_s));
         verifyLoadable(model.harness());
         stack.undo();
         QVERIFY(model.harness() == h);
@@ -596,6 +632,9 @@ private slots:
         h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
         h.layoutNodes.push_back(LayoutNode{u"n6"_s, LayoutNodeType::Splice, u"sp2"_s, QPointF(450, 300), {}});
         h.wires[0].routeSegmentIds = {u"s1"_s, u"s2"_s};
+        // Labels on s2 at 50, 90 (the split point) and 200 mm from n2.
+        h.accessories = {accessory(u"a1"_s, u"s2"_s, 50), accessory(u"a2"_s, u"s2"_s, 90),
+                         accessory(u"a3"_s, u"s2"_s, 200)};
         model.reset(h);
         QUndoStack stack;
         QVERIFY(!splitSegmentAt(&model, u"s2"_s, u"n4"_s, 0.5, {}, {})); // n4 already has segments
@@ -612,6 +651,12 @@ private slots:
         QCOMPARE(second->nodeB, u"n3"_s);
         QCOMPARE(second->lengthMm, 360.0);
         QVERIFY(model.find<Wire>(u"w1"_s)->routeSegmentIds.empty());
+        // Labels keep their place along the run: up to 90 mm on s2, a3 now 200 - 90 = 110 mm
+        // along the new segment.
+        QCOMPARE(model.find<LayoutAccessory>(u"a1"_s)->segmentId, u"s2"_s);
+        QCOMPARE(model.find<LayoutAccessory>(u"a2"_s)->segmentId, u"s2"_s);
+        QCOMPARE(model.find<LayoutAccessory>(u"a3"_s)->segmentId, newId);
+        QCOMPARE(model.find<LayoutAccessory>(u"a3"_s)->offsetMm, 110.0);
         verifyLoadable(model.harness());
         // w1 ecu -> sensor still 300 + 90 + 360 = 750 along the bundle: (750 + 20) * 1.05
         // = 808.5 -> 810 mm, as before the split.
