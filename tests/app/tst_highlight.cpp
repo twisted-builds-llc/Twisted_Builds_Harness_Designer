@@ -393,6 +393,24 @@ private slots:
             QVERIFY(t.approximate); // shipped values must be marked approximate
         for (const Sleeving &s : seed.sleevings)
             QVERIFY(s.approximate);
+        // Connector parts: Deutsch DT / DTM / DTP and AMPSEAL housings, Molex CMC terminals.
+        QVERIFY(seed.connectorParts.size() >= 30);
+        QVERIFY(seed.pinParts.size() >= 19);
+        for (const ConnectorPart &p : seed.connectorParts) {
+            QVERIFY2(p.approximate, qPrintable(p.partNumber));
+            QVERIFY(!p.cavityLabels.isEmpty());
+            // Every compatible part a housing lists is in the seed itself.
+            for (PinPartKind kind : {PinPartKind::Terminal, PinPartKind::Seal, PinPartKind::Plug}) {
+                for (const QString &number : p.parts(kind))
+                    QVERIFY2(seed.pinPart(kind, number), qPrintable(p.partNumber + u" -> "_s + number));
+            }
+        }
+        for (const PinPart &p : seed.pinParts)
+            QVERIFY2(p.approximate, qPrintable(p.partNumber));
+        const ConnectorPart *dt = seed.connectorPart(u"DT06-4S"_s);
+        QVERIFY(dt);
+        QCOMPARE(dt->gender, Gender::Female);
+        QCOMPARE(dt->cavityLabels.size(), 4);
 
         QFile::remove(libraryStore::userLibraryPath());
         QString warning;
@@ -409,6 +427,21 @@ private slots:
         file.close();
         QVERIFY(libraryStore::loadUserLibrary(&warning) == seed);
         QVERIFY(!warning.isEmpty());
+
+        // A v0.1.0 library (no connector parts) gets the seed parts once, saved to the file;
+        // after the user deletes them they stay deleted.
+        QSettings().remove(u"library/connectorPartsSeeded"_s);
+        QVERIFY(libraryStore::saveUserLibrary(testLibrary(), &error));
+        warning.clear();
+        Library upgraded = libraryStore::loadUserLibrary(&warning);
+        QVERIFY(warning.isEmpty());
+        QCOMPARE(upgraded.wireTypes, testLibrary().wireTypes);
+        QCOMPARE(upgraded.connectorParts.size(), seed.connectorParts.size());
+        QVERIFY(libraryStore::loadUserLibrary(&warning) == upgraded); // saved, not added again
+        upgraded.connectorParts.clear();
+        upgraded.pinParts.clear();
+        QVERIFY(libraryStore::saveUserLibrary(upgraded, &error));
+        QVERIFY(libraryStore::loadUserLibrary(&warning).connectorParts.empty());
         QFile::remove(libraryStore::userLibraryPath());
     }
 };

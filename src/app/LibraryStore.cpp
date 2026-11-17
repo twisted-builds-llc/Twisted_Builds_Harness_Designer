@@ -2,11 +2,13 @@
 #include "LibraryStore.h"
 
 #include "io/HarnessJson.h"
+#include "model/Library.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QSaveFile>
+#include <QSettings>
 #include <QStandardPaths>
 
 namespace tbh::app::libraryStore {
@@ -20,6 +22,26 @@ class Tr
 } // namespace
 
 namespace {
+
+// Set once the seed connector parts have been added to an existing user library.
+constexpr auto kConnectorPartsSeededKey = "library/connectorPartsSeeded";
+
+// Adds the seed connector parts to a library from before they existed.
+Library withSeedConnectorParts(const Library &library)
+{
+    if (QSettings().value(QLatin1StringView(kConnectorPartsSeededKey)).toBool())
+        return library;
+    const Library seed = defaultLibrary();
+    Library parts;
+    parts.connectorParts = seed.connectorParts;
+    parts.pinParts = seed.pinParts;
+    const Library merged = mergeLibraries(library, parts);
+    if (merged == library || saveUserLibrary(merged, nullptr)) {
+        QSettings().setValue(QLatin1StringView(kConnectorPartsSeededKey), true);
+        return merged;
+    }
+    return library; // not saved: try again next time
+}
 
 } // namespace
 
@@ -39,13 +61,16 @@ Library defaultLibrary()
 Library loadUserLibrary(QString *warning)
 {
     QFile file(userLibraryPath());
-    if (!file.exists())
+    if (!file.exists()) {
+        QSettings().setValue(QLatin1StringView(kConnectorPartsSeededKey), true); // the seed has them
         return defaultLibrary();
+    }
     QString error;
     if (!file.open(QIODevice::ReadOnly)) {
         error = file.errorString();
     } else if (auto library = io::deserializeLibrary(file.readAll(), &error)) {
-        return *library;
+        file.close();
+        return withSeedConnectorParts(*library);
     }
     if (warning)
         *warning = Tr::tr("Your parts library (%1) could not be read: %2. Using the default library for now; "
