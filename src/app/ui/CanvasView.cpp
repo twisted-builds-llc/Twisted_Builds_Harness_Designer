@@ -12,7 +12,9 @@
 #include <QLineEdit>
 #include <QNativeGestureEvent>
 #include <QScrollBar>
+#include <QStyleHints>
 #include <QTimer>
+#include <QTouchEvent>
 
 #include <algorithm>
 #include <cmath>
@@ -135,6 +137,9 @@ CanvasView::CanvasView(QWidget *parent)
     setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     setDragMode(QGraphicsView::RubberBandDrag);
     setFocusPolicy(Qt::StrongFocus);
+    // Touchscreens: Qt's own mouse emulation would hide a second finger, so the view takes
+    // touches itself (see handleTouch()).
+    viewport()->setAttribute(Qt::WA_AcceptTouchEvents);
     for (QScrollBar *bar : {horizontalScrollBar(), verticalScrollBar()})
         connect(bar, &QScrollBar::sliderPressed, this, [this] { m_fitPending = false; });
 }
@@ -216,6 +221,11 @@ bool CanvasView::viewportEvent(QEvent *event)
         }
         break;
     }
+    case QEvent::TouchBegin:
+    case QEvent::TouchUpdate:
+    case QEvent::TouchEnd:
+    case QEvent::TouchCancel:
+        return handleTouch(static_cast<QTouchEvent *>(event));
     case QEvent::ContextMenu:
         // With right-drag panning the menu opens on a right-click release without movement
         // (see panMouseEvent()), not when the platform sends it.
@@ -300,6 +310,130 @@ bool CanvasView::panMouseEvent(QMouseEvent *event)
     default:
         return false;
     }
+}
+
+bool CanvasView::handleTouch(QTouchEvent *event)
+{
+    // Touchpads (macOS sends their raw touches too) keep their wheel and pinch events.
+    if (event->device()->type() != QInputDevice::DeviceType::TouchScreen) {
+        event->ignore();
+        return false;
+    }
+    if (event->type() == QEvent::TouchBegin) {
+        const QPointF pos = event->points().constFirst().position();
+        // Touches on the inline editor (a child of the viewport) reach it as Qt emulates them.
+        if (viewport()->childAt(pos.toPoint())) {
+            event->ignore();
+            return false;
+        }
+        m_fitPending = false;
+        m_touchMode = TouchMode::Pending;
+        m_touchId = event->points().constFirst().id();
+        m_touchStart = m_touchLast = pos;
+        m_pinchIds[0] = m_pinchIds[1] = -1;
+    }
+    event->accept();
+    if (m_touchMode == TouchMode::None)
+        return true;
+
+    if (event->type() == QEvent::TouchCancel) {
+        if (m_touchMode == TouchMode::Mouse)
+            sendTouchMouse(QEvent::MouseButtonRelease, m_touchLast);
+        m_touchMode = TouchMode::None;
+        return true;
+    }
+
+    std::vector<const QEventPoint *> down;
+    for (const QEventPoint &point : event->points()) {
+        if (point.state() != QEventPoint::State::Released)
+            down.push_back(&point);
+    }
+    if (m_touchMode == TouchMode::Pending && down.size() >= 2)
+        m_touchMode = TouchMode::Pinch; // a click or drag already under way stays one
+
+    switch (m_touchMode) {
+    case TouchMode::Pinch:
+        if (down.size() >= 2) {
+            const QPointF a = down[0]->position();
+            const QPointF b = down[1]->position();
+            const qreal distance = std::max(QLineF(a, b).length(), qreal(1));
+            const QPointF mid = (a + b) / 2;
+            if (down[0]->id() == m_pinchIds[0] && down[1]->id() == m_pinchIds[1])
+                pinchTo(m_pinchMid, mid, distance / m_pinchDistance);
+            // New pair of fingers: start measuring from here.
+            m_pinchIds[0] = down[0]->id();
+            m_pinchIds[1] = down[1]->id();
+            m_pinchDistance = distance;
+            m_pinchMid = mid;
+        } else {
+            m_pinchIds[0] = m_pinchIds[1] = -1;
+        }
+        break;
+    case TouchMode::Pending:
+    case TouchMode::Mouse:
+        for (const QEventPoint &point : event->points()) {
+            if (point.id() != m_touchId)
+                continue;
+            m_touchLast = point.position();
+            if (m_touchMode == TouchMode::Pending
+                && (m_touchLast - m_touchStart).manhattanLength() >= QApplication::startDragDistance()) {
+                m_touchMode = TouchMode::Mouse;
+                sendTouchMouse(QEvent::MouseButtonPress, m_touchStart);
+            }
+            if (m_touchMode == TouchMode::Mouse && point.state() == QEventPoint::State::Updated)
+                sendTouchMouse(QEvent::MouseMove, m_touchLast);
+        }
+        break;
+    case TouchMode::None:
+        break;
+    }
+
+    if (event->type() == QEvent::TouchEnd) {
+        if (m_touchMode == TouchMode::Pending) {
+            // A tap: a click, or a double click when it follows a tap close by.
+            const QStyleHints *hints = QGuiApplication::styleHints();
+            const bool doubleTap = m_lastTap.isValid()
+                                   && m_lastTap.elapsed() < hints->mouseDoubleClickInterval()
+                                   && (m_touchStart - m_lastTapPos).manhattanLength()
+                                          <= hints->touchDoubleTapDistance();
+            sendTouchMouse(doubleTap ? QEvent::MouseButtonDblClick : QEvent::MouseButtonPress,
+                           m_touchStart);
+            sendTouchMouse(QEvent::MouseButtonRelease, m_touchStart);
+            if (doubleTap) {
+                m_lastTap.invalidate();
+            } else {
+                m_lastTap.start();
+                m_lastTapPos = m_touchStart;
+            }
+        } else if (m_touchMode == TouchMode::Mouse) {
+            sendTouchMouse(QEvent::MouseButtonRelease, m_touchLast);
+        }
+        m_touchMode = TouchMode::None;
+    }
+    return true;
+}
+
+void CanvasView::sendTouchMouse(QEvent::Type type, QPointF pos)
+{
+    const Qt::MouseButton button = type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton;
+    const Qt::MouseButtons buttons = type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton;
+    QMouseEvent mouse(type, pos, viewport()->mapToGlobal(pos), button, buttons,
+                      QGuiApplication::keyboardModifiers());
+    QCoreApplication::sendEvent(viewport(), &mouse);
+}
+
+void CanvasView::pinchTo(QPointF from, QPointF to, qreal factor)
+{
+    const QPointF scenePoint = viewportTransform().inverted().map(from);
+    const qreal scale = std::clamp(transform().m11() * factor, kMinScale, kMaxScale);
+    const ViewportAnchor anchor = transformationAnchor();
+    setTransformationAnchor(QGraphicsView::NoAnchor);
+    setTransform(QTransform::fromScale(scale, scale));
+    setTransformationAnchor(anchor);
+    // Scroll so the content follows the fingers.
+    const QPointF offset = viewportTransform().map(scenePoint) - to;
+    horizontalScrollBar()->setValue(horizontalScrollBar()->value() + qRound(offset.x()));
+    verticalScrollBar()->setValue(verticalScrollBar()->value() + qRound(offset.y()));
 }
 
 void CanvasView::setPanCursor(Qt::CursorShape shape)

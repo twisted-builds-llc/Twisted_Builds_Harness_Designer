@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QElapsedTimer>
+#include <QEvent>
 #include <QGraphicsView>
 
 #include <functional>
+
+class QTouchEvent;
 
 namespace tbh::app {
 
@@ -19,6 +23,8 @@ void drawCanvasBackground(QPainter *painter, const QRectF &rect, const QPalette 
 // the cursor, panning (middle drag, plus right drag or Space + left drag and wheel panning as
 // set in Preferences), zoom to fit, and a one-line text editor laid over the canvas.
 // Panning is handled before the subclasses see the mouse events.
+// Touchscreens: one finger acts as the left mouse button (tap = click, double tap = double
+// click, drag = drag); two fingers pinch zoom and pan together.
 class CanvasView : public QGraphicsView
 {
     Q_OBJECT
@@ -67,6 +73,12 @@ private:
     void zoomBy(qreal factor);
     // Pan handling for viewportEvent(). Return true if the event was used for panning.
     bool panMouseEvent(QMouseEvent *event);
+    // Touchscreen handling for viewportEvent(). Returns whether the event was used.
+    bool handleTouch(QTouchEvent *event);
+    // Sends a left-button mouse event at viewport position `pos`, as a touch emulates it.
+    void sendTouchMouse(QEvent::Type type, QPointF pos);
+    // Zooms by `factor` so the scene point under `from` ends up under `to` (viewport positions).
+    void pinchTo(QPointF from, QPointF to, qreal factor);
     void setPanCursor(Qt::CursorShape shape);
     void restoreCursor();
 
@@ -80,6 +92,20 @@ private:
     bool m_cursorSaved = false;
     QCursor m_savedCursor;
     InlineEdit *m_editor = nullptr;
+
+    // One touch sequence (first finger down to last finger up). A single finger is held as
+    // Pending until it moves or lifts, so a second finger can still make it a pinch without
+    // having started a click or drag.
+    enum class TouchMode { None, Pending, Mouse, Pinch };
+    TouchMode m_touchMode = TouchMode::None;
+    int m_touchId = -1; // first finger
+    QPointF m_touchStart;
+    QPointF m_touchLast;
+    int m_pinchIds[2] = {-1, -1};
+    qreal m_pinchDistance = 0;
+    QPointF m_pinchMid;
+    QElapsedTimer m_lastTap;
+    QPointF m_lastTapPos;
 };
 
 } // namespace tbh::app

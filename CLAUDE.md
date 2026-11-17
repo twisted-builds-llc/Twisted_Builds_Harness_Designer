@@ -68,7 +68,11 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   release first; merge only when the user says so): Edit > Preferences picks
   an extra pan input (right drag, where a right-click without movement still opens the menu, or
   Space + left drag; middle drag always pans) and "Scroll wheel pans" (Ctrl+wheel zooms); pinch
-  zooms. Panning is intercepted in `CanvasView::viewportEvent` before subclasses see the mouse.
+  zooms; touchscreens: one finger = left button, two fingers pinch zoom + pan
+  (`CanvasView::handleTouch`). Panning is intercepted in `CanvasView::viewportEvent` before subclasses see the mouse.
+- **Current work: v0.1.1 feature set** (touch pinch/pan, pin table bulk edit, plug column, circuit
+  IDs, connect-from-pin, connector/terminal/seal library, layout labels, backshells/strain relief).
+  Plan, decisions and progress: `docs/V0.1.1_PLAN.md` - read it and keep its checkboxes current.
 - Still open (not in any finished milestone): connector/terminal/seal autofill library (5.7),
   UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
   translations for languages other than English.

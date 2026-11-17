@@ -23,6 +23,8 @@ class TestView : public CanvasView
 public:
     int menus = 0;
     int leftPresses = 0;
+    int doubleClicks = 0;
+    QPoint lastRelease;
 
 protected:
     void contextMenuEvent(QContextMenuEvent *) override { ++menus; }
@@ -31,6 +33,16 @@ protected:
         if (event->button() == Qt::LeftButton)
             ++leftPresses;
         CanvasView::mousePressEvent(event);
+    }
+    void mouseDoubleClickEvent(QMouseEvent *event) override
+    {
+        ++doubleClicks;
+        CanvasView::mouseDoubleClickEvent(event);
+    }
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        lastRelease = event->position().toPoint();
+        CanvasView::mouseReleaseEvent(event);
     }
 };
 
@@ -43,6 +55,7 @@ class TestCanvasView : public QObject
 private:
     QGraphicsScene *m_scene = nullptr;
     TestView *m_view = nullptr;
+    QPointingDevice *m_touchScreen = QTest::createTouchDevice();
 
     QWidget *viewport() const { return m_view->viewport(); }
     int h() const { return m_view->horizontalScrollBar()->value(); }
@@ -195,6 +208,57 @@ private slots:
         QCoreApplication::sendEvent(viewport(), &pinch);
         // Value 0.25: factor 1 + 0.25.
         QCOMPARE(m_view->transform().m11(), 1.25);
+    }
+
+    void touchTapClicksAndDoubleTapDoubleClicks()
+    {
+        QTest::touchEvent(viewport(), m_touchScreen).press(0, {100, 100}, viewport());
+        QCOMPARE(m_view->leftPresses, 0); // held back: a second finger could still pinch
+        QTest::touchEvent(viewport(), m_touchScreen).release(0, {100, 100}, viewport());
+        QCOMPARE(m_view->leftPresses, 1);
+        QCOMPARE(m_view->lastRelease, QPoint(100, 100));
+        QTest::touchEvent(viewport(), m_touchScreen).press(0, {102, 101}, viewport());
+        QTest::touchEvent(viewport(), m_touchScreen).release(0, {102, 101}, viewport());
+        QCOMPARE(m_view->doubleClicks, 1);
+        QCOMPARE(h(), 1000);
+        QCOMPARE(m_view->transform().m11(), 1.0);
+    }
+
+    void touchDragActsLikeLeftDrag()
+    {
+        QTest::touchEvent(viewport(), m_touchScreen).press(0, {100, 100}, viewport());
+        QTest::touchEvent(viewport(), m_touchScreen).move(0, {60, 70}, viewport());
+        // Moved past the drag distance: the press is sent where the finger went down.
+        QCOMPARE(m_view->leftPresses, 1);
+        // A second finger during a drag does not turn it into a pinch.
+        QTest::touchEvent(viewport(), m_touchScreen).move(0, {60, 70}, viewport()).press(1, {200, 200}, viewport());
+        QTest::touchEvent(viewport(), m_touchScreen).move(0, {50, 60}, viewport()).move(1, {250, 250}, viewport());
+        QCOMPARE(m_view->transform().m11(), 1.0);
+        QTest::touchEvent(viewport(), m_touchScreen).release(0, {50, 60}, viewport()).release(1, {250, 250}, viewport());
+        QCOMPARE(m_view->lastRelease, QPoint(50, 60));
+        QCOMPARE(h(), 1000);
+        QCOMPARE(v(), 1000);
+    }
+
+    void twoFingersPinchZoomAndPan()
+    {
+        QTest::touchEvent(viewport(), m_touchScreen).press(0, {100, 150}, viewport());
+        QTest::touchEvent(viewport(), m_touchScreen).move(0, {100, 150}, viewport()).press(1, {200, 150}, viewport());
+        // Fingers spread from 100 to 200 pixels apart around the same midpoint (150, 150):
+        // factor 200 / 100 = 2. Scene point under (150, 150) was 1000 + 150 = 1150; at scale 2
+        // it is at 2300 in view coordinates, so it stays under (150, 150) with scroll 2300 - 150.
+        QTest::touchEvent(viewport(), m_touchScreen).move(0, {50, 150}, viewport()).move(1, {250, 150}, viewport());
+        QCOMPARE(m_view->transform().m11(), 2.0);
+        QCOMPARE(h(), 2150);
+        QCOMPARE(v(), 2150);
+        // Both fingers move by (-40, -30), still 200 apart: no zoom, content follows: +40, +30.
+        QTest::touchEvent(viewport(), m_touchScreen).move(0, {10, 120}, viewport()).move(1, {210, 120}, viewport());
+        QCOMPARE(m_view->transform().m11(), 2.0);
+        QCOMPARE(h(), 2190);
+        QCOMPARE(v(), 2180);
+        QTest::touchEvent(viewport(), m_touchScreen).release(0, {10, 120}, viewport()).release(1, {210, 120}, viewport());
+        QCOMPARE(m_view->leftPresses, 0); // no click, selection or drawing
+        QCOMPARE(m_view->doubleClicks, 0);
     }
 };
 
