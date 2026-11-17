@@ -12,7 +12,12 @@
 
 #include <QCheckBox>
 #include <QClipboard>
+#include <QAbstractItemView>
 #include <QCompleter>
+#include <QRegularExpression>
+#include <QStandardItemModel>
+#include <QTimer>
+#include <QToolButton>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QStyledItemDelegate>
@@ -217,6 +222,31 @@ bool PinTableModel::setCellTexts(const std::vector<std::pair<QModelIndex, QStrin
     return batch.pushedAny();
 }
 
+QString PinTableModel::housingPartNumber() const
+{
+    const Connector *c = m_document->model()->find<Connector>(m_connectorId);
+    return c ? c->partNumber : QString();
+}
+
+std::vector<PartChoice> PinTableModel::partChoices(int column) const
+{
+    PinPartKind kind;
+    switch (column) {
+    case Terminal:
+        kind = PinPartKind::Terminal;
+        break;
+    case Seal:
+        kind = PinPartKind::Seal;
+        break;
+    case PlugPart:
+        kind = PinPartKind::Plug;
+        break;
+    default:
+        return {};
+    }
+    return pinPartChoices(m_document->model()->library(), housingPartNumber(), kind);
+}
+
 QStringList PinTableModel::wiredChoices(int row) const
 {
     const Harness &harness = m_document->model()->harness();
@@ -289,6 +319,50 @@ QModelIndexList sortedSelection(const QItemSelectionModel *selection)
     return cells;
 }
 
+// An item for a part completer: shown as "PN — description", completing to the part number
+// (Qt::UserRole, see partCompleter()).
+QStandardItem *partItem(const PartChoice &choice, const QString &housing)
+{
+    QStringList details;
+    if (choice.part && !choice.part->description.isEmpty())
+        details << choice.part->description;
+    if (choice.madeForHousing)
+        details << PinTableModel::tr("made for %1").arg(housing);
+    QString text = choice.partNumber;
+    if (!details.isEmpty())
+        text += u" — "_s + details.join(u", "_s);
+    if (choice.part && choice.part->approximate)
+        text = PinTableModel::tr("%1 (approx.)").arg(text);
+    auto *item = new QStandardItem(text);
+    item->setData(choice.partNumber, Qt::UserRole);
+    if (choice.madeForHousing) {
+        QFont font = item->font();
+        font.setBold(true);
+        item->setFont(font);
+    }
+    return item;
+}
+
+// Opens the completer's list for `prefix`, wide enough for its text (lists are otherwise
+// only as wide as the field, cutting off descriptions).
+void showCompletions(QCompleter *completer, const QString &prefix)
+{
+    QAbstractItemView *popup = completer->popup();
+    popup->setMinimumWidth(std::min(popup->sizeHintForColumn(0) + 40, 640));
+    completer->setCompletionPrefix(prefix);
+    completer->complete();
+}
+
+QCompleter *partCompleter(QStandardItemModel *items, QWidget *parent)
+{
+    auto *completer = new QCompleter(items, parent);
+    completer->setCompletionRole(Qt::UserRole);
+    completer->setCaseSensitivity(Qt::CaseInsensitive);
+    completer->setFilterMode(Qt::MatchContains);
+    completer->setMaxVisibleItems(15);
+    return completer;
+}
+
 // Typing in a cell while several cells of its column are selected fills them all.
 class PinCellDelegate : public QStyledItemDelegate
 {
@@ -310,6 +384,18 @@ public:
             completer->setCaseSensitivity(Qt::CaseInsensitive);
             completer->setFilterMode(Qt::MatchContains);
             line->setCompleter(completer);
+        }
+        const std::vector<PartChoice> parts = line ? m_pins->partChoices(index.column()) : std::vector<PartChoice>{};
+        if (!parts.empty()) {
+            // Library parts, those made for the housing first (in bold); the list opens with
+            // the editor so they can be picked without typing.
+            auto *items = new QStandardItemModel(line);
+            const QString housing = m_pins->housingPartNumber();
+            for (const PartChoice &choice : parts)
+                items->appendRow(partItem(choice, housing));
+            QCompleter *completer = partCompleter(items, line);
+            line->setCompleter(completer);
+            QTimer::singleShot(0, line, [line, completer] { showCompletions(completer, line->text()); });
         }
         return editor;
     }
@@ -470,6 +556,7 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     , m_document(document)
     , m_label(new QLineEdit(this))
     , m_partNumber(new QLineEdit(this))
+    , m_housings(partCompleter(new QStandardItemModel(this), m_partNumber))
     , m_manufacturer(new QLineEdit(this))
     , m_description(new QLineEdit(this))
     , m_gender(new QComboBox(this))
@@ -500,9 +587,29 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     displayRow->addWidget(new QLabel(tr("Visible rows:"), this));
     displayRow->addWidget(m_visibleRows, 1);
 
+    m_partNumber->setCompleter(m_housings);
+    m_partNumber->setAccessibleName(tr("Connector part number"));
+    m_partNumber->setToolTip(tr("Type or pick a housing from the parts library to fill the maker, "
+                                "description and pins. Any other part number is kept as typed."));
+    auto *browse = new QToolButton(this);
+    browse->setArrowType(Qt::DownArrow);
+    browse->setToolTip(tr("Show the connector housings in the parts library"));
+    browse->setAccessibleName(tr("Show library housings"));
+    auto *partNumberRow = new QHBoxLayout;
+    partNumberRow->addWidget(m_partNumber, 1);
+    partNumberRow->addWidget(browse);
+    connect(browse, &QToolButton::clicked, this, [this] {
+        m_partNumber->setFocus();
+        showCompletions(m_housings, QString());
+    });
+    connect(m_housings, qOverload<const QString &>(&QCompleter::activated), this, [this] { commitInfo(); });
+    connect(document->model(), &HarnessModel::libraryChanged, this, &ConnectorPanel::refreshHousings);
+    connect(document->model(), &HarnessModel::harnessReset, this, &ConnectorPanel::refreshHousings);
+    refreshHousings();
+
     auto *form = new QFormLayout;
     form->addRow(tr("&Label:"), m_label);
-    form->addRow(tr("&Part number:"), m_partNumber);
+    form->addRow(tr("&Part number:"), partNumberRow);
     form->addRow(tr("&Manufacturer:"), m_manufacturer);
     form->addRow(tr("&Description:"), m_description);
     form->addRow(tr("&Gender:"), m_gender);
@@ -603,9 +710,66 @@ void ConnectorPanel::commitInfo()
     updated.description = m_description->text();
     updated.gender = Gender(m_gender->currentData().toInt());
     updated.notes = m_notes->toPlainText();
+    if (updated.partNumber.trimmed() != current->partNumber.trimmed()) {
+        if (const ConnectorPart *housing = m_document->model()->library().connectorPart(updated.partNumber)) {
+            applyHousing(updated, *housing);
+            return;
+        }
+    }
     if (updated != *current)
         m_document->undoStack()->push(
             new UpdateEntityCommand<Connector>(m_document->model(), updated, tr("Edit connector")));
+}
+
+void ConnectorPanel::applyHousing(Connector edited, const ConnectorPart &housing)
+{
+    HarnessModel *model = m_document->model();
+    const Connector *current = model->find<Connector>(m_id);
+    if (!current)
+        return;
+    edited.partNumber = housing.partNumber;
+    if (!housing.manufacturer.isEmpty())
+        edited.manufacturer = housing.manufacturer;
+    const QString description = QStringList{housing.family, housing.description}
+                                    .filter(QRegularExpression(u"\\S"_s))
+                                    .join(u", "_s);
+    if (!description.isEmpty())
+        edited.description = description;
+    if (housing.gender != Gender::None)
+        edited.gender = housing.gender;
+    edited.pins = current->pins;
+    std::vector<Pin> pins = resizedPins(current->pins, int(housing.cavityLabels.size()));
+    for (size_t i = 0; i < pins.size(); ++i)
+        pins[i].label = housing.cavityLabels[qsizetype(i)];
+    const auto lost = wiresLostByPinChange(model->harness(), *current, pins);
+    if (!confirmWireRemoval(this, model->harness(), lost, tr("Using housing %1").arg(housing.partNumber))) {
+        refresh(); // back to the connector as it is
+        return;
+    }
+    UndoBatch batch(m_document->undoStack(), tr("Use housing %1").arg(housing.partNumber));
+    if (edited != *current)
+        batch.push(std::make_unique<UpdateEntityCommand<Connector>>(model, edited, tr("Edit connector")));
+    if (pins != current->pins)
+        batch.push(setConnectorPins(model, m_id, std::move(pins), tr("Use housing pins")));
+}
+
+void ConnectorPanel::refreshHousings()
+{
+    auto *items = static_cast<QStandardItemModel *>(m_housings->model());
+    items->clear();
+    for (const ConnectorPart &housing : m_document->model()->library().connectorParts) {
+        QString text = housing.partNumber;
+        const QString detail = QStringList{housing.family, housing.description}
+                                   .filter(QRegularExpression(u"\\S"_s))
+                                   .join(u", "_s);
+        if (!detail.isEmpty())
+            text += u" — "_s + detail;
+        if (housing.approximate)
+            text = tr("%1 (approx.)").arg(text);
+        auto *item = new QStandardItem(text);
+        item->setData(housing.partNumber, Qt::UserRole);
+        items->appendRow(item);
+    }
 }
 
 void ConnectorPanel::openPatternDialog()

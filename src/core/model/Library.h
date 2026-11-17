@@ -17,4 +17,17 @@ Library mergeLibraries(const Library &user, const Library &embedded);
 // embedding on save.
 Library usedLibraryEntries(const Harness &harness, const Library &library);
 
+// Part numbers to offer for a cavity of housing `housingPartNumber`: first the parts of
+// `kind` the housing lists (in its order, also ones missing from the library), then the
+// library's other parts of that kind in library order. `part` is null for listed numbers the
+// library lacks.
+struct PartChoice
+{
+    QString partNumber;
+    const PinPart *part = nullptr;
+    bool madeForHousing = false;
+};
+std::vector<PartChoice> pinPartChoices(const Library &library, const QString &housingPartNumber,
+                                       PinPartKind kind);
+
 } // namespace tbh

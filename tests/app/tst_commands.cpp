@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Document.h"
+#include "LibraryStore.h"
 #include "Preferences.h"
 #include "Translations.h"
 #include "commands/EditOps.h"
@@ -7,7 +8,13 @@
 #include "commands/HarnessCommands.h"
 #include "ui/properties/ConnectorPanel.h"
 
+#include <QApplication>
+#include <QMessageBox>
+#include <QTimer>
+#include <QToolButton>
+#include <QAbstractItemView>
 #include <QClipboard>
+#include <QCompleter>
 #include <QGuiApplication>
 #include <QLineEdit>
 #include <QTableView>
@@ -203,6 +210,123 @@ private slots:
         QCOMPARE(doc.model()->harness().connectors.size(), size_t(4));
         QCOMPARE(wires().size(), size_t(2));
         QCOMPARE(wires()[1].circuitId, u"C002"_s);
+    }
+
+    // Picking a library housing fills the connector; terminal cells offer its parts first.
+    void connectorFromLibraryHousing()
+    {
+        Document doc;
+        Library lib;
+        ConnectorPart housing;
+        housing.partNumber = u"DT06-4S"_s;
+        housing.manufacturer = u"TE Deutsch"_s;
+        housing.family = u"Deutsch DT"_s;
+        housing.description = u"4-way plug"_s;
+        housing.gender = Gender::Female;
+        housing.cavityLabels = {u"A"_s, u"B"_s, u"C"_s, u"D"_s};
+        housing.terminals = {u"S16"_s};
+        ConnectorPart small = housing;
+        small.partNumber = u"DT06-2S"_s;
+        small.cavityLabels = {u"1"_s, u"2"_s};
+        lib.connectorParts = {housing, small};
+        PinPart other;
+        other.partNumber = u"OTHER"_s;
+        PinPart socket;
+        socket.partNumber = u"S16"_s;
+        lib.pinParts = {other, socket};
+        doc.model()->setUserLibrary(lib);
+
+        Harness h = doc.model()->harness();
+        Connector c;
+        c.id = u"c1"_s;
+        c.label = u"X1"_s;
+        c.partNumber = u"OLD"_s;
+        for (int i = 1; i <= 2; ++i)
+            c.pins.push_back(Pin{u"p%1"_s.arg(i), QString::number(i), {}, {}, {}, false, {}, {}, {}});
+        h.connectors.push_back(c);
+        doc.model()->reset(h);
+        doc.model()->setUserLibrary(lib);
+        ConnectorPanel panel(&doc);
+        panel.setConnector(u"c1"_s);
+        QLineEdit *partNumber = nullptr;
+        for (auto *edit : panel.findChildren<QLineEdit *>()) {
+            if (edit->accessibleName() == u"Connector part number"_s)
+                partNumber = edit;
+        }
+        QVERIFY(partNumber);
+        const auto connector = [&] { return *doc.model()->find<Connector>(u"c1"_s); };
+        const int undoBase = doc.undoStack()->count();
+
+        partNumber->setText(u"dt06-4s"_s); // not exact: kept as typed, nothing filled
+        emit partNumber->editingFinished();
+        QCOMPARE(connector().partNumber, u"dt06-4s"_s);
+        QCOMPARE(connector().pins.size(), size_t(2));
+
+        partNumber->setText(u"DT06-4S"_s);
+        emit partNumber->editingFinished();
+        QCOMPARE(connector().partNumber, u"DT06-4S"_s);
+        QCOMPARE(connector().manufacturer, u"TE Deutsch"_s);
+        QCOMPARE(connector().description, u"Deutsch DT, 4-way plug"_s);
+        QCOMPARE(connector().gender, Gender::Female);
+        QCOMPARE(connector().pins.size(), size_t(4));
+        QCOMPARE(connector().pins[0].id, u"p1"_s); // existing pins kept
+        QCOMPARE(connector().pins[3].label, u"D"_s);
+        QCOMPARE(doc.undoStack()->count(), undoBase + 2); // the typed text, then the housing
+
+        // Terminal cells: the housing's socket first, then the rest of the library.
+        auto *pins = static_cast<PinTableModel *>(panel.findChild<QTableView *>()->model());
+        const auto choices = pins->partChoices(PinTableModel::Terminal);
+        QCOMPARE(choices.size(), size_t(2));
+        QCOMPARE(choices[0].partNumber, u"S16"_s);
+        QVERIFY(choices[0].madeForHousing);
+        QCOMPARE(choices[1].partNumber, u"OTHER"_s);
+        QVERIFY(pins->partChoices(PinTableModel::Notes).empty());
+
+        // A smaller housing would lose the wire on pin D: cancelling changes nothing.
+        Wire wire;
+        wire.id = u"w1"_s;
+        wire.endA = PinRef{u"c1"_s, connector().pins[3].id};
+        wire.endB = PinRef{u"c1"_s, u"p1"_s};
+        doc.undoStack()->push(addWire(doc.model(), wire, {}, u"wire"_s).release());
+        QTimer::singleShot(0, [] {
+            for (QWidget *w : QApplication::topLevelWidgets()) {
+                if (auto *box = qobject_cast<QMessageBox *>(w))
+                    box->reject();
+            }
+        });
+        partNumber->setText(u"DT06-2S"_s);
+        emit partNumber->editingFinished();
+        QCOMPARE(connector().partNumber, u"DT06-4S"_s);
+        QCOMPARE(connector().pins.size(), size_t(4));
+        QCOMPARE(partNumber->text(), u"DT06-4S"_s); // the field shows the connector again
+
+        doc.undoStack()->undo(); // the wire
+        doc.undoStack()->undo(); // the housing, one step
+        QCOMPARE(connector().partNumber, u"dt06-4s"_s);
+        QCOMPARE(connector().pins.size(), size_t(2));
+        // Optional look at the housing list and a terminal cell's list.
+        const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR");
+        if (!out.isEmpty()) {
+            doc.model()->setUserLibrary(libraryStore::defaultLibrary());
+            partNumber->setText(u"DT06-4S"_s);
+            emit partNumber->editingFinished();
+            panel.resize(420, 700);
+            panel.show();
+            QVERIFY(QTest::qWaitForWindowExposed(&panel));
+            for (auto *button : panel.findChildren<QToolButton *>()) {
+                if (button->accessibleName() == u"Show library housings"_s)
+                    button->click();
+            }
+            QTest::qWait(100);
+            partNumber->completer()->popup()->grab().save(out + u"/housing-list.png"_s);
+            partNumber->completer()->popup()->hide();
+            auto *table = panel.findChild<QTableView *>();
+            table->edit(table->model()->index(0, PinTableModel::Terminal));
+            QTest::qWait(100);
+            auto *editor = table->viewport()->findChild<QLineEdit *>();
+            QVERIFY(editor && editor->completer());
+            editor->completer()->popup()->grab().save(out + u"/terminal-list.png"_s);
+        }
     }
 
     void defaultUnitsPreference()

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "model/Library.h"
+
 #include <QAbstractTableModel>
 #include <QWidget>
 
@@ -9,6 +11,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QCompleter;
 class QLabel;
 class QLineEdit;
 class QSpinBox;
@@ -53,6 +56,10 @@ public:
 
     // Names a Wired cell can take: every wire end except that row's own pin.
     QStringList wiredChoices(int row) const;
+    // Parts a Terminal, Seal or PlugPart cell can take: those made for the connector's
+    // housing first (pinPartChoices()); empty for other columns.
+    std::vector<PartChoice> partChoices(int column) const;
+    QString housingPartNumber() const;
 
 signals:
     // Typed Wired names that match no pin, splice or free end (nothing was changed).
@@ -86,12 +93,18 @@ signals:
 
 private:
     void commitInfo();
+    // Uses library housing `housing` for this connector: part number, maker, description,
+    // contacts, and pins from its cavities (asks before wires would be lost). One undo step.
+    // `edited` carries the other fields as typed.
+    void applyHousing(Connector edited, const ConnectorPart &housing);
+    void refreshHousings();
     void openPatternDialog();
 
     Document *m_document;
     QString m_id;
     QLineEdit *m_label;
     QLineEdit *m_partNumber;
+    QCompleter *m_housings; // library housings for m_partNumber
     QLineEdit *m_manufacturer;
     QLineEdit *m_description;
     QComboBox *m_gender;

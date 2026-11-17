@@ -99,6 +99,26 @@ Library mergeLibraries(const Library &user, const Library &embedded)
     return merged;
 }
 
+std::vector<PartChoice> pinPartChoices(const Library &library, const QString &housingPartNumber,
+                                       PinPartKind kind)
+{
+    std::vector<PartChoice> choices;
+    QSet<QString> listed;
+    if (const ConnectorPart *housing = library.connectorPart(housingPartNumber)) {
+        for (const QString &number : housing->parts(kind)) {
+            if (listed.contains(number))
+                continue;
+            listed.insert(number);
+            choices.push_back({number, library.pinPart(kind, number), true});
+        }
+    }
+    for (const PinPart &p : library.pinParts) {
+        if (p.kind == kind && !listed.contains(p.partNumber))
+            choices.push_back({p.partNumber, &p, false});
+    }
+    return choices;
+}
+
 Library usedLibraryEntries(const Harness &harness, const Library &library)
 {
     QSet<QString> wireTypes;

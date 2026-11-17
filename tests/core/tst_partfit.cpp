@@ -129,6 +129,30 @@ private slots:
         QVERIFY(housing.parts(PinPartKind::Seal).isEmpty());
     }
 
+    void choicesForHousing()
+    {
+        Library lib = sampleLibrary();
+        lib.connectorParts[0].terminals = {u"MISSING"_s, u"T16"_s};
+        PinPart other;
+        other.partNumber = u"T20"_s;
+        lib.pinParts.insert(lib.pinParts.begin(), other); // library order: T20 first
+        // Listed for the housing first, in its order, then the rest of the library.
+        const auto terminals = pinPartChoices(lib, u"DT04-2P"_s, PinPartKind::Terminal);
+        QCOMPARE(terminals.size(), size_t(3));
+        QCOMPARE(terminals[0].partNumber, u"MISSING"_s);
+        QVERIFY(terminals[0].madeForHousing && !terminals[0].part);
+        QCOMPARE(terminals[1].partNumber, u"T16"_s);
+        QVERIFY(terminals[1].madeForHousing && terminals[1].part);
+        QCOMPARE(terminals[2].partNumber, u"T20"_s);
+        QVERIFY(!terminals[2].madeForHousing);
+        // Unknown housing: the whole library, nothing marked.
+        const auto any = pinPartChoices(lib, u"NOPE"_s, PinPartKind::Terminal);
+        QCOMPARE(any.size(), size_t(2));
+        QVERIFY(!any[0].madeForHousing);
+        // Kinds stay apart: the seal T16 only among seals.
+        QCOMPARE(pinPartChoices(lib, u"DT04-2P"_s, PinPartKind::Seal).size(), size_t(1));
+    }
+
     void jsonRoundTrip()
     {
         Library lib = sampleLibrary();
