@@ -3,6 +3,7 @@
 #include "Preferences.h"
 #include "Translations.h"
 #include "commands/EditOps.h"
+#include "model/Queries.h"
 #include "commands/HarnessCommands.h"
 #include "ui/properties/ConnectorPanel.h"
 
@@ -181,12 +182,25 @@ private slots:
         QCOMPARE(wires().size(), size_t(1));
         QCOMPARE(wires()[0].endB, WireEnd(PinRef{u"c2"_s, u"c2p1"_s}));
 
-        // Pasted wires are new circuits: copying C001 pastes as C002.
+        // Pasting onto another sheet shows the same connectors and wire there: no copy, and
+        // the wire keeps circuit id C001.
         Harness fragment;
         fragment.connectors = {h.connectors[0], h.connectors[1]};
         fragment.wires = {wires()[0]};
+        fragment.schematic.placements[Schematic::wireSheetKey(wires()[0].id)] = SchematicPlacement{};
+        QString sheet2;
+        doc.undoStack()->push(addSheet(doc.model(), &sheet2).release());
         QSet<QString> pasted;
-        doc.undoStack()->push(pasteFragment(doc.model(), fragment, QPointF(100, 0), &pasted).release());
+        doc.undoStack()->push(pasteFragment(doc.model(), fragment, QPointF(100, 0), &pasted, sheet2).release());
+        QCOMPARE(doc.model()->harness().connectors.size(), size_t(2));
+        QCOMPARE(wires().size(), size_t(1));
+        QCOMPARE(wires()[0].circuitId, u"C001"_s);
+        QVERIFY(wireSheets(doc.model()->harness(), wires()[0]).drawnOn(sheet2));
+
+        // Pasting where the connectors already are makes real copies: the copied wire is a
+        // new circuit, C002.
+        doc.undoStack()->push(pasteFragment(doc.model(), fragment, QPointF(100, 0), &pasted, sheet2).release());
+        QCOMPARE(doc.model()->harness().connectors.size(), size_t(4));
         QCOMPARE(wires().size(), size_t(2));
         QCOMPARE(wires()[1].circuitId, u"C002"_s);
     }
