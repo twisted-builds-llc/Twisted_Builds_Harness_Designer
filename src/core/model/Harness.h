@@ -133,6 +133,7 @@ struct Wire {
     ConductorKind conductorKind = ConductorKind::Single;
     std::optional<double> lengthOverrideMm;
     std::vector<QString> routeSegmentIds; // manual route override, empty = automatic
+    QString circuitId; // unique circuit number for build prints, e.g. "C001" (nextCircuitId)
     QJsonObject extra;
 
     bool operator==(const Wire &) const = default;

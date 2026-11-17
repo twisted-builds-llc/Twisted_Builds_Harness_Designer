@@ -52,6 +52,7 @@ private:
     QSet<QString> m_ids;
     QLabel *m_title;
     QLineEdit *m_name;
+    QLineEdit *m_circuitId;
     WireColorCombo *m_base;
     WireColorCombo *m_stripe;
     QPushButton *m_baseCustom;

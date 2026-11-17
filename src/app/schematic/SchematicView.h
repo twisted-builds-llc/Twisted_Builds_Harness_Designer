@@ -64,6 +64,8 @@ public:
     void moveSelectionToSheet(const QString &sheetId);
     // Fills `menu` with one action per sheet (moves the selection there) and "New Sheet".
     void addMoveToSheetActions(QMenu *menu);
+    // Asks where the pin's wires go (by name, as the pin table's Wired column) and wires it.
+    void connectPinByName(const PinRef &pin);
     // Also shows the selected connectors, splices, free ends and wires on another sheet: the
     // same items (one in the layout and BOM), not copies. Wires need both ends there.
     void showSelectionOnSheet(const QString &sheetId);

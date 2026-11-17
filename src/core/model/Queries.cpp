@@ -231,6 +231,125 @@ QString describeWire(const Harness &harness, const Wire &wire)
     return wire.name.isEmpty() ? ends : QStringLiteral("%1 (%2)").arg(wire.name, ends);
 }
 
+QString circuitIdForNumber(int number)
+{
+    return QStringLiteral("C%1").arg(number, 3, 10, QLatin1Char('0'));
+}
+
+QString nextCircuitId(const Harness &harness)
+{
+    return circuitIdForNumber(nextCircuitNumber(harness));
+}
+
+int nextCircuitNumber(const Harness &harness)
+{
+    int highest = 0;
+    for (const Wire &w : harness.wires) {
+        if (w.circuitId.size() < 2 || w.circuitId[0] != QLatin1Char('C'))
+            continue;
+        bool ok = false;
+        const int number = QStringView(w.circuitId).mid(1).toInt(&ok);
+        if (ok && number > 0 && std::all_of(w.circuitId.begin() + 1, w.circuitId.end(),
+                                            [](QChar c) { return c.isDigit(); }))
+            highest = std::max(highest, number);
+    }
+    return highest + 1;
+}
+
+std::vector<WireEndChoice> wireEndChoices(const Harness &harness)
+{
+    std::vector<WireEndChoice> choices;
+    for (const Connector &c : harness.connectors) {
+        for (const Pin &p : c.pins)
+            choices.push_back({describeWireEnd(harness, PinRef{c.id, p.id}), PinRef{c.id, p.id}});
+    }
+    for (const Splice &s : harness.splices)
+        choices.push_back({describeWireEnd(harness, SpliceRef{s.id}), SpliceRef{s.id}});
+    for (const FreeEnd &f : harness.freeEnds)
+        choices.push_back({describeWireEnd(harness, FreeEndRef{f.id}), FreeEndRef{f.id}});
+    return choices;
+}
+
+std::optional<WireEnd> findWireEnd(const Harness &harness, const QString &text)
+{
+    auto key = [](QString s) {
+        s.remove(QLatin1Char(' '));
+        return s.toCaseFolded();
+    };
+    const QString wanted = key(text);
+    if (wanted.isEmpty())
+        return std::nullopt;
+    for (const WireEndChoice &choice : wireEndChoices(harness)) {
+        if (key(choice.text) == wanted)
+            return choice.end;
+    }
+    return std::nullopt;
+}
+
+namespace {
+
+struct PinWire
+{
+    QString wireId;
+    bool farIsB = false;
+    WireEnd farEnd;
+};
+
+std::vector<PinWire> wiresOnPin(const Harness &harness, const PinRef &pin)
+{
+    std::vector<PinWire> result;
+    for (const Wire &w : harness.wires) {
+        if (w.endA == WireEnd(pin))
+            result.push_back({w.id, true, w.endB});
+        else if (w.endB == WireEnd(pin))
+            result.push_back({w.id, false, w.endA});
+    }
+    return result;
+}
+
+} // namespace
+
+QString pinConnectionsText(const Harness &harness, const PinRef &pin)
+{
+    QStringList names;
+    for (const PinWire &w : wiresOnPin(harness, pin))
+        names << describeWireEnd(harness, w.farEnd);
+    return names.join(QStringLiteral(", "));
+}
+
+PinConnectionPlan planPinConnections(const Harness &harness, const PinRef &pin, const QString &text)
+{
+    PinConnectionPlan plan;
+    std::vector<WireEnd> wanted;
+    for (const QString &name : text.split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+        if (name.trimmed().isEmpty())
+            continue;
+        const std::optional<WireEnd> end = findWireEnd(harness, name);
+        if (!end || *end == WireEnd(pin))
+            plan.unknown << name.trimmed();
+        else if (std::find(wanted.begin(), wanted.end(), *end) == wanted.end())
+            wanted.push_back(*end);
+    }
+    if (!plan.unknown.isEmpty())
+        return plan;
+    std::vector<PinWire> leftOver;
+    for (const PinWire &w : wiresOnPin(harness, pin)) {
+        const auto kept = std::find(wanted.begin(), wanted.end(), w.farEnd);
+        if (kept != wanted.end())
+            wanted.erase(kept);
+        else
+            leftOver.push_back(w);
+    }
+    size_t i = 0;
+    for (; i < leftOver.size() && i < wanted.size(); ++i)
+        plan.moves.push_back({leftOver[i].wireId, leftOver[i].farIsB, wanted[i]});
+    for (size_t j = i; j < wanted.size(); ++j)
+        plan.adds.push_back(wanted[j]);
+    for (size_t j = i; j < leftOver.size(); ++j)
+        plan.removals.push_back(leftOver[j].wireId);
+    return plan;
+}
+
 std::vector<LayoutRef> layoutRefs(const Harness &harness)
 {
     std::vector<LayoutRef> refs;

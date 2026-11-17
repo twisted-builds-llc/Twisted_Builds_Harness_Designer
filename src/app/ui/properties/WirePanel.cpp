@@ -28,6 +28,7 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     , m_document(document)
     , m_title(new QLabel(this))
     , m_name(new QLineEdit(this))
+    , m_circuitId(new QLineEdit(this))
     , m_base(new WireColorCombo(false, this))
     , m_stripe(new WireColorCombo(true, this))
     , m_baseCustom(new QPushButton(tr("..."), this))
@@ -81,6 +82,7 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     };
     auto *form = new QFormLayout;
     form->addRow(m_title);
+    form->addRow(tr("Circuit &ID:"), m_circuitId);
     form->addRow(tr("&Name:"), m_name);
     form->addRow(tr("Color:"), row(m_base, m_baseCustom));
     form->addRow(tr("Stripe:"), row(m_stripe, m_stripeCustom));
@@ -100,6 +102,12 @@ WirePanel::WirePanel(Document *document, QWidget *parent)
     layout->addWidget(m_endB.box);
     layout->addStretch();
 
+    m_circuitId->setToolTip(tr("Unique circuit number for build prints. New wires are numbered "
+                               "automatically; the Problems panel flags an ID used twice."));
+    connect(m_circuitId, &QLineEdit::editingFinished, this, [this] {
+        const QString id = m_circuitId->text().trimmed();
+        apply([&](Wire &w) { w.circuitId = id; }, tr("Change circuit ID"));
+    });
     connect(m_name, &QLineEdit::editingFinished, this, [this] {
         const QString name = m_name->text();
         apply([&](Wire &w) { w.name = name; }, tr("Rename wire"));
@@ -234,6 +242,9 @@ void WirePanel::refresh()
         return std::all_of(wires.begin(), wires.end(), [&](const Wire &w) { return getter(w) == getter(first); });
     };
 
+    const QSignalBlocker b0(m_circuitId);
+    m_circuitId->setEnabled(single);
+    m_circuitId->setText(single ? first.circuitId : QString());
     const QSignalBlocker b1(m_name), b2(m_base), b3(m_stripe), b4(m_wireType), b5(m_lengthOverride);
     m_title->setText(single ? describeWire(h, first) : tr("%n wires selected", nullptr, int(wires.size())));
     m_name->setEnabled(single);

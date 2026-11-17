@@ -3,6 +3,7 @@
 
 #include "io/FileFormat.h"
 #include "model/Harness.h"
+#include "model/Queries.h"
 
 #include <QCoreApplication>
 #include <QHash>
@@ -93,9 +94,20 @@ bool migrateV1ToV2(ZipEntries &entries, QString *)
 }
 
 // v2 had no plug part number: a cavity plug's part number went in the pin's seal column.
-// v3 moves it to "plugPartNumber" on pins marked "isCavityPlug".
+// v3 moves it to "plugPartNumber" on pins marked "isCavityPlug". v3 also numbers every wire
+// with a circuit id, C001 upwards in file order.
 bool migrateV2ToV3(ZipEntries &entries, QString *)
 {
+    if (const auto wiresDoc = parsed(entries, kWiresEntry); wiresDoc && wiresDoc->isArray()) {
+        QJsonArray wires = wiresDoc->array();
+        for (qsizetype i = 0; i < wires.size(); ++i) {
+            QJsonObject wire = wires[i].toObject();
+            if (wire.value(u"circuitId").toString().isEmpty())
+                wire[u"circuitId"] = circuitIdForNumber(int(i) + 1);
+            wires[i] = wire;
+        }
+        entries[QString(kWiresEntry)] = QJsonDocument(wires).toJson(QJsonDocument::Indented);
+    }
     const auto doc = parsed(entries, kConnectorsEntry);
     if (!doc || !doc->isArray())
         return true;

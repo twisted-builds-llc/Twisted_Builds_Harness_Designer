@@ -81,7 +81,7 @@ BomView::BomView(Document *document, QWidget *parent)
     , m_wires(makeTable({tr("Color"), tr("Gauge"), tr("Wire type"), tr("Pieces"), tr("Length"),
                          tr("With waste"), tr("Note")},
                         this))
-    , m_cutList(makeTable({tr("Wire"), tr("End A"), tr("End B"), tr("Color"), tr("Gauge"), tr("Wire type"),
+    , m_cutList(makeTable({tr("Circuit ID"), tr("Wire"), tr("End A"), tr("End B"), tr("Color"), tr("Gauge"), tr("Wire type"),
                            tr("Cut length"), tr("Note")},
                           this))
     , m_sleeving(makeTable({tr("Type"), tr("Size"), tr("Segments"), tr("Length"), tr("With waste")}, this))
@@ -208,22 +208,23 @@ void BomView::refresh()
     m_cutList->setRowCount(int(m_bom.cutList.size()));
     for (int r = 0; r < int(m_bom.cutList.size()); ++r) {
         const bom::CutLine &c = m_bom.cutList[size_t(r)];
-        auto *name = cell(c.name);
-        name->setData(Qt::UserRole, c.wireId);
-        m_cutList->setItem(r, 0, name);
-        m_cutList->setItem(r, 1, cell(c.endA));
-        m_cutList->setItem(r, 2, cell(c.endB));
-        m_cutList->setItem(r, 3, cell(colorText(c.baseColor, c.stripeColor)));
-        m_cutList->setItem(r, 4, cell(gaugeText(c.gauge)));
-        m_cutList->setItem(r, 5, cell(c.wireTypeName));
+        auto *circuit = cell(c.circuitId);
+        circuit->setData(Qt::UserRole, c.wireId);
+        m_cutList->setItem(r, 0, circuit);
+        m_cutList->setItem(r, 1, cell(c.name));
+        m_cutList->setItem(r, 2, cell(c.endA));
+        m_cutList->setItem(r, 3, cell(c.endB));
+        m_cutList->setItem(r, 4, cell(colorText(c.baseColor, c.stripeColor)));
+        m_cutList->setItem(r, 5, cell(gaugeText(c.gauge)));
+        m_cutList->setItem(r, 6, cell(c.wireTypeName));
         auto *length = cell(c.cutMm ? formatLength(*c.cutMm, units) : QString(), true);
         if (c.cutMm)
             length->setData(Qt::UserRole, *c.cutMm);
-        m_cutList->setItem(r, 6, length);
+        m_cutList->setItem(r, 7, length);
         const QString note = !c.cutMm ? tr("Not routed") : (c.overridden ? tr("Manual length") : QString());
-        m_cutList->setItem(r, 7, cell(note));
+        m_cutList->setItem(r, 8, cell(note));
         if (!c.cutMm)
-            flag(name, tr("Not routed: place both ends in the layout and connect them."));
+            flag(circuit, tr("Not routed: place both ends in the layout and connect them."));
     }
     m_cutList->setSortingEnabled(true);
 

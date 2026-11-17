@@ -26,6 +26,7 @@ struct WireLine
 struct CutLine
 {
     QString wireId;
+    QString circuitId;
     QString name;
     QString endA; // describeWireEnd()
     QString endB;

@@ -133,6 +133,7 @@ Loading fails with a message if:
 [
   {
     "baseColor": "RED",
+    "circuitId": "C001",
     "conductorKind": "single",
     "endA": { "type": "pin", "connectorId": "c-ecu", "pinId": "ecu-p1" },
     "endB": { "type": "free", "freeEndId": "fe1" },
@@ -153,6 +154,9 @@ Loading fails with a message if:
 - `stripeColor`: `""` means no stripe.
 - `lengthOverrideMm`: omitted when there is no manual override.
 - `routeSegmentIds`: manual route override; empty means route automatically.
+- `circuitId` (schema 3): the circuit number printed on cut lists and pinouts. New wires
+  get `C` + the next number (three digits or more); it is free text and may be edited.
+  Duplicates load fine and are reported in the Problems panel.
 - `conductorKind`: only `single` in schema 1.
 
 ## `splices.json`
@@ -324,4 +328,6 @@ supports are refused, never silently downgraded.
   placement key and the layout `refId`.
 - **3** (v0.1.1): pins gained `plugPartNumber`. Schema 2 files kept a cavity plug's part
   number in `sealPartNumber`; the 2 to 3 migration moves it to `plugPartNumber` on pins with
-  `isCavityPlug` and clears the seal. Other v0.1.1 schema additions also go in schema 3.
+  `isCavityPlug` and clears the seal. Wires gained `circuitId`; the migration numbers
+  wires without one C001, C002, ... in file order. Other v0.1.1 schema additions also go in
+  schema 3.

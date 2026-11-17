@@ -272,7 +272,8 @@ TableBlock cutListBlock(const Harness &harness, const Library &library)
     const Units units = harness.info.units;
     TableBlock block;
     block.columns = {{Tr::tr("Cut"), 0.5, Qt::AlignCenter},  {Tr::tr("#"), 0.5, Qt::AlignRight},
-                     {Tr::tr("Wire"), 2.0},                  {Tr::tr("Gauge"), 1.0},
+                     {Tr::tr("Circuit ID"), 0.8},            {Tr::tr("Wire"), 1.7},
+                     {Tr::tr("Gauge"), 1.0},
                      {Tr::tr("Color"), 1.7},                 {Tr::tr("Type"), 1.0},
                      {Tr::tr("Cut length"), 1.2, Qt::AlignRight}, {Tr::tr("From"), 2.4},
                      {Tr::tr("To"), 2.4},                    {Tr::tr("Note"), 1.3}};
@@ -282,6 +283,7 @@ TableBlock cutListBlock(const Harness &harness, const Library &library)
         const QString note = !c.cutMm ? Tr::tr("Not routed") : (c.overridden ? Tr::tr("Manual length") : QString());
         block.rows.push_back({checkboxCell(),
                               textCell(QString::number(++number)),
+                              textCell(c.circuitId),
                               textCell(c.name),
                               textCell(gaugeText(c.gauge)),
                               colorCell(c.baseColor, c.stripeColor),
@@ -296,7 +298,8 @@ TableBlock cutListBlock(const Harness &harness, const Library &library)
 
 std::vector<TableBlock> pinoutBlocks(const Harness &harness)
 {
-    const std::vector<Column> columns = {{Tr::tr("Pin"), 0.7},    {Tr::tr("Circuit"), 2.0}, {Tr::tr("Wire"), 2.0},
+    const std::vector<Column> columns = {{Tr::tr("Pin"), 0.7},    {Tr::tr("Circuit"), 2.0},
+                                         {Tr::tr("Circuit ID"), 0.8}, {Tr::tr("Wire"), 1.7},
                                          {Tr::tr("Color"), 1.7},  {Tr::tr("Gauge"), 1.0},   {Tr::tr("Goes to"), 2.6}};
     std::vector<TableBlock> blocks;
     for (const bom::PinoutTable &table : bom::pinoutTables(harness)) {
@@ -310,14 +313,14 @@ std::vector<TableBlock> pinoutBlocks(const Harness &harness)
         block.columns = columns;
         for (const bom::PinoutRow &r : table.rows) {
             if (r.wireId.isEmpty()) {
-                block.rows.push_back({textCell(r.pin), textCell(r.circuit), textCell(QStringLiteral("—")), Cell(), Cell(),
+                block.rows.push_back({textCell(r.pin), textCell(r.circuit), Cell(), textCell(QStringLiteral("—")), Cell(), Cell(),
                                       textCell(!r.cavityPlug ? Tr::tr("Empty")
                                                : r.plugPartNumber.isEmpty()
                                                    ? Tr::tr("Cavity plug")
                                                    : Tr::tr("Cavity plug %1").arg(r.plugPartNumber))});
                 continue;
             }
-            block.rows.push_back({textCell(r.pin), textCell(r.circuit), textCell(r.wireName),
+            block.rows.push_back({textCell(r.pin), textCell(r.circuit), textCell(r.circuitId), textCell(r.wireName),
                                   colorCell(r.baseColor, r.stripeColor),
                                   textCell(gaugeText(r.gauge)), textCell(r.otherEnd)});
         }

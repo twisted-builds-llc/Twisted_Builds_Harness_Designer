@@ -311,7 +311,9 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
         Placements p = placementsOf(EntityKind::FreeEnd, f.id);
         new AddEntityCommand<FreeEnd>(model, std::move(f), std::move(p), {}, macro.get());
     }
+    int circuitNumber = nextCircuitNumber(model->harness());
     for (Wire &w : fragment.wires) {
+        w.circuitId = circuitIdForNumber(circuitNumber++); // pasted wires are new circuits
         Placements p = placementsOf(EntityKind::Wire, w.id);
         new AddEntityCommand<Wire>(model, std::move(w), std::move(p), {}, macro.get());
     }
@@ -322,6 +324,8 @@ std::unique_ptr<QUndoCommand> addWire(HarnessModel *model, Wire wire, Placements
                                       const QString &text)
 {
     Harness after = model->harness();
+    if (wire.circuitId.isEmpty())
+        wire.circuitId = nextCircuitId(after);
     after.wires.push_back(std::move(wire));
     const CircuitTextFill fill = fillEmptyCircuitText(after, {after.wires.back().id});
     auto macro = std::make_unique<QUndoCommand>(text);

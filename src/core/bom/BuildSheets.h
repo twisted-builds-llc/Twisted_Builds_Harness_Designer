@@ -24,6 +24,7 @@ struct PinoutRow
     bool cavityPlug = false;
     QString plugPartNumber;
     QString wireId;  // empty: nothing on this pin
+    QString circuitId;
     QString wireName;
     QString baseColor;
     QString stripeColor;

@@ -2,6 +2,7 @@
 #include "Document.h"
 #include "Preferences.h"
 #include "Translations.h"
+#include "commands/EditOps.h"
 #include "commands/HarnessCommands.h"
 #include "ui/properties/ConnectorPanel.h"
 
@@ -121,6 +122,73 @@ private slots:
         doc.undoStack()->undo(); // delete
         QCOMPARE(pins()[0].sealPartNumber, u"S-5"_s);
         QCOMPARE(pins()[1].sealPartNumber, u"S-5"_s);
+    }
+
+    // Wiring pins by typing where they go; new wires get circuit ids.
+    void pinTableWiredColumn()
+    {
+        Document doc;
+        Harness h = doc.model()->harness();
+        for (const auto &[id, label, count] : {std::tuple{u"c1"_s, u"X1"_s, 3}, std::tuple{u"c2"_s, u"X2"_s, 2}}) {
+            Connector c;
+            c.id = id;
+            c.label = label;
+            for (int i = 1; i <= count; ++i)
+                c.pins.push_back(Pin{id + u"p%1"_s.arg(i), QString::number(i), {}, {}, {}, false, {}, {}, {}});
+            h.connectors.push_back(c);
+        }
+        doc.model()->reset(h);
+        ConnectorPanel panel(&doc);
+        panel.setConnector(u"c1"_s);
+        QAbstractItemModel *table = panel.findChild<QTableView *>()->model();
+        auto *pins = static_cast<PinTableModel *>(table);
+        const auto wires = [&] { return doc.model()->harness().wires; };
+        const int undoBase = doc.undoStack()->count();
+
+        QVERIFY(table->setData(table->index(0, PinTableModel::Wired), u"x2:1"_s, Qt::EditRole));
+        QCOMPARE(wires().size(), size_t(1));
+        const Wire first = wires()[0];
+        QCOMPARE(first.endA, WireEnd(PinRef{u"c1"_s, u"c1p1"_s}));
+        QCOMPARE(first.endB, WireEnd(PinRef{u"c2"_s, u"c2p1"_s}));
+        QCOMPARE(first.circuitId, u"C001"_s);
+        QCOMPARE(first.baseColor, doc.wireStyle().baseColor);
+        QCOMPARE(table->data(table->index(0, PinTableModel::Wired), Qt::DisplayRole).toString(), u"X2 : 1"_s);
+
+        // Names that match nothing change nothing and are reported.
+        QSignalSpy notFound(pins, &PinTableModel::connectionsNotFound);
+        QVERIFY(!table->setData(table->index(1, PinTableModel::Wired), u"X9 : 1"_s, Qt::EditRole));
+        QCOMPARE(notFound.size(), 1);
+        QCOMPARE(notFound[0][0].toStringList(), QStringList{u"X9 : 1"_s});
+        QCOMPARE(wires().size(), size_t(1));
+
+        // Two cells at once: two new wires, numbered on, one undo step.
+        QVERIFY(pins->setCellTexts({{table->index(1, PinTableModel::Wired), u"X2 : 2"_s},
+                                    {table->index(2, PinTableModel::Wired), u"X2 : 2"_s}}));
+        QCOMPARE(wires().size(), size_t(3));
+        QCOMPARE(wires()[1].circuitId, u"C002"_s);
+        QCOMPARE(wires()[2].circuitId, u"C003"_s);
+        QCOMPARE(doc.undoStack()->count(), undoBase + 2);
+
+        // Naming another end moves the existing wire: same wire, same circuit id.
+        QVERIFY(table->setData(table->index(0, PinTableModel::Wired), u"X2 : 2"_s, Qt::EditRole));
+        QCOMPARE(wires().size(), size_t(3));
+        QCOMPARE(wires()[0].id, first.id);
+        QCOMPARE(wires()[0].circuitId, u"C001"_s);
+        QCOMPARE(wires()[0].endB, WireEnd(PinRef{u"c2"_s, u"c2p2"_s}));
+
+        doc.undoStack()->undo();
+        doc.undoStack()->undo();
+        QCOMPARE(wires().size(), size_t(1));
+        QCOMPARE(wires()[0].endB, WireEnd(PinRef{u"c2"_s, u"c2p1"_s}));
+
+        // Pasted wires are new circuits: copying C001 pastes as C002.
+        Harness fragment;
+        fragment.connectors = {h.connectors[0], h.connectors[1]};
+        fragment.wires = {wires()[0]};
+        QSet<QString> pasted;
+        doc.undoStack()->push(pasteFragment(doc.model(), fragment, QPointF(100, 0), &pasted).release());
+        QCOMPARE(wires().size(), size_t(2));
+        QCOMPARE(wires()[1].circuitId, u"C002"_s);
     }
 
     void defaultUnitsPreference()

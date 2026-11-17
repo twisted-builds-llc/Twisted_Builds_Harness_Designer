@@ -84,6 +84,7 @@ Bom buildBom(const Harness &harness, const Library &library)
 
         CutLine cut;
         cut.wireId = w.id;
+        cut.circuitId = w.circuitId;
         cut.name = w.name;
         cut.endA = describeWireEnd(harness, w.endA);
         cut.endB = describeWireEnd(harness, w.endB);

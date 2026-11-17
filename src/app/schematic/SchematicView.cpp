@@ -6,6 +6,7 @@
 #include "calc/Highlight.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
+#include "commands/UndoBatch.h"
 #include "io/HarnessJson.h"
 #include "model/Fragment.h"
 #include "model/Queries.h"
@@ -16,9 +17,11 @@
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QGraphicsPathItem>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QScrollBar>
 #include <QTimer>
@@ -1254,6 +1257,14 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
     }
     const Selection &s = m_selection->selection();
     QMenu menu(this);
+    const DropTarget target = targetAt(mapToScene(event->pos()));
+    if (target.connector && target.row >= 0 && target.row < target.connector->rowCount()) {
+        const Connector &c = target.connector->connector();
+        const PinRef pin{c.id, c.pins[size_t(target.row)].id};
+        menu.addAction(tr("Connect Pin %1 To...").arg(c.pins[size_t(target.row)].label), this,
+                       [this, pin] { connectPinByName(pin); });
+        menu.addSeparator();
+    }
     if (!s.connectors.isEmpty() || !s.splices.isEmpty() || !s.freeEnds.isEmpty() || !s.notes.isEmpty()) {
         addMoveToSheetActions(menu.addMenu(tr("Move to Sheet")));
     }
@@ -1261,6 +1272,36 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
         addShowOnSheetActions(menu.addMenu(tr("Also Show on Sheet")));
     addExistingItemActions(menu.addMenu(tr("Add Existing Item to This Sheet")));
     menu.exec(event->globalPos());
+}
+
+void SchematicView::connectPinByName(const PinRef &pin)
+{
+    const Harness &harness = m_document->model()->harness();
+    QStringList choices;
+    for (const WireEndChoice &choice : wireEndChoices(harness)) {
+        if (choice.end != WireEnd(pin))
+            choices << choice.text;
+    }
+    QInputDialog dialog(this);
+    dialog.setWindowTitle(tr("Connect Pin"));
+    dialog.setLabelText(tr("Wire %1 to (a pin as \"Connector : Pin\", a splice or a flying lead; "
+                           "separate several with commas):")
+                            .arg(describeWireEnd(harness, pin)));
+    dialog.setComboBoxItems(choices);
+    dialog.setComboBoxEditable(true);
+    dialog.setTextValue(pinConnectionsText(harness, pin));
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+    const PinConnections connections{{pin, dialog.textValue()}};
+    QStringList unknown;
+    if (!checkPinConnections(this, m_document, connections, &unknown)) {
+        if (!unknown.isEmpty())
+            QMessageBox::warning(this, tr("Connect Pin"),
+                                 tr("Nothing is called %1. The pin was not wired.").arg(unknown.join(tr(", "))));
+        return;
+    }
+    UndoBatch batch(m_document->undoStack(), tr("Connect pin"));
+    applyPinConnections(m_document, connections, batch);
 }
 
 void SchematicView::addMoveToSheetActions(QMenu *menu)

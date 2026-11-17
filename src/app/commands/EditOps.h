@@ -42,12 +42,13 @@ std::unique_ptr<QUndoCommand> setConnectorPins(HarnessModel *model, const QStrin
 // same label and are not on that sheet are shown there instead of copied (wires touching
 // them are not copied); their ids are returned too. Wires between two reused items are
 // shown there too when the fragment marks them with a Schematic::wireSheetKey entry (the
-// wires selected when copying). New wires are drawn on that sheet.
+// wires selected when copying). New wires are drawn on that sheet and numbered with new
+// circuit ids.
 // Returns the new connector and splice ids through the out-parameter.
 std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragment, QPointF offset,
                                             QSet<QString> *newItemIds, const QString &sheetId = {});
 
-// Adds a wire. Empty circuit text is filled across it (fillEmptyCircuitText): a pin
+// Adds a wire; one without a circuit id gets nextCircuitId(). Empty circuit text is filled across it (fillEmptyCircuitText): a pin
 // without text takes the text of the pin at the other end (through splices), and an
 // unnamed wire takes it as its name. One undo step.
 std::unique_ptr<QUndoCommand> addWire(HarnessModel *model, Wire wire, Placements placements,

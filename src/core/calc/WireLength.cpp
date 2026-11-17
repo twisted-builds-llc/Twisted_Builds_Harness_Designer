@@ -265,6 +265,15 @@ std::vector<Problem> findProblems(const Harness &harness, const Library &library
         problems.push_back({Problem::Kind::UnroutedWire, w.id,
                             Tr::tr("Wire %1 is not routed: %2.").arg(describeWire(harness, w), reason)});
     }
+    QHash<QString, int> circuitUses;
+    for (const Wire &w : harness.wires) {
+        const QString id = w.circuitId.trimmed();
+        if (!id.isEmpty() && ++circuitUses[id.toCaseFolded()] == 2) {
+            // Reported once per id, on the second wire that uses it.
+            problems.push_back({Problem::Kind::DuplicateCircuitId, w.id,
+                                Tr::tr("Circuit ID %1 is used by more than one wire.").arg(id)});
+        }
+    }
     for (const LayoutSegment &s : harness.layoutSegments) {
         if (s.lengthMm <= 0) {
             const QString name = s.label.isEmpty() ? Tr::tr("(unlabeled)") : s.label;

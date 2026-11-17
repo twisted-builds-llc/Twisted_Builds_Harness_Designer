@@ -129,10 +129,10 @@ QString sectionToCsv(const Bom &bom, CsvSection section, Units units)
                         QString::number(w.piecesWithoutLength)});
         break;
     case CsvSection::CutList:
-        csv += row({Tr::tr("Wire"), Tr::tr("End A"), Tr::tr("End B"), Tr::tr("Color"), Tr::tr("Stripe"), Tr::tr("Gauge"), Tr::tr("Wire type"),
+        csv += row({Tr::tr("Circuit ID"), Tr::tr("Wire"), Tr::tr("End A"), Tr::tr("End B"), Tr::tr("Color"), Tr::tr("Stripe"), Tr::tr("Gauge"), Tr::tr("Wire type"),
                     Tr::tr("Cut length (%1)").arg(u), Tr::tr("Note")});
         for (const CutLine &c : bom.cutList)
-            csv += row({c.name, c.endA, c.endB, c.baseColor, c.stripeColor, gauge(c.gauge), c.wireTypeName,
+            csv += row({c.circuitId, c.name, c.endA, c.endB, c.baseColor, c.stripeColor, gauge(c.gauge), c.wireTypeName,
                         c.cutMm ? length(*c.cutMm, units) : QString(),
                         !c.cutMm ? Tr::tr("not routed") : (c.overridden ? Tr::tr("manual length") : QString())});
         break;

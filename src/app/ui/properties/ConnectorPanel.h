@@ -9,6 +9,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QLabel;
 class QLineEdit;
 class QSpinBox;
 class QTableView;
@@ -29,8 +30,9 @@ class PinTableModel : public QAbstractTableModel
     Q_OBJECT
 
 public:
-    // Plug is the cavity plug check box, PlugPart that plug's part number.
-    enum Column { Label, Circuit, Terminal, Seal, Plug, PlugPart, Notes, ColumnCount };
+    // Wired: the far ends of the pin's wires; typing names there wires the pin (see
+    // planPinConnections()). Plug is the cavity plug check box, PlugPart that plug's part number.
+    enum Column { Label, Circuit, Wired, Terminal, Seal, Plug, PlugPart, Notes, ColumnCount };
 
     explicit PinTableModel(Document *document, QObject *parent = nullptr);
 
@@ -49,10 +51,16 @@ public:
     // except empty, "0", "no" or "false". Returns false if nothing changed.
     bool setCellTexts(const std::vector<std::pair<QModelIndex, QString>> &cells);
 
+    // Names a Wired cell can take: every wire end except that row's own pin.
+    QStringList wiredChoices(int row) const;
+
+signals:
+    // Typed Wired names that match no pin, splice or free end (nothing was changed).
+    void connectionsNotFound(const QStringList &names);
+
 private:
     // Applies `text` to `column` of `pin`.
     static void applyText(Pin &pin, int column, const QString &text);
-    bool pushPins(Connector updated, const QString &undoText);
 
     void onConnectorChanged(const QString &id);
 
@@ -93,6 +101,7 @@ private:
     QSpinBox *m_visibleRows;
     PinTableModel *m_pins;
     QTableView *m_table;
+    QLabel *m_wiredMessage; // names typed in the Wired column that matched nothing
 };
 
 } // namespace tbh::app

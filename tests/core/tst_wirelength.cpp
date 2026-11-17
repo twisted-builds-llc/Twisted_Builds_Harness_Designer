@@ -176,6 +176,23 @@ private slots:
         QCOMPARE(problems[1].kind, Problem::Kind::SegmentWithoutLength);
         QCOMPARE(problems[1].itemId, u"seg4"_s);
     }
+
+    void duplicateCircuitIds()
+    {
+        Harness h = sample();
+        h.wires[0].circuitId = u"C001"_s;
+        h.wires[1].circuitId = u"c001"_s; // same id, other case
+        h.wires[2].circuitId = u"C001"_s; // third use: still one problem for the id
+        h.wires[3].circuitId = u"C002"_s;
+        std::vector<Problem> found;
+        for (const Problem &p : findProblems(h, h.library)) {
+            if (p.kind == Problem::Kind::DuplicateCircuitId)
+                found.push_back(p);
+        }
+        QCOMPARE(found.size(), size_t(1));
+        QCOMPARE(found[0].itemId, h.wires[1].id); // reported on its second wire
+        QVERIFY(found[0].message.contains(u"c001"_s));
+    }
 };
 
 QTEST_GUILESS_MAIN(TestWireLength)

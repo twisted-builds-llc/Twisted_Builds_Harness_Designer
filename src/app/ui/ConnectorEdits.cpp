@@ -3,6 +3,7 @@
 
 #include "Document.h"
 #include "commands/EditOps.h"
+#include "commands/UndoBatch.h"
 #include "model/Queries.h"
 
 #include <QCoreApplication>
@@ -87,6 +88,61 @@ bool deleteItems(QWidget *parent, Document *document, const Selection &selection
     document->undoStack()->push(
         removeItems(model, selection.connectors, selection.splices, selection.freeEnds, selection.wires, selection.notes).release());
     return true;
+}
+
+} // namespace tbh::app
+
+namespace tbh::app {
+
+bool checkPinConnections(QWidget *parent, Document *document, const PinConnections &connections,
+                         QStringList *unknown)
+{
+    HarnessModel *model = document->model();
+    QStringList missing;
+    std::vector<QString> removed;
+    for (const auto &[pin, text] : connections) {
+        const PinConnectionPlan plan = planPinConnections(model->harness(), pin, text);
+        missing << plan.unknown;
+        removed.insert(removed.end(), plan.removals.begin(), plan.removals.end());
+    }
+    if (!missing.isEmpty()) {
+        missing.removeDuplicates();
+        if (unknown)
+            *unknown = missing;
+        return false;
+    }
+    return confirmWireRemoval(parent, model->harness(), removed, Tr::tr("Changing these connections"));
+}
+
+void applyPinConnections(Document *document, const PinConnections &connections, UndoBatch &batch)
+{
+    HarnessModel *model = document->model();
+    for (const auto &[pin, text] : connections) {
+        // Planned again on the current state: an earlier pin may have wired this one already.
+        const PinConnectionPlan plan = planPinConnections(model->harness(), pin, text);
+        for (const PinConnectionPlan::Move &move : plan.moves)
+            batch.push(setWireEnd(model, move.wireId, move.endB, move.end));
+        if (!plan.removals.empty()) {
+            const QSet<QString> ids(plan.removals.begin(), plan.removals.end());
+            batch.push(removeItems(model, {}, {}, {}, ids));
+        }
+        const SchematicPlacement *home = model->placement(pin.connectorId);
+        for (const WireEnd &end : plan.adds) {
+            const WireStyle &style = document->wireStyle();
+            Wire wire;
+            wire.id = newId();
+            wire.endA = pin;
+            wire.endB = end;
+            wire.baseColor = style.baseColor;
+            wire.stripeColor = style.stripeColor;
+            wire.gauge = style.gauge;
+            wire.wireTypeId = style.wireTypeId;
+            SchematicPlacement drawnOn;
+            drawnOn.sheetId = home ? home->sheetId : QString();
+            const QString sheetKey = Schematic::wireSheetKey(wire.id);
+            batch.push(addWire(model, std::move(wire), {{sheetKey, drawnOn}}, Tr::tr("Add wire")));
+        }
+    }
 }
 
 } // namespace tbh::app

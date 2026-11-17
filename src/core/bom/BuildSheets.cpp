@@ -32,6 +32,7 @@ PinoutRow wireRow(const Harness &harness, const Wire &wire, bool atEndA)
 {
     PinoutRow row;
     row.wireId = wire.id;
+    row.circuitId = wire.circuitId;
     row.wireName = wire.name;
     row.baseColor = wire.baseColor;
     row.stripeColor = wire.stripeColor;

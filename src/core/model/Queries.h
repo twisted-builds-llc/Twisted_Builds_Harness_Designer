@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include <QStringList>
 #include "model/Harness.h"
 
 #include <QSet>
@@ -77,6 +78,50 @@ struct LayoutRef
     LayoutNodeType nodeType;
     QString label;
 };
+
+// Circuit ids: "C" + a number of at least three digits. The next one is one more than the
+// highest such id in use (ids typed in another form are ignored), e.g. C001 for none.
+QString circuitIdForNumber(int number);
+int nextCircuitNumber(const Harness &harness);
+QString nextCircuitId(const Harness &harness);
+
+// Wire ends a wire can be connected to, by their describeWireEnd() text: every connector
+// pin ("X1 : 3"), splice and free end, in model order.
+struct WireEndChoice
+{
+    QString text;
+    WireEnd end;
+};
+std::vector<WireEndChoice> wireEndChoices(const Harness &harness);
+// The choice whose text matches `text`, ignoring case and spaces ("x1:3" finds "X1 : 3").
+// The first match wins when labels repeat.
+std::optional<WireEnd> findWireEnd(const Harness &harness, const QString &text);
+
+// Connecting a pin by naming the ends it is wired to: names are describeWireEnd() texts,
+// comma separated (e.g. "ECU : 3, S1"; findWireEnd() matching).
+// The current text for a pin: the far ends of its wires, in wire order.
+QString pinConnectionsText(const Harness &harness, const PinRef &pin);
+// What it takes to make `pin` wired to exactly the ends `text` names. Wires to ends no
+// longer named are moved to newly named ends, pairing them in order, so they keep their
+// color, gauge and name; named ends left over get new wires, wires left over are removed.
+// Names that match nothing, or name the pin itself, go to `unknown` (the plan is otherwise
+// empty then). Repeated names count once.
+struct PinConnectionPlan
+{
+    struct Move
+    {
+        QString wireId;
+        bool endB = false; // which end of the wire moves
+        WireEnd end;
+    };
+    QStringList unknown;
+    std::vector<Move> moves;
+    std::vector<WireEnd> adds;
+    std::vector<QString> removals;
+
+    bool isEmpty() const { return moves.empty() && adds.empty() && removals.empty(); }
+};
+PinConnectionPlan planPinConnections(const Harness &harness, const PinRef &pin, const QString &text);
 
 // All connectors, splices and free ends, in model order.
 std::vector<LayoutRef> layoutRefs(const Harness &harness);

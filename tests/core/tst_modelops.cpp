@@ -65,6 +65,72 @@ private slots:
         QCOMPARE(unitsToMm(7.0, Units::Millimeters), 7.0);
     }
 
+    void circuitIds()
+    {
+        Harness h = sample();
+        QCOMPARE(nextCircuitId(h), u"C001"_s); // no ids yet
+        h.wires[0].circuitId = u"C007"_s;
+        h.wires[1].circuitId = u"C12"_s;   // still a number: 12
+        h.wires[2].circuitId = u"PWR-1"_s; // another form: ignored
+        QCOMPARE(nextCircuitId(h), u"C013"_s); // highest 12, + 1
+        h.wires[1].circuitId = u"C1234"_s;
+        QCOMPARE(nextCircuitId(h), u"C1235"_s); // more than three digits stay as they are
+    }
+
+    void findWireEndByName()
+    {
+        const Harness h = sample();
+        QCOMPARE(findWireEnd(h, u"J1 : 2"_s), std::optional<WireEnd>(PinRef{u"j1"_s, u"j1-p2"_s}));
+        QCOMPARE(findWireEnd(h, u" j1:2 "_s), std::optional<WireEnd>(PinRef{u"j1"_s, u"j1-p2"_s}));
+        QCOMPARE(findWireEnd(h, u"s1"_s), std::optional<WireEnd>(SpliceRef{u"s1"_s}));
+        QCOMPARE(findWireEnd(h, u"Flying lead L"_s), std::optional<WireEnd>(FreeEndRef{u"f1"_s}));
+        QVERIFY(!findWireEnd(h, u"J1 : 9"_s));
+        QVERIFY(!findWireEnd(h, u""_s));
+    }
+
+    void planPinConnectionsFromText()
+    {
+        const Harness h = sample();
+        const PinRef j1p1{u"j1"_s, u"j1-p1"_s}; // w1 runs J1.1 - J2.1
+        QCOMPARE(pinConnectionsText(h, j1p1), u"J2 : 1"_s);
+
+        // Same end named again: nothing to do.
+        QVERIFY(planPinConnections(h, j1p1, u"J2:1"_s).isEmpty());
+
+        // Another end: w1 moves there (its far end is B) and keeps its name.
+        PinConnectionPlan plan = planPinConnections(h, j1p1, u"S1"_s);
+        QCOMPARE(plan.moves.size(), size_t(1));
+        QCOMPARE(plan.moves[0].wireId, u"w1"_s);
+        QVERIFY(plan.moves[0].endB);
+        QCOMPARE(plan.moves[0].end, WireEnd(SpliceRef{u"s1"_s}));
+        QVERIFY(plan.adds.empty() && plan.removals.empty());
+
+        // Keep J2.1 and add two more (repeated name counted once): two new wires.
+        plan = planPinConnections(h, j1p1, u"J2 : 1, S1, Flying lead L, s1"_s);
+        QVERIFY(plan.moves.empty());
+        QCOMPARE(plan.adds, (std::vector<WireEnd>{SpliceRef{u"s1"_s}, FreeEndRef{u"f1"_s}}));
+
+        // Empty text: w1 goes.
+        plan = planPinConnections(h, j1p1, u""_s);
+        QCOMPARE(plan.removals, std::vector<QString>{u"w1"_s});
+
+        // Two wires on a pin, one name left: the first moves, the second is removed.
+        Harness two = h;
+        two.wires.push_back(two.wires[0]);
+        two.wires.back().id = u"w4"_s;
+        two.wires.back().endB = SpliceRef{u"s1"_s};
+        // J1.1 now has w1 (to J2.1) and w4 (to S1). Naming F1 only: w1 moves to F1, w4 goes.
+        plan = planPinConnections(two, j1p1, u"Flying lead L"_s);
+        QCOMPARE(plan.moves.size(), size_t(1));
+        QCOMPARE(plan.moves[0].wireId, u"w1"_s);
+        QCOMPARE(plan.removals, std::vector<QString>{u"w4"_s});
+
+        // Unknown names, or the pin itself, change nothing.
+        plan = planPinConnections(h, j1p1, u"S1, nowhere, J1 : 1"_s);
+        QCOMPARE(plan.unknown, (QStringList{u"nowhere"_s, u"J1 : 1"_s}));
+        QVERIFY(plan.isEmpty());
+    }
+
     void queries()
     {
         const Harness h = sample();

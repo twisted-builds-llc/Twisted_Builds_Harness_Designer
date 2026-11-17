@@ -310,6 +310,7 @@ Wire readWire(ObjectReader r)
     Wire w;
     w.id = r.id();
     w.name = r.string("name");
+    w.circuitId = r.string("circuitId");
     const QString base = r.context();
     w.endA = readWireEnd(ObjectReader(r.object("endA", true), base + QStringLiteral(".endA")));
     w.endB = readWireEnd(ObjectReader(r.object("endB", true), base + QStringLiteral(".endB")));
@@ -596,6 +597,7 @@ QJsonObject writeWire(const Wire &w)
     QJsonObject o = w.extra;
     o[u"id"] = w.id;
     o[u"name"] = w.name;
+    o[u"circuitId"] = w.circuitId;
     o[u"endA"] = writeWireEnd(w.endA);
     o[u"endB"] = writeWireEnd(w.endB);
     o[u"baseColor"] = w.baseColor;

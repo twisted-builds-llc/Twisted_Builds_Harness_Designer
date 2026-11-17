@@ -64,6 +64,7 @@ Harness sampleHarness()
     pinToPin.gauge = {20, GaugeSystem::Awg};
     pinToPin.lengthOverrideMm = 1234.5;
     pinToPin.routeSegmentIds = {u"seg1"_s};
+    pinToPin.circuitId = u"C007"_s;
 
     Wire toSplice;
     toSplice.id = u"w2"_s;
@@ -356,7 +357,8 @@ private slots:
 
     // Schema 2 had no plug part number: a cavity plug's part number was typed in the seal
     // column. Opening such a file moves it to plugPartNumber; other pins keep their seals.
-    void schemaV2PlugPartNumbersAreMigrated()
+    // Schema 2 wires had no circuit id; they are numbered C001 upwards.
+    void schemaV2PlugsAndCircuitIdsAreMigrated()
     {
         const QString file = path(u"v2.tbh"_s);
         QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
@@ -377,6 +379,13 @@ private slots:
         ecu[u"pins"] = pins;
         connectors[0] = ecu;
         e[u"connectors.json"_s] = toBytes(connectors);
+        QJsonArray wires = QJsonDocument::fromJson(e.at(u"wires.json"_s)).array();
+        for (qsizetype i = 0; i < wires.size(); ++i) {
+            QJsonObject wire = wires[i].toObject();
+            wire.remove(u"circuitId");
+            wires[i] = wire;
+        }
+        e[u"wires.json"_s] = toBytes(wires);
         writeRaw(file, e);
 
         QString error;
@@ -386,6 +395,10 @@ private slots:
         QVERIFY(c.pins[2].isCavityPlug);
         QCOMPARE(c.pins[2].plugPartNumber, u"PLUG-1"_s);
         QVERIFY(c.pins[2].sealPartNumber.isEmpty());
+        // Schema 3 also numbers the wires in file order.
+        QVERIFY(loaded->wires.size() >= 2);
+        QCOMPARE(loaded->wires[0].circuitId, u"C001"_s);
+        QCOMPARE(loaded->wires[1].circuitId, u"C002"_s);
         // The sensor's ordinary pin keeps its seal.
         QCOMPARE(loaded->connectors[1].pins[0].sealPartNumber, u"SEAL-1"_s);
         QVERIFY(loaded->connectors[1].pins[0].plugPartNumber.isEmpty());

@@ -4,12 +4,15 @@
 #include "Document.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
+#include "commands/UndoBatch.h"
+#include "model/Queries.h"
 #include "ui/ConnectorEdits.h"
 #include "ui/PinPatternDialog.h"
 #include "ui/properties/PanelWidgets.h"
 
 #include <QCheckBox>
 #include <QClipboard>
+#include <QCompleter>
 #include <QGuiApplication>
 #include <QKeyEvent>
 #include <QStyledItemDelegate>
@@ -23,6 +26,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QTableView>
+#include <QUndoStack>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -42,6 +46,14 @@ PinTableModel::PinTableModel(Document *document, QObject *parent)
             onConnectorChanged(id);
     });
     connect(document->model(), &HarnessModel::harnessReset, this, [this] { setConnector({}); });
+    // The Wired column shows wires and the labels of what they go to.
+    auto refreshWired = [this] {
+        if (m_rows > 0)
+            emit dataChanged(index(0, Wired), index(m_rows - 1, Wired));
+    };
+    connect(document->model(), &HarnessModel::entityAdded, this, refreshWired);
+    connect(document->model(), &HarnessModel::entityRemoved, this, refreshWired);
+    connect(document->model(), &HarnessModel::entityChanged, this, refreshWired);
 }
 
 void PinTableModel::setConnector(const QString &id)
@@ -103,6 +115,8 @@ QVariant PinTableModel::data(const QModelIndex &index, int role) const
         return pin.label;
     case Circuit:
         return pin.circuitText;
+    case Wired:
+        return pinConnectionsText(m_document->model()->harness(), PinRef{c->id, pin.id});
     case Terminal:
         return pin.terminalPartNumber;
     case Seal:
@@ -157,15 +171,6 @@ void PinTableModel::applyText(Pin &pin, int column, const QString &text)
     }
 }
 
-bool PinTableModel::pushPins(Connector updated, const QString &undoText)
-{
-    auto command = updateConnector(m_document->model(), updated, undoText);
-    if (!command)
-        return false;
-    m_document->undoStack()->push(command.release());
-    return true;
-}
-
 bool PinTableModel::setData(const QModelIndex &index, const QVariant &value, int role)
 {
     const Connector *current = m_document->model()->find<Connector>(m_connectorId);
@@ -173,13 +178,10 @@ bool PinTableModel::setData(const QModelIndex &index, const QVariant &value, int
         return false;
     if (role != (index.column() == Plug ? Qt::CheckStateRole : Qt::EditRole))
         return false;
-    Connector updated = *current;
-    Pin &pin = updated.pins[size_t(index.row())];
+    QString text = value.toString();
     if (index.column() == Plug)
-        pin.isCavityPlug = Qt::CheckState(value.toInt()) == Qt::Checked;
-    else
-        applyText(pin, index.column(), value.toString());
-    return pushPins(std::move(updated), tr("Edit pin"));
+        text = Qt::CheckState(value.toInt()) == Qt::Checked ? u"1"_s : QString();
+    return setCellTexts({{index, text}});
 }
 
 bool PinTableModel::setCellTexts(const std::vector<std::pair<QModelIndex, QString>> &cells)
@@ -188,11 +190,46 @@ bool PinTableModel::setCellTexts(const std::vector<std::pair<QModelIndex, QStrin
     if (!current)
         return false;
     Connector updated = *current;
+    PinConnections connections;
     for (const auto &[index, text] : cells) {
-        if (index.isValid() && index.row() < int(updated.pins.size()))
-            applyText(updated.pins[size_t(index.row())], index.column(), text);
+        if (!index.isValid() || index.row() >= int(updated.pins.size()))
+            continue;
+        Pin &pin = updated.pins[size_t(index.row())];
+        if (index.column() == Wired) {
+            if (text != data(index, Qt::EditRole).toString())
+                connections.emplace_back(PinRef{updated.id, pin.id}, text);
+        } else {
+            applyText(pin, index.column(), text);
+        }
     }
-    return pushPins(std::move(updated), cells.size() == 1 ? tr("Edit pin") : tr("Edit pins"));
+    if (!connections.empty()) {
+        QStringList unknown;
+        if (!checkPinConnections(qobject_cast<QWidget *>(QObject::parent()), m_document, connections, &unknown)) {
+            if (!unknown.isEmpty())
+                emit connectionsNotFound(unknown);
+            return false;
+        }
+    }
+    UndoBatch batch(m_document->undoStack(), cells.size() == 1 ? tr("Edit pin") : tr("Edit pins"));
+    // The connector first: new wires may then fill empty circuit text on its pins.
+    batch.push(updateConnector(m_document->model(), updated, tr("Edit pin")));
+    applyPinConnections(m_document, connections, batch);
+    return batch.pushedAny();
+}
+
+QStringList PinTableModel::wiredChoices(int row) const
+{
+    const Harness &harness = m_document->model()->harness();
+    const Connector *c = m_document->model()->find<Connector>(m_connectorId);
+    const WireEnd self = c && row >= 0 && row < int(c->pins.size())
+                             ? WireEnd(PinRef{c->id, c->pins[size_t(row)].id})
+                             : WireEnd(SpliceRef{});
+    QStringList choices;
+    for (const WireEndChoice &choice : wireEndChoices(harness)) {
+        if (choice.end != self)
+            choices << choice.text;
+    }
+    return choices;
 }
 
 Qt::ItemFlags PinTableModel::flags(const QModelIndex &index) const
@@ -204,6 +241,10 @@ Qt::ItemFlags PinTableModel::flags(const QModelIndex &index) const
 
 QVariant PinTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
+    if (role == Qt::ToolTipRole && orientation == Qt::Horizontal && section == Wired)
+        return tr("Where the pin's wires go, e.g. \"ECU : 12\" or a splice. Type a pin, splice or flying "
+                  "lead to wire it there; separate several with commas. New wires are numbered and "
+                  "use the current wire color and gauge.");
     if (role == Qt::ToolTipRole && orientation == Qt::Horizontal && section == Plug)
         return tr("Unused cavity fitted with a blind plug.");
     if (role == Qt::ToolTipRole && orientation == Qt::Horizontal && section == PlugPart)
@@ -217,6 +258,8 @@ QVariant PinTableModel::headerData(int section, Qt::Orientation orientation, int
         return tr("Pin");
     case Circuit:
         return tr("Circuit");
+    case Wired:
+        return tr("Wired to");
     case Terminal:
         return tr("Terminal P/N");
     case Seal:
@@ -255,6 +298,20 @@ public:
         , m_view(view)
         , m_pins(pins)
     {
+    }
+
+    QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
+                          const QModelIndex &index) const override
+    {
+        QWidget *editor = QStyledItemDelegate::createEditor(parent, option, index);
+        auto *line = qobject_cast<QLineEdit *>(editor);
+        if (line && index.column() == PinTableModel::Wired) {
+            auto *completer = new QCompleter(m_pins->wiredChoices(index.row()), line);
+            completer->setCaseSensitivity(Qt::CaseInsensitive);
+            completer->setFilterMode(Qt::MatchContains);
+            line->setCompleter(completer);
+        }
+        return editor;
     }
 
     void setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const override
@@ -422,6 +479,7 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     , m_visibleRows(new QSpinBox(this))
     , m_pins(new PinTableModel(document, this))
     , m_table(new PinTableView(this))
+    , m_wiredMessage(new QLabel(this))
 {
     m_gender->addItem(tr("None"), int(Gender::None));
     m_gender->addItem(tr("Male"), int(Gender::Male));
@@ -456,6 +514,15 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     m_table->setItemDelegate(new PinCellDelegate(m_table, m_pins));
     m_table->setToolTip(tr("Select several cells to fill them at once: type a value, paste one with "
                            "Ctrl+V, or press Delete to clear them. Ctrl+C copies the selected cells."));
+    m_wiredMessage->setWordWrap(true);
+    m_wiredMessage->hide();
+    connect(m_pins, &PinTableModel::connectionsNotFound, this, [this](const QStringList &names) {
+        m_wiredMessage->setText(tr("Not wired: nothing is called %1. Use a pin as \"Connector : Pin\", "
+                                   "a splice or a flying lead name.")
+                                    .arg(names.join(tr(", "))));
+        m_wiredMessage->show();
+    });
+    connect(m_document->undoStack(), &QUndoStack::indexChanged, m_wiredMessage, &QWidget::hide);
     m_table->setAccessibleName(tr("Pins"));
     m_pinCount->setAccessibleName(tr("Pin count"));
     pattern->setAccessibleDescription(tr("Fill pin labels from a pattern such as A1-A8, B1-B8"));
@@ -469,6 +536,7 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);
     layout->addWidget(m_table, 1);
+    layout->addWidget(m_wiredMessage);
 
     for (QLineEdit *edit : {m_label, m_partNumber, m_manufacturer, m_description})
         connect(edit, &QLineEdit::editingFinished, this, &ConnectorPanel::commitInfo);
