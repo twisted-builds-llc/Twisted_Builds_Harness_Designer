@@ -70,9 +70,12 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   Space + left drag; middle drag always pans) and "Scroll wheel pans" (Ctrl+wheel zooms); pinch
   zooms; touchscreens: one finger = left button, two fingers pinch zoom + pan
   (`CanvasView::handleTouch`). Panning is intercepted in `CanvasView::viewportEvent` before subclasses see the mouse.
-- **Current work: v0.1.1 feature set** (touch pinch/pan, pin table bulk edit, plug column, circuit
-  IDs, connect-from-pin, connector/terminal/seal library, layout labels, backshells/strain relief).
-  Plan, decisions and progress: `docs/V0.1.1_PLAN.md` - read it and keep its checkboxes current.
+- **v0.1.1 feature set done on branch `v0.1.1-features`** (built on `canvas-pan-preferences`;
+  touch pinch/pan, pin table bulk edit + Plug P/N column, circuit IDs, Wired to column /
+  Connect Pin To, connector/terminal/seal/plug library with seed data, CSV import and fit
+  warnings, layout labels with covers, zip ties, backshells/strain relief; schema 3). Tagged
+  `v0.1.1` from that branch for a draft release the user is testing. **Not merged to `main`**:
+  merge only when the user says so. Details and decisions: `docs/V0.1.1_PLAN.md`.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
   translations for languages other than English.
 - User preferences: inches by default (mm/cm optional, set in Edit > Preferences); work on a
