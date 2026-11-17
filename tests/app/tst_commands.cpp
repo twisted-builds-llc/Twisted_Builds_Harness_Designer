@@ -3,6 +3,13 @@
 #include "Preferences.h"
 #include "Translations.h"
 #include "commands/HarnessCommands.h"
+#include "ui/properties/ConnectorPanel.h"
+
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QLineEdit>
+#include <QTableView>
+#include <QUndoStack>
 
 #include <QSettings>
 #include <QSignalSpy>
@@ -29,6 +36,92 @@ private slots:
 
     void init() { QSettings().clear(); }
     void cleanupTestCase() { QSettings().clear(); }
+
+    // Spreadsheet-style editing of several pin cells at once, each one undo step.
+    void pinTableBulkEdit()
+    {
+        Document doc;
+        Harness h = doc.model()->harness();
+        Connector c;
+        c.id = u"c1"_s;
+        c.label = u"X1"_s;
+        for (int i = 1; i <= 4; ++i)
+            c.pins.push_back(Pin{u"p%1"_s.arg(i), QString::number(i), {}, {}, {}, false, {}, {}, {}});
+        h.connectors.push_back(c);
+        doc.model()->reset(h);
+        ConnectorPanel panel(&doc);
+        panel.setConnector(u"c1"_s);
+        auto *table = panel.findChild<QTableView *>();
+        QAbstractItemModel *model = table->model();
+        auto pins = [&] { return doc.model()->find<Connector>(u"c1"_s)->pins; };
+        auto select = [&](int top, int left, int bottom, int right) {
+            table->setCurrentIndex(model->index(top, left));
+            table->selectionModel()->select(QItemSelection(model->index(top, left), model->index(bottom, right)),
+                                            QItemSelectionModel::ClearAndSelect);
+        };
+        const int undoBase = doc.undoStack()->count();
+
+        // Typing with three terminal cells selected fills all three.
+        select(0, PinTableModel::Terminal, 2, PinTableModel::Terminal);
+        table->edit(model->index(0, PinTableModel::Terminal));
+        auto *editor = table->viewport()->findChild<QLineEdit *>();
+        QVERIFY(editor);
+        editor->setText(u"T-9"_s);
+        QTest::keyClick(editor, Qt::Key_Return);
+        // Qt commits the editor on Enter through a queued call.
+        QTRY_COMPARE(pins()[0].terminalPartNumber, u"T-9"_s);
+        QCOMPARE(pins()[2].terminalPartNumber, u"T-9"_s);
+        QVERIFY(pins()[3].terminalPartNumber.isEmpty());
+        QCOMPARE(doc.undoStack()->count(), undoBase + 1);
+
+        // Ctrl+C copies the selected block, tab separated, one line per row.
+        select(0, PinTableModel::Terminal, 1, PinTableModel::Seal);
+        QTest::keyClick(table, Qt::Key_C, Qt::ControlModifier);
+        QCOMPARE(QGuiApplication::clipboard()->text(), u"T-9\t\nT-9\t"_s);
+
+        // One value pastes into every selected cell.
+        QGuiApplication::clipboard()->setText(u"S-5"_s);
+        select(0, PinTableModel::Seal, 3, PinTableModel::Seal);
+        QTest::keyClick(table, Qt::Key_V, Qt::ControlModifier);
+        for (const Pin &pin : pins())
+            QCOMPARE(pin.sealPartNumber, u"S-5"_s);
+        QCOMPARE(doc.undoStack()->count(), undoBase + 2);
+
+        // A block pastes from the top left selected cell.
+        QGuiApplication::clipboard()->setText(u"A\tB\r\nC\tD\r\n"_s);
+        select(2, PinTableModel::Terminal, 2, PinTableModel::Terminal);
+        QTest::keyClick(table, Qt::Key_V, Qt::ControlModifier);
+        QCOMPARE(pins()[2].terminalPartNumber, u"A"_s);
+        QCOMPARE(pins()[2].sealPartNumber, u"B"_s);
+        QCOMPARE(pins()[3].terminalPartNumber, u"C"_s);
+        QCOMPARE(pins()[3].sealPartNumber, u"D"_s);
+
+        // Delete clears the selected cells.
+        select(0, PinTableModel::Seal, 1, PinTableModel::Seal);
+        QTest::keyClick(table, Qt::Key_Delete);
+        QVERIFY(pins()[0].sealPartNumber.isEmpty());
+        QVERIFY(pins()[1].sealPartNumber.isEmpty());
+        QCOMPARE(pins()[2].sealPartNumber, u"B"_s);
+
+        // Space toggles every selected Plug box; a plug part number marks the cavity plugged.
+        select(0, PinTableModel::Plug, 1, PinTableModel::Plug);
+        QTest::keyClick(table, Qt::Key_Space);
+        QVERIFY(pins()[0].isCavityPlug);
+        QVERIFY(pins()[1].isCavityPlug);
+        QVERIFY(!pins()[2].isCavityPlug);
+        QVERIFY(model->setData(model->index(3, PinTableModel::PlugPart), u"PL-7"_s, Qt::EditRole));
+        QVERIFY(pins()[3].isCavityPlug);
+        QCOMPARE(pins()[3].plugPartNumber, u"PL-7"_s);
+
+        // Each bulk edit is one undo step: type, paste, block paste, delete, plug toggle,
+        // plug P/N = 6 (copying is not an edit).
+        QCOMPARE(doc.undoStack()->count() - undoBase, 6);
+        doc.undoStack()->undo(); // plug P/N
+        doc.undoStack()->undo(); // plug toggle
+        doc.undoStack()->undo(); // delete
+        QCOMPARE(pins()[0].sealPartNumber, u"S-5"_s);
+        QCOMPARE(pins()[1].sealPartNumber, u"S-5"_s);
+    }
 
     void defaultUnitsPreference()
     {

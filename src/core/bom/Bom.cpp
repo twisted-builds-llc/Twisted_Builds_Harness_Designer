@@ -160,7 +160,9 @@ Bom buildBom(const Harness &harness, const Library &library)
         for (const Pin &p : c.pins) {
             const QString reference = QStringLiteral("%1 : %2").arg(c.label, p.label);
             if (p.isCavityPlug) {
-                parts.add(PartCategory::CavityPlug, p.sealPartNumber, {}, reference);
+                parts.add(PartCategory::CavityPlug, p.plugPartNumber, {}, reference);
+                if (!p.sealPartNumber.trimmed().isEmpty()) // plugs that need a seal too
+                    parts.add(PartCategory::Seal, p.sealPartNumber, {}, reference);
                 continue;
             }
             if (!wiredPins.contains(c.id + QLatin1Char('/') + p.id))

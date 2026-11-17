@@ -92,9 +92,35 @@ bool migrateV1ToV2(ZipEntries &entries, QString *)
     return true;
 }
 
+// v2 had no plug part number: a cavity plug's part number went in the pin's seal column.
+// v3 moves it to "plugPartNumber" on pins marked "isCavityPlug".
+bool migrateV2ToV3(ZipEntries &entries, QString *)
+{
+    const auto doc = parsed(entries, kConnectorsEntry);
+    if (!doc || !doc->isArray())
+        return true;
+    QJsonArray connectors = doc->array();
+    for (qsizetype i = 0; i < connectors.size(); ++i) {
+        QJsonObject connector = connectors[i].toObject();
+        QJsonArray pins = connector.value(u"pins").toArray();
+        for (qsizetype j = 0; j < pins.size(); ++j) {
+            QJsonObject pin = pins[j].toObject();
+            if (!pin.value(u"isCavityPlug").toBool() || pin.contains(u"plugPartNumber"))
+                continue;
+            pin[u"plugPartNumber"] = pin.value(u"sealPartNumber").toString();
+            pin[u"sealPartNumber"] = QString();
+            pins[j] = pin;
+        }
+        connector[u"pins"] = pins;
+        connectors[i] = connector;
+    }
+    entries[QString(kConnectorsEntry)] = QJsonDocument(connectors).toJson(QJsonDocument::Indented);
+    return true;
+}
+
 // kMigrations[i] upgrades schema version i+1 to i+2. Append one step (and bump
 // kSchemaVersion) for every backward-incompatible schema change.
-constexpr std::array<MigrationStep, kSchemaVersion - 1> kMigrations{migrateV1ToV2};
+constexpr std::array<MigrationStep, kSchemaVersion - 1> kMigrations{migrateV1ToV2, migrateV2ToV3};
 
 } // namespace
 

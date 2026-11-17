@@ -94,7 +94,7 @@ private slots:
         QCOMPARE(findPart(bom, PartCategory::Terminal, {})->quantity, 2);
         QCOMPARE(findPart(bom, PartCategory::Terminal, {})->references, (QStringList{u"ECU : 4"_s, u"LAMP : 1"_s}));
         QCOMPARE(findPart(bom, PartCategory::Seal, u"S-1"_s)->quantity, 2);
-        // The plug's seal P/N is not also counted as a seal; it is the plug part number.
+        // ecu5 is a cavity plug (no seal): counted from its plug part number.
         QCOMPARE(findPart(bom, PartCategory::CavityPlug, u"PLUG-1"_s)->quantity, 1);
         QCOMPARE(findPart(bom, PartCategory::Splice, u"SPL-1"_s)->quantity, 1);
         // Order: category, then part number, "(no part number)" last.

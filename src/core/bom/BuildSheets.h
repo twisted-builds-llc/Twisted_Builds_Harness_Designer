@@ -22,6 +22,7 @@ struct PinoutRow
     QString pin;     // pin label; empty for splices
     QString circuit; // pin circuit text
     bool cavityPlug = false;
+    QString plugPartNumber;
     QString wireId;  // empty: nothing on this pin
     QString wireName;
     QString baseColor;

@@ -9,6 +9,10 @@
 #include "ui/properties/PanelWidgets.h"
 
 #include <QCheckBox>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QKeyEvent>
+#include <QStyledItemDelegate>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -21,7 +25,11 @@
 #include <QTableView>
 #include <QVBoxLayout>
 
+#include <algorithm>
+
 namespace tbh::app {
+
+using namespace Qt::StringLiterals;
 
 // ---- PinTableModel --------------------------------------------------------------
 
@@ -99,6 +107,8 @@ QVariant PinTableModel::data(const QModelIndex &index, int role) const
         return pin.terminalPartNumber;
     case Seal:
         return pin.sealPartNumber;
+    case PlugPart:
+        return pin.plugPartNumber;
     case Notes:
         return pin.notes;
     default:
@@ -106,45 +116,83 @@ QVariant PinTableModel::data(const QModelIndex &index, int role) const
     }
 }
 
+QString PinTableModel::cellText(const QModelIndex &index) const
+{
+    if (index.column() == Plug)
+        return data(index, Qt::CheckStateRole) == Qt::Checked ? tr("Yes") : QString();
+    return data(index, Qt::EditRole).toString();
+}
+
+void PinTableModel::applyText(Pin &pin, int column, const QString &text)
+{
+    switch (column) {
+    case Label:
+        pin.label = text;
+        break;
+    case Circuit:
+        pin.circuitText = text;
+        break;
+    case Terminal:
+        pin.terminalPartNumber = text;
+        break;
+    case Seal:
+        pin.sealPartNumber = text;
+        break;
+    case Plug: {
+        const QString t = text.trimmed().toLower();
+        pin.isCavityPlug = !(t.isEmpty() || t == u"0" || t == u"no" || t == u"false"
+                             || t == tr("No").toLower());
+        break;
+    }
+    case PlugPart:
+        pin.plugPartNumber = text;
+        if (!text.trimmed().isEmpty())
+            pin.isCavityPlug = true; // a plug part number means the cavity is plugged
+        break;
+    case Notes:
+        pin.notes = text;
+        break;
+    default:
+        break;
+    }
+}
+
+bool PinTableModel::pushPins(Connector updated, const QString &undoText)
+{
+    auto command = updateConnector(m_document->model(), updated, undoText);
+    if (!command)
+        return false;
+    m_document->undoStack()->push(command.release());
+    return true;
+}
+
 bool PinTableModel::setData(const QModelIndex &index, const QVariant &value, int role)
 {
     const Connector *current = m_document->model()->find<Connector>(m_connectorId);
     if (!current || index.row() >= int(current->pins.size()))
         return false;
+    if (role != (index.column() == Plug ? Qt::CheckStateRole : Qt::EditRole))
+        return false;
     Connector updated = *current;
     Pin &pin = updated.pins[size_t(index.row())];
-    if (index.column() == Plug) {
-        if (role != Qt::CheckStateRole)
-            return false;
+    if (index.column() == Plug)
         pin.isCavityPlug = Qt::CheckState(value.toInt()) == Qt::Checked;
-    } else {
-        if (role != Qt::EditRole)
-            return false;
-        const QString text = value.toString();
-        switch (index.column()) {
-        case Label:
-            pin.label = text;
-            break;
-        case Circuit:
-            pin.circuitText = text;
-            break;
-        case Terminal:
-            pin.terminalPartNumber = text;
-            break;
-        case Seal:
-            pin.sealPartNumber = text;
-            break;
-        case Notes:
-            pin.notes = text;
-            break;
-        default:
-            return false;
-        }
-    }
-    if (updated == *current)
+    else
+        applyText(pin, index.column(), value.toString());
+    return pushPins(std::move(updated), tr("Edit pin"));
+}
+
+bool PinTableModel::setCellTexts(const std::vector<std::pair<QModelIndex, QString>> &cells)
+{
+    const Connector *current = m_document->model()->find<Connector>(m_connectorId);
+    if (!current)
         return false;
-    m_document->undoStack()->push(updateConnector(m_document->model(), updated, tr("Edit pin")).release());
-    return true;
+    Connector updated = *current;
+    for (const auto &[index, text] : cells) {
+        if (index.isValid() && index.row() < int(updated.pins.size()))
+            applyText(updated.pins[size_t(index.row())], index.column(), text);
+    }
+    return pushPins(std::move(updated), cells.size() == 1 ? tr("Edit pin") : tr("Edit pins"));
 }
 
 Qt::ItemFlags PinTableModel::flags(const QModelIndex &index) const
@@ -156,8 +204,10 @@ Qt::ItemFlags PinTableModel::flags(const QModelIndex &index) const
 
 QVariant PinTableModel::headerData(int section, Qt::Orientation orientation, int role) const
 {
-    if (role == Qt::ToolTipRole && orientation == Qt::Horizontal && section == Seal)
-        return tr("Seal part number. For a cavity plug, enter the plug's part number here.");
+    if (role == Qt::ToolTipRole && orientation == Qt::Horizontal && section == Plug)
+        return tr("Unused cavity fitted with a blind plug.");
+    if (role == Qt::ToolTipRole && orientation == Qt::Horizontal && section == PlugPart)
+        return tr("Cavity plug part number. Entering one marks the cavity as plugged.");
     if (role != Qt::DisplayRole)
         return {};
     if (orientation == Qt::Vertical)
@@ -173,12 +223,188 @@ QVariant PinTableModel::headerData(int section, Qt::Orientation orientation, int
         return tr("Seal P/N");
     case Plug:
         return tr("Plug");
+    case PlugPart:
+        return tr("Plug P/N");
     case Notes:
         return tr("Notes");
     default:
         return {};
     }
 }
+
+// ---- PinTableView -----------------------------------------------------------------
+
+namespace {
+
+// Selected cells, top to bottom then left to right.
+QModelIndexList sortedSelection(const QItemSelectionModel *selection)
+{
+    QModelIndexList cells = selection->selectedIndexes();
+    std::sort(cells.begin(), cells.end(), [](const QModelIndex &a, const QModelIndex &b) {
+        return a.row() != b.row() ? a.row() < b.row() : a.column() < b.column();
+    });
+    return cells;
+}
+
+// Typing in a cell while several cells of its column are selected fills them all.
+class PinCellDelegate : public QStyledItemDelegate
+{
+public:
+    PinCellDelegate(QTableView *view, PinTableModel *pins)
+        : QStyledItemDelegate(view)
+        , m_view(view)
+        , m_pins(pins)
+    {
+    }
+
+    void setModelData(QWidget *editor, QAbstractItemModel *model, const QModelIndex &index) const override
+    {
+        auto *line = qobject_cast<QLineEdit *>(editor);
+        if (!line) {
+            QStyledItemDelegate::setModelData(editor, model, index);
+            return;
+        }
+        std::vector<std::pair<QModelIndex, QString>> cells{{index, line->text()}};
+        for (const QModelIndex &cell : m_view->selectionModel()->selectedIndexes()) {
+            if (cell.column() == index.column() && cell != index)
+                cells.emplace_back(cell, line->text());
+        }
+        m_pins->setCellTexts(cells);
+    }
+
+private:
+    QTableView *m_view;
+    PinTableModel *m_pins;
+};
+
+// Pin table with spreadsheet-style keys: Ctrl+C copies the selected cells (tab separated),
+// Ctrl+V pastes (one value fills every selected cell, a block pastes from the top left
+// selected cell), Delete clears the selected cells and Space toggles every selected Plug box.
+class PinTableView : public QTableView
+{
+public:
+    explicit PinTableView(QWidget *parent)
+        : QTableView(parent)
+    {
+    }
+
+    PinTableModel *pins() const { return static_cast<PinTableModel *>(model()); }
+
+protected:
+    bool event(QEvent *event) override
+    {
+        // Keep these keys from window shortcuts while the table has focus.
+        if (event->type() == QEvent::ShortcutOverride && state() != EditingState) {
+            auto *key = static_cast<QKeyEvent *>(event);
+            if (key == QKeySequence::Copy || key == QKeySequence::Paste || key == QKeySequence::Delete
+                || key->key() == Qt::Key_Backspace) {
+                event->accept();
+                return true;
+            }
+        }
+        return QTableView::event(event);
+    }
+
+    void keyPressEvent(QKeyEvent *event) override
+    {
+        if (state() != EditingState && selectionModel() && pins()) {
+            if (event == QKeySequence::Copy) {
+                copy();
+                return;
+            }
+            if (event == QKeySequence::Paste) {
+                paste();
+                return;
+            }
+            if (event == QKeySequence::Delete || event->key() == Qt::Key_Backspace) {
+                std::vector<std::pair<QModelIndex, QString>> cells;
+                for (const QModelIndex &cell : selectionModel()->selectedIndexes())
+                    cells.emplace_back(cell, QString());
+                pins()->setCellTexts(cells);
+                return;
+            }
+            if (event->key() == Qt::Key_Space && currentIndex().column() == PinTableModel::Plug) {
+                const bool plug = pins()->cellText(currentIndex()).isEmpty();
+                std::vector<std::pair<QModelIndex, QString>> cells;
+                for (const QModelIndex &cell : selectionModel()->selectedIndexes()) {
+                    if (cell.column() == PinTableModel::Plug)
+                        cells.emplace_back(cell, plug ? u"1"_s : QString());
+                }
+                if (cells.empty())
+                    cells.emplace_back(currentIndex(), plug ? u"1"_s : QString());
+                pins()->setCellTexts(cells);
+                return;
+            }
+        }
+        QTableView::keyPressEvent(event);
+    }
+
+private:
+    void copy()
+    {
+        const QModelIndexList cells = sortedSelection(selectionModel());
+        if (cells.isEmpty())
+            return;
+        int top = cells.first().row(), bottom = cells.last().row();
+        int left = cells.first().column(), right = left;
+        for (const QModelIndex &cell : cells) {
+            left = std::min(left, cell.column());
+            right = std::max(right, cell.column());
+        }
+        QStringList rows;
+        for (int row = top; row <= bottom; ++row) {
+            QStringList values;
+            for (int column = left; column <= right; ++column) {
+                const QModelIndex cell = model()->index(row, column);
+                values << (selectionModel()->isSelected(cell) ? pins()->cellText(cell) : QString());
+            }
+            rows << values.join(u'\t');
+        }
+        QGuiApplication::clipboard()->setText(rows.join(u'\n'));
+    }
+
+    void paste()
+    {
+        QString text = QGuiApplication::clipboard()->text();
+        text.remove(u'\r');
+        if (text.endsWith(u'\n'))
+            text.chop(1);
+        QList<QStringList> block;
+        for (const QString &row : text.split(u'\n'))
+            block << row.split(u'\t');
+        std::vector<std::pair<QModelIndex, QString>> cells;
+        const QModelIndexList selected = sortedSelection(selectionModel());
+        if (block.size() == 1 && block.first().size() == 1) {
+            for (const QModelIndex &cell : selected)
+                cells.emplace_back(cell, block.first().first());
+        } else {
+            QModelIndex start = selected.isEmpty() ? currentIndex() : selected.first();
+            for (const QModelIndex &cell : selected) {
+                if (cell.column() < start.column())
+                    start = model()->index(start.row(), cell.column());
+            }
+            if (!start.isValid())
+                return;
+            for (qsizetype r = 0; r < block.size(); ++r) {
+                for (qsizetype c = 0; c < block[r].size(); ++c) {
+                    const QModelIndex cell = model()->index(start.row() + int(r), start.column() + int(c));
+                    if (cell.isValid())
+                        cells.emplace_back(cell, block[r][c]);
+                }
+            }
+        }
+        if (cells.empty())
+            return;
+        pins()->setCellTexts(cells);
+        // Select what was pasted, so it can be pasted again or cleared.
+        QItemSelection pasted;
+        for (const auto &cell : cells)
+            pasted.select(cell.first, cell.first);
+        selectionModel()->select(pasted, QItemSelectionModel::ClearAndSelect);
+    }
+};
+
+} // namespace
 
 // ---- ConnectorPanel ---------------------------------------------------------------
 
@@ -195,7 +421,7 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     , m_collapsed(new QCheckBox(tr("Collapsed"), this))
     , m_visibleRows(new QSpinBox(this))
     , m_pins(new PinTableModel(document, this))
-    , m_table(new QTableView(this))
+    , m_table(new PinTableView(this))
 {
     m_gender->addItem(tr("None"), int(Gender::None));
     m_gender->addItem(tr("Male"), int(Gender::Male));
@@ -227,6 +453,9 @@ ConnectorPanel::ConnectorPanel(Document *document, QWidget *parent)
     form->addRow(tr("Display:"), displayRow);
 
     m_table->setModel(m_pins);
+    m_table->setItemDelegate(new PinCellDelegate(m_table, m_pins));
+    m_table->setToolTip(tr("Select several cells to fill them at once: type a value, paste one with "
+                           "Ctrl+V, or press Delete to clear them. Ctrl+C copies the selected cells."));
     m_table->setAccessibleName(tr("Pins"));
     m_pinCount->setAccessibleName(tr("Pin count"));
     pattern->setAccessibleDescription(tr("Fill pin labels from a pattern such as A1-A8, B1-B8"));

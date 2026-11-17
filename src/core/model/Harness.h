@@ -75,7 +75,8 @@ struct Pin {
     QString circuitText;
     QString terminalPartNumber;
     QString sealPartNumber;
-    bool isCavityPlug = false;
+    bool isCavityPlug = false;  // unused cavity fitted with a blind plug
+    QString plugPartNumber;     // that plug's part number
     QString notes;
     QJsonObject extra;
 

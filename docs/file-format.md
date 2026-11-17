@@ -58,7 +58,7 @@ Loading fails with a message if:
   "appVersion": "0.1.0",
   "createdAt": "2026-01-02T03:04:05.678Z",
   "modifiedAt": "2026-01-02T04:00:00.000Z",
-  "schemaVersion": 2
+  "schemaVersion": 3
 }
 ```
 
@@ -112,6 +112,7 @@ Loading fails with a message if:
         "isCavityPlug": false,
         "label": "A1",
         "notes": "",
+        "plugPartNumber": "",
         "sealPartNumber": "",
         "terminalPartNumber": ""
       }
@@ -122,6 +123,9 @@ Loading fails with a message if:
 
 - `gender`: `none` | `male` | `female`.
 - Pin order in the array is the display order. Pin `label` is free text.
+- `isCavityPlug`: the cavity is fitted with a blind plug; `plugPartNumber` is that plug
+  (schema 3). The BOM counts plugs from `plugPartNumber` and, if set, a seal from
+  `sealPartNumber`.
 
 ## `wires.json`
 
@@ -318,3 +322,6 @@ supports are refused, never silently downgraded.
   placement and layout node used the key `<wireId>/a` or `<wireId>/b`. The 1 to 2 migration
   gives each such end an id, moves it to `freeEnds.json`, and rewrites the wire end, the
   placement key and the layout `refId`.
+- **3** (v0.1.1): pins gained `plugPartNumber`. Schema 2 files kept a cavity plug's part
+  number in `sealPartNumber`; the 2 to 3 migration moves it to `plugPartNumber` on pins with
+  `isCavityPlug` and clears the seal. Other v0.1.1 schema additions also go in schema 3.

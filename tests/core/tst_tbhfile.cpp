@@ -43,12 +43,13 @@ Harness sampleHarness()
         ecu.pins.push_back(p);
     }
     ecu.pins[2].isCavityPlug = true;
+    ecu.pins[2].plugPartNumber = u"PLUG-1"_s;
 
     Connector sensor;
     sensor.id = u"c-sensor"_s;
     sensor.label = u"SENSOR"_s;
     sensor.gender = Gender::Male;
-    sensor.pins.push_back(Pin{u"s-p1"_s, u"+"_s, u"5V"_s, {}, u"SEAL-1"_s, false, u"note"_s, {}});
+    sensor.pins.push_back(Pin{u"s-p1"_s, u"+"_s, u"5V"_s, {}, u"SEAL-1"_s, false, {}, u"note"_s, {}});
     h.connectors = {ecu, sensor};
 
     h.splices.push_back(Splice{u"sp1"_s, u"S1"_s, u"SPL-1"_s, {}});
@@ -351,6 +352,43 @@ private slots:
         QVERIFY(withWire([](QJsonObject &w) {
                     w[u"routeSegmentIds"] = QJsonArray{u"nope"_s};
                 }).contains(u"nope"));
+    }
+
+    // Schema 2 had no plug part number: a cavity plug's part number was typed in the seal
+    // column. Opening such a file moves it to plugPartNumber; other pins keep their seals.
+    void schemaV2PlugPartNumbersAreMigrated()
+    {
+        const QString file = path(u"v2.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
+        io::ZipEntries e = readRaw(file);
+        QJsonObject manifest = QJsonDocument::fromJson(e.at(u"manifest.json"_s)).object();
+        manifest[u"schemaVersion"] = 2;
+        e[u"manifest.json"_s] = toBytes(manifest);
+        QJsonArray connectors = QJsonDocument::fromJson(e.at(u"connectors.json"_s)).array();
+        QJsonObject ecu = connectors[0].toObject();
+        QJsonArray pins = ecu[u"pins"].toArray();
+        for (qsizetype i = 0; i < pins.size(); ++i) {
+            QJsonObject pin = pins[i].toObject();
+            pin.remove(u"plugPartNumber");
+            if (i == 2)
+                pin[u"sealPartNumber"] = u"PLUG-1"_s; // plug pin (isCavityPlug)
+            pins[i] = pin;
+        }
+        ecu[u"pins"] = pins;
+        connectors[0] = ecu;
+        e[u"connectors.json"_s] = toBytes(connectors);
+        writeRaw(file, e);
+
+        QString error;
+        const auto loaded = io::readTbhFile(file, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        const Connector &c = loaded->connectors[0];
+        QVERIFY(c.pins[2].isCavityPlug);
+        QCOMPARE(c.pins[2].plugPartNumber, u"PLUG-1"_s);
+        QVERIFY(c.pins[2].sealPartNumber.isEmpty());
+        // The sensor's ordinary pin keeps its seal.
+        QCOMPARE(loaded->connectors[1].pins[0].sealPartNumber, u"SEAL-1"_s);
+        QVERIFY(loaded->connectors[1].pins[0].plugPartNumber.isEmpty());
     }
 
     // Schema 1 kept free ends inside wires.json; opening such a file moves each into

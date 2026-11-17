@@ -115,7 +115,7 @@ inline Harness bomSample()
         ecu.pins[size_t(i)].terminalPartNumber = u"T-1"_s; // ecu4 has none
     ecu.pins[0].sealPartNumber = u"S-1"_s;
     ecu.pins[1].sealPartNumber = u"S-1"_s;
-    ecu.pins.push_back(Pin{u"ecu5"_s, u"5"_s, {}, {}, u"PLUG-1"_s, true, {}, {}});
+    ecu.pins.push_back(Pin{u"ecu5"_s, u"5"_s, {}, {}, {}, true, u"PLUG-1"_s, {}, {}});
     for (Pin &p : h.connectors[1].pins)
         p.terminalPartNumber = u"T-2"_s;
     h.splices[0].partNumber = u"SPL-1"_s;

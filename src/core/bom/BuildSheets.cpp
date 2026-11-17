@@ -116,6 +116,7 @@ std::vector<PinoutTable> pinoutTables(const Harness &harness)
                 table.rows[i].pin = p.label;
                 table.rows[i].circuit = p.circuitText;
                 table.rows[i].cavityPlug = p.isCavityPlug;
+                table.rows[i].plugPartNumber = p.plugPartNumber;
             }
         }
         tables.push_back(std::move(table));

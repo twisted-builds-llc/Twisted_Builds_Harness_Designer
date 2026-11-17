@@ -8,7 +8,7 @@
 namespace tbh::io {
 
 inline constexpr QLatin1StringView kFileExtension{"tbh"}; // without the dot
-inline constexpr int kSchemaVersion = 2;
+inline constexpr int kSchemaVersion = 3;
 
 // Container entry names.
 inline constexpr QLatin1StringView kManifestEntry{"manifest.json"};

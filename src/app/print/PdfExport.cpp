@@ -311,7 +311,10 @@ std::vector<TableBlock> pinoutBlocks(const Harness &harness)
         for (const bom::PinoutRow &r : table.rows) {
             if (r.wireId.isEmpty()) {
                 block.rows.push_back({textCell(r.pin), textCell(r.circuit), textCell(QStringLiteral("—")), Cell(), Cell(),
-                                      textCell(r.cavityPlug ? Tr::tr("Cavity plug") : Tr::tr("Empty"))});
+                                      textCell(!r.cavityPlug ? Tr::tr("Empty")
+                                               : r.plugPartNumber.isEmpty()
+                                                   ? Tr::tr("Cavity plug")
+                                                   : Tr::tr("Cavity plug %1").arg(r.plugPartNumber))});
                 continue;
             }
             block.rows.push_back({textCell(r.pin), textCell(r.circuit), textCell(r.wireName),

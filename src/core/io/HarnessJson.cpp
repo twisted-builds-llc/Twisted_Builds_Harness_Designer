@@ -267,6 +267,7 @@ Pin readPin(ObjectReader r)
     pin.terminalPartNumber = r.string("terminalPartNumber");
     pin.sealPartNumber = r.string("sealPartNumber");
     pin.isCavityPlug = r.boolean("isCavityPlug", false);
+    pin.plugPartNumber = r.string("plugPartNumber");
     pin.notes = r.string("notes");
     pin.extra = r.extra();
     return pin;
@@ -551,6 +552,7 @@ QJsonObject writePin(const Pin &p)
     o[u"terminalPartNumber"] = p.terminalPartNumber;
     o[u"sealPartNumber"] = p.sealPartNumber;
     o[u"isCavityPlug"] = p.isCavityPlug;
+    o[u"plugPartNumber"] = p.plugPartNumber;
     o[u"notes"] = p.notes;
     return o;
 }
