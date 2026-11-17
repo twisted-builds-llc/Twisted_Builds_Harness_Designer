@@ -30,7 +30,7 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
     for (const LayoutNode &n : harness.layoutNodes) {
         if (!seed.layoutNodes.contains(n.id))
             continue;
-        for (const QString &id : n.sharedSpliceIds)
+        for (const QString &id : n.sharedRefIds)
             nodeRefs.insert(id);
         if (!n.refId.isEmpty())
             nodeRefs.insert(n.refId);
@@ -61,7 +61,7 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
     {
         if (!n.refId.isEmpty())
             nodeByRef.insert(n.refId, n.id);
-        for (const QString &id : n.sharedSpliceIds)
+        for (const QString &id : n.sharedRefIds)
             nodeByRef.insert(id, n.id);
     }
     for (const LayoutSegment &s : harness.layoutSegments)

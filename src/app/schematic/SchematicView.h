@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
+#include "calc/WireLength.h"
 #include "model/Harness.h"
 #include "schematic/SchematicItems.h"
 #include "ui/CanvasView.h"
 
 #include <map>
+#include <optional>
 
 class QGraphicsPathItem;
 class QMenu;
@@ -79,8 +81,18 @@ public:
     void goToOtherSheet(const QString &wireId);
 
     // Cuts a wire at a schematic point (two cut ends either side) / replaces a cut end with
-    // a new splice, so an add-on can be spliced in. One undo step each.
-    void cutWireAt(const QString &wireId, const QPointF &scenePos);
+    // a new splice, so an add-on can be spliced in. One undo step each. With `inLoom`, both
+    // cut ends go into the layout at one point, that far along the wire's route; false (and
+    // nothing changes) if the route has no such point that a cut can go on (see
+    // calc::pointAlongRoute(); a connector, splice or other end is in the way).
+    struct CutPosition
+    {
+        bool fromEndB = false;
+        double distanceMm = 0;
+    };
+    bool cutWireAt(const QString &wireId, const QPointF &scenePos, std::optional<CutPosition> inLoom);
+    // Context menu: asks where along its route a routed wire is cut, then cuts it.
+    void askAndCutWire(const QString &wireId, const QPointF &scenePos);
     void replaceWithSplice(const QString &freeEndId);
 
 signals:
@@ -97,6 +109,9 @@ protected:
     bool nudgeSelection(const QPointF &delta) override;
 
 private:
+    // Puts both cut ends at one new point in the loom (or in place of a bend or fork), on
+    // the undo stack's open macro.
+    void placeCutInLoom(const QString &cutA, const QString &cutB, const calc::RoutePoint &at);
     struct DropTarget
     {
         std::optional<WireEnd> end;

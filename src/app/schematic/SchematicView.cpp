@@ -4,21 +4,29 @@
 #include "Document.h"
 #include "SelectionModel.h"
 #include "calc/Highlight.h"
+#include "calc/WireLength.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "commands/UndoBatch.h"
 #include "io/HarnessJson.h"
+#include "layout/LayoutItems.h"
 #include "model/Fragment.h"
 #include "model/Queries.h"
 #include "schematic/SchematicScene.h"
 #include "ui/ConnectorEdits.h"
+#include "ui/Format.h"
 
 #include <QApplication>
 #include <QClipboard>
+#include <QComboBox>
 #include <QContextMenuEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QGraphicsPathItem>
 #include <QInputDialog>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QMessageBox>
@@ -1306,7 +1314,7 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
     const QPointF scenePos = mapToScene(event->pos());
     if (item && item->type() == WireItemType) {
         const QString wireId = static_cast<WireItem *>(item)->id();
-        menu.addAction(tr("Cut Wire Here"), this, [this, wireId, scenePos] { cutWireAt(wireId, scenePos); });
+        menu.addAction(tr("Cut Wire Here"), this, [this, wireId, scenePos] { askAndCutWire(wireId, scenePos); });
         menu.addSeparator();
     }
     if (item && item->type() == FreeEndItemType
@@ -1324,11 +1332,76 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
     menu.exec(event->globalPos());
 }
 
-void SchematicView::cutWireAt(const QString &wireId, const QPointF &scenePos)
+void SchematicView::askAndCutWire(const QString &wireId, const QPointF &scenePos)
 {
-    const Wire *wire = m_document->model()->find<Wire>(wireId);
+    HarnessModel *model = m_document->model();
+    const Wire *wire = model->find<Wire>(wireId);
     if (!wire)
         return;
+    const Harness &h = model->harness();
+    const calc::WireLength route = calc::wireLength(h, calc::LayoutGraph(h), *wire);
+    if (route.status != calc::RouteStatus::Ok || route.baseMm <= 0) {
+        cutWireAt(wireId, scenePos, std::nullopt);
+        emit statusMessage(tr("Wire cut. It is not routed in the layout: when it is, drag one cut end onto the "
+                              "other there, so both sit at the cut."));
+        return;
+    }
+    // Both cut ends go to one point in the loom; ask where, measured from either end
+    // (a factory connector by default: what an installer can measure from).
+    const Units units = h.info.units;
+    auto isFactoryPin = [&](const WireEnd &end) {
+        const auto *pin = std::get_if<PinRef>(&end);
+        const Connector *c = pin ? model->find<Connector>(pin->connectorId) : nullptr;
+        return c && c->factory;
+    };
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Cut Wire"));
+    auto *form = new QFormLayout(&dialog);
+    form->addRow(new QLabel(tr("Where along the loom is the wire cut? Its route is %1 long.")
+                                .arg(formatLength(route.baseMm, units)),
+                            &dialog));
+    auto *distance = new QLineEdit(formatLength(route.baseMm / 2, units, false), &dialog);
+    auto *from = new QComboBox(&dialog);
+    from->addItem(describeWireEnd(h, wire->endA));
+    from->addItem(describeWireEnd(h, wire->endB));
+    from->setCurrentIndex(!isFactoryPin(wire->endA) && isFactoryPin(wire->endB) ? 1 : 0);
+    form->addRow(tr("&Distance (%1):").arg(unitsSymbol(units)), distance);
+    form->addRow(tr("&From:"), from);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(buttons);
+    distance->selectAll();
+    while (dialog.exec() == QDialog::Accepted) {
+        const auto mm = parseLength(distance->text(), units);
+        if (mm && cutWireAt(wireId, scenePos, CutPosition{from->currentIndex() == 1, *mm}))
+            return;
+        QMessageBox::warning(&dialog, tr("Cut Wire"),
+                             mm ? tr("The cut must be between the two ends of the wire's route, not on a "
+                                     "connector, splice or other end along it.")
+                                : tr("\"%1\" is not a length in %2.").arg(distance->text(), unitsSymbol(units)));
+    }
+}
+
+bool SchematicView::cutWireAt(const QString &wireId, const QPointF &scenePos, std::optional<CutPosition> inLoom)
+{
+    HarnessModel *model = m_document->model();
+    const Wire *wire = model->find<Wire>(wireId);
+    if (!wire)
+        return false;
+    // Where both cut ends go in the loom: inside a segment, or in place of a bend or fork.
+    std::optional<calc::RoutePoint> loomPoint;
+    if (inLoom) {
+        loomPoint = calc::pointAlongRoute(calc::LayoutGraph(model->harness()), *wire, inLoom->fromEndB,
+                                          inLoom->distanceMm);
+        if (!loomPoint)
+            return false;
+        if (!loomPoint->atNodeId.isEmpty()) {
+            const LayoutNode *point = model->find<LayoutNode>(loomPoint->atNodeId);
+            if (!point || point->type != LayoutNodeType::Branch)
+                return false;
+        }
+    }
     // The cut ends sit either side of the point, the one for end A on end A's side.
     constexpr qreal kGap = 40;
     const QPointF at = SchematicScene::snapped(scenePos);
@@ -1340,14 +1413,55 @@ void SchematicView::cutWireAt(const QString &wireId, const QPointF &scenePos)
     const QPointF left = SchematicScene::snapped(at - QPointF(kGap, 0));
     const QPointF right = SchematicScene::snapped(at + QPointF(kGap, 0));
     QString secondId;
-    auto command = cutWire(m_document->model(), wireId, endAOnLeft ? left : right, endAOnLeft ? right : left,
-                           m_scene->currentSheet(), &secondId);
+    std::pair<QString, QString> cutEnds;
+    auto command = cutWire(model, wireId, endAOnLeft ? left : right, endAOnLeft ? right : left,
+                           m_scene->currentSheet(), &secondId, &cutEnds);
     if (!command)
-        return;
-    m_document->undoStack()->push(command.release());
+        return false;
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(command->text());
+    stack->push(command.release());
+    if (loomPoint)
+        placeCutInLoom(cutEnds.first, cutEnds.second, *loomPoint);
+    stack->endMacro();
     Selection selection;
     selection.wires = {wireId, secondId};
     m_selection->setSelection(selection);
+    return true;
+}
+
+void SchematicView::placeCutInLoom(const QString &cutA, const QString &cutB, const calc::RoutePoint &at)
+{
+    HarnessModel *model = m_document->model();
+    QUndoStack *stack = m_document->undoStack();
+    if (!at.atNodeId.isEmpty()) {
+        // Exactly on a bend or fork: the cut takes its place.
+        LayoutNode point = *model->find<LayoutNode>(at.atNodeId);
+        point.type = LayoutNodeType::FlyingLead;
+        point.refId = cutA;
+        point.sharedRefIds = {cutB};
+        stack->push(new UpdateEntityCommand<LayoutNode>(model, point, {}));
+        return;
+    }
+    const LayoutSegment segment = *model->find<LayoutSegment>(at.segmentId);
+    const QPointF a = model->find<LayoutNode>(segment.nodeA)->position;
+    const QPointF b = model->find<LayoutNode>(segment.nodeB)->position;
+    const double fromA = at.fromNodeA ? at.offsetMm / segment.lengthMm : 1 - at.offsetMm / segment.lengthMm;
+    // The drawing is not to scale: keep the cut clear of the segment's ends.
+    const SegmentSplit split = splitAt(a, b, segment.bend, std::clamp(fromA, 0.2, 0.8));
+    LayoutNode node;
+    node.id = newId();
+    node.type = LayoutNodeType::FlyingLead;
+    node.refId = cutA;
+    node.sharedRefIds = {cutB};
+    node.position = split.point;
+    const QString nodeId = node.id;
+    stack->push(new AddEntityCommand<LayoutNode>(model, std::move(node), {}, {}));
+    QString newSegmentId;
+    stack->push(
+        splitSegmentAt(model, segment.id, nodeId, split.fraction, split.bendA, split.bendB, &newSegmentId).release());
+    if (auto distance = setDistanceAlongRun(model, nodeId, at.fromNodeA ? segment.id : newSegmentId, at.offsetMm))
+        stack->push(distance.release());
 }
 
 void SchematicView::replaceWithSplice(const QString &freeEndId)

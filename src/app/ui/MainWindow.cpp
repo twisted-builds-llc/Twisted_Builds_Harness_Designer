@@ -509,6 +509,15 @@ void MainWindow::createMenus()
         QSettings().setValue(QStringLiteral("view/bundleDiameters"), on);
         m_layout->view()->layoutScene()->setShowBundleDiameters(on);
     });
+    QAction *factory = m_viewMenu->addAction(tr("Show F&actory Harness"));
+    factory->setCheckable(true);
+    factory->setToolTip(tr("Draw the existing (factory) harness faded in the layout; off shows only the add-on"));
+    factory->setChecked(QSettings().value(QStringLiteral("view/factoryHarness"), true).toBool());
+    m_layout->view()->layoutScene()->setShowFactoryHarness(factory->isChecked());
+    connect(factory, &QAction::toggled, this, [this](bool on) {
+        QSettings().setValue(QStringLiteral("view/factoryHarness"), on);
+        m_layout->view()->layoutScene()->setShowFactoryHarness(on);
+    });
     m_viewMenu->addSeparator();
     m_splitAction = m_viewMenu->addAction(tr("S&plit Schematic and Layout"));
     m_splitAction->setCheckable(true);

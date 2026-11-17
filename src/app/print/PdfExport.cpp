@@ -3,6 +3,7 @@
 
 #include "SelectionModel.h"
 #include "bom/BuildSheets.h"
+#include "calc/WireLength.h"
 #include "layout/LayoutScene.h"
 #include "model/Queries.h"
 #include "schematic/SchematicScene.h"
@@ -505,10 +506,29 @@ int exportBuildPackage(const HarnessModel &source, const QString &path, const Pd
                          frame.height() - 2 * inset - headingHeight - kTitleBlockHeight - pt(8));
 
     std::vector<Sheet> sheets;
-    sheets.push_back({Tr::tr("Layout"), Tr::tr("Not to scale: build to the lengths shown."),
-                      [&](QPainter &p, const QRectF &area) {
-                          drawScene(p, layout, area, Tr::tr("Nothing is placed in the layout yet."));
-                      }});
+    // An add-on to an existing (factory) harness prints twice: whole, with the factory part
+    // faded so the builder sees where the add-on joins it, then the add-on alone.
+    const calc::FactoryParts factory = calc::factoryOnlyParts(harness, calc::wiresBySegment(harness, calc::LayoutGraph(harness)));
+    if (factory.segmentIds.isEmpty() && factory.nodeIds.isEmpty()) {
+        sheets.push_back({Tr::tr("Layout"), Tr::tr("Not to scale: build to the lengths shown."),
+                          [&](QPainter &p, const QRectF &area) {
+                              drawScene(p, layout, area, Tr::tr("Nothing is placed in the layout yet."));
+                          }});
+    } else {
+        sheets.push_back({Tr::tr("Layout - With Factory Harness"),
+                          Tr::tr("Not to scale. The existing (factory) harness is faded; build the rest."),
+                          [&](QPainter &p, const QRectF &area) {
+                              layout.setShowFactoryHarness(true);
+                              drawScene(p, layout, area, Tr::tr("Nothing is placed in the layout yet."));
+                          }});
+        sheets.push_back({Tr::tr("Layout - Add-on Only"),
+                          Tr::tr("Not to scale: build to the lengths shown. Cuts are measured from the factory "
+                                 "connector named under them."),
+                          [&](QPainter &p, const QRectF &area) {
+                              layout.setShowFactoryHarness(false);
+                              drawScene(p, layout, area, Tr::tr("The layout has only factory parts."));
+                          }});
+    }
     // One schematic sheet prints as before. Several print side by side on one page first,
     // then one page each.
     const auto &schematicSheets = harness.schematic.sheets;

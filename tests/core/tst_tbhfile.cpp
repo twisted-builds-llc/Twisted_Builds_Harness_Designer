@@ -622,27 +622,52 @@ private slots:
         // Splice node n4 (sp1) also holds sp2, side by side in the loom.
         Harness h = sampleHarness();
         h.splices.push_back(Splice{u"sp2"_s, u"S2"_s, {}, {}});
-        h.layoutNodes[3].sharedSpliceIds = {u"sp2"_s};
+        h.layoutNodes[3].sharedRefIds = {u"sp2"_s};
         QString error;
         const auto loaded = io::deserializeHarness(io::serializeHarness(h), &error);
         QVERIFY2(loaded, qPrintable(error));
         QVERIFY(loaded->layoutNodes == h.layoutNodes);
         // Written only when present, so files without it are unchanged.
-        QVERIFY(!io::serializeHarness(sampleHarness()).at(u"layout.json"_s).contains("sharedSpliceIds"));
+        QVERIFY(!io::serializeHarness(sampleHarness()).at(u"layout.json"_s).contains("sharedRefIds"));
 
         Harness missing = h; // no such splice
-        missing.layoutNodes[3].sharedSpliceIds = {u"gone"_s};
+        missing.layoutNodes[3].sharedRefIds = {u"gone"_s};
         QVERIFY(!io::deserializeHarness(io::serializeHarness(missing), &error));
         QVERIFY(error.contains(u"gone"));
 
         Harness twice = h; // sp1 is already the node's own splice
-        twice.layoutNodes[3].sharedSpliceIds = {u"sp1"_s};
+        twice.layoutNodes[3].sharedRefIds = {u"sp1"_s};
         QVERIFY(!io::deserializeHarness(io::serializeHarness(twice), &error));
 
         Harness notSplice = h; // only splice nodes share
-        notSplice.layoutNodes[1].sharedSpliceIds = {u"sp2"_s};
-        notSplice.layoutNodes[3].sharedSpliceIds.clear();
+        notSplice.layoutNodes[1].sharedRefIds = {u"sp2"_s};
+        notSplice.layoutNodes[3].sharedRefIds.clear();
         QVERIFY(!io::deserializeHarness(io::serializeHarness(notSplice), &error));
+
+        // Files from before v0.1.1 name the list sharedSpliceIds.
+        auto legacy = io::serializeHarness(h);
+        legacy[u"layout.json"_s].replace("sharedRefIds", "sharedSpliceIds");
+        const auto old = io::deserializeHarness(legacy, &error);
+        QVERIFY2(old, qPrintable(error));
+        QVERIFY(old->layoutNodes == h.layoutNodes);
+    }
+
+    void cutEndsShareOnePoint()
+    {
+        // Both cut ends of a cut sit at one point: a free end node holding the other too.
+        Harness h = sampleHarness();
+        h.freeEnds.push_back(FreeEnd{u"fe-cut2"_s, FreeEndKind::Cut, {}, {}, {}});
+        LayoutNode cut{u"n9"_s, LayoutNodeType::FlyingLead, u"fe-cut"_s, QPointF(10, 10), {}};
+        cut.sharedRefIds = {u"fe-cut2"_s};
+        h.layoutNodes.push_back(cut);
+        QString error;
+        const auto loaded = io::deserializeHarness(io::serializeHarness(h), &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QVERIFY(loaded->layoutNodes == h.layoutNodes);
+
+        Harness unassigned = h; // the node must hold an item of its own
+        unassigned.layoutNodes.back().refId.clear();
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(unassigned), &error));
     }
 
     void orphanPlacementsAreDropped()

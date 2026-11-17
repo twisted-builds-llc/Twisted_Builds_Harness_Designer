@@ -220,9 +220,11 @@ more wires end on it.
   connector id (`connector`), splice id (`splice`), or free end id (`flyingLead`, `eyelet`;
   eyelet is also used for ring terminals). `branch`
   nodes have no reference. Any node may have an empty `refId` (unassigned).
-- `sharedSpliceIds` (optional, `splice` nodes only): further splice ids at the same point in
-  the loom, side by side with the node's own `refId` splice (splices the same distance from a
-  connector). Written only when non-empty. The node must have a non-empty `refId`.
+- `sharedRefIds` (optional, `splice`, `flyingLead` and `eyelet` nodes only): further splice
+  or free end ids at the same point in the loom as the node's own `refId`: splices side by
+  side (the same distance from a connector), or the two cut ends of a cut wire. Written only
+  when non-empty. The node must have a non-empty `refId`. Files written before v0.1.1 name
+  this list `sharedSpliceIds` (splice ids only); it is still read.
 - At most one node may reference the same item (through `refId` or `sharedSpliceIds`).
 - `position` is for drawing only. `lengthMm` is the entered branch length and is
   authoritative.

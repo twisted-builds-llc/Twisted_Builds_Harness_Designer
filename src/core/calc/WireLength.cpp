@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QSet>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <queue>
@@ -65,7 +66,7 @@ LayoutGraph::LayoutGraph(const Harness &harness)
         m_adjacency[n.id];
         if (!n.refId.isEmpty())
             m_nodeByRef.insert(n.refId, n.id);
-        for (const QString &id : n.sharedSpliceIds)
+        for (const QString &id : n.sharedRefIds)
             m_nodeByRef.insert(id, n.id);
     }
     for (const LayoutSegment &s : harness.layoutSegments) {
@@ -114,13 +115,10 @@ bool LayoutGraph::isPath(const std::vector<QString> &segmentIds, const QString &
     return current == to;
 }
 
-Route LayoutGraph::shortestPath(const QString &from, const QString &to) const
+QHash<QString, double> LayoutGraph::search(const QString &from, const QString &to,
+                                          QHash<QString, std::pair<QString, QString>> *previous) const
 {
-    if (from == to)
-        return {RouteStatus::Ok, {}};
-    // Dijkstra on entered segment lengths.
     QHash<QString, double> distance;
-    QHash<QString, std::pair<QString, QString>> previous; // node -> (prev node, segment)
     using Item = std::pair<double, QString>;
     std::priority_queue<Item, std::vector<Item>, std::greater<>> queue;
     distance.insert(from, 0);
@@ -130,17 +128,32 @@ Route LayoutGraph::shortestPath(const QString &from, const QString &to) const
         queue.pop();
         if (d > distance.value(node, std::numeric_limits<double>::infinity()))
             continue;
-        if (node == to)
+        if (!to.isEmpty() && node == to)
             break;
         for (const Edge &edge : m_adjacency.value(node)) {
             const double next = d + std::max(0.0, m_lengths.value(edge.segmentId));
             if (next < distance.value(edge.otherNode, std::numeric_limits<double>::infinity())) {
                 distance.insert(edge.otherNode, next);
-                previous.insert(edge.otherNode, {node, edge.segmentId});
+                if (previous)
+                    previous->insert(edge.otherNode, {node, edge.segmentId});
                 queue.push({next, edge.otherNode});
             }
         }
     }
+    return distance;
+}
+
+QHash<QString, double> LayoutGraph::distancesFrom(const QString &from) const
+{
+    return search(from, {}, nullptr);
+}
+
+Route LayoutGraph::shortestPath(const QString &from, const QString &to) const
+{
+    if (from == to)
+        return {RouteStatus::Ok, {}};
+    QHash<QString, std::pair<QString, QString>> previous; // node -> (prev node, segment)
+    search(from, to, &previous);
     if (!previous.contains(to))
         return {RouteStatus::NoPath, {}};
     std::vector<QString> segments;
@@ -150,6 +163,88 @@ Route LayoutGraph::shortestPath(const QString &from, const QString &to) const
         node = prev;
     }
     return {RouteStatus::Ok, segments};
+}
+
+std::optional<RoutePoint> pointAlongRoute(const LayoutGraph &graph, const Wire &wire, bool fromEndB,
+                                          double distanceMm)
+{
+    Route route = graph.route(wire);
+    if (route.status != RouteStatus::Ok || distanceMm <= 0)
+        return std::nullopt;
+    if (fromEndB)
+        std::reverse(route.segmentIds.begin(), route.segmentIds.end());
+    constexpr double kSame = 1e-6; // mm
+    QString at = graph.nodeForEnd(wire, fromEndB);
+    double rest = distanceMm;
+    for (size_t i = 0; i < route.segmentIds.size(); ++i) {
+        const QString &id = route.segmentIds[i];
+        const double length = graph.segmentLengthMm(id);
+        if (length <= 0)
+            return std::nullopt;
+        const auto [nodeA, nodeB] = graph.segmentNodes(id);
+        const QString next = nodeA == at ? nodeB : nodeA;
+        if (rest < length - kSame)
+            return RoutePoint{id, nodeA == at, rest, {}};
+        if (rest <= length + kSame) // on the point at the end of this segment
+            return i + 1 < route.segmentIds.size() ? std::optional(RoutePoint{{}, true, 0, next}) : std::nullopt;
+        rest -= length;
+        at = next;
+    }
+    return std::nullopt;
+}
+
+FactoryParts factoryOnlyParts(const Harness &harness, const QHash<QString, std::vector<QString>> &wiresBySegment)
+{
+    QSet<QString> factoryWires;
+    for (const Wire &w : harness.wires) {
+        if (w.factory)
+            factoryWires.insert(w.id);
+    }
+    FactoryParts parts;
+    for (auto it = wiresBySegment.cbegin(); it != wiresBySegment.cend(); ++it) {
+        const std::vector<QString> &wires = it.value();
+        if (!wires.empty() && std::all_of(wires.begin(), wires.end(), [&](const QString &id) {
+                return factoryWires.contains(id);
+            }))
+            parts.segmentIds.insert(it.key());
+    }
+    QHash<QString, bool> allFactory; // node -> all its segments are factory-only so far
+    for (const LayoutSegment &s : harness.layoutSegments) {
+        const bool factory = parts.segmentIds.contains(s.id);
+        for (const QString &node : {s.nodeA, s.nodeB})
+            allFactory[node] = allFactory.value(node, true) && factory;
+    }
+    for (const LayoutNode &n : harness.layoutNodes) {
+        if (allFactory.contains(n.id)) {
+            if (allFactory.value(n.id))
+                parts.nodeIds.insert(n.id);
+        } else if (n.type == LayoutNodeType::Connector) {
+            const auto c = std::find_if(harness.connectors.begin(), harness.connectors.end(),
+                                        [&](const Connector &c) { return c.id == n.refId; });
+            if (c != harness.connectors.end() && c->factory)
+                parts.nodeIds.insert(n.id);
+        }
+    }
+    return parts;
+}
+
+std::optional<FactoryDistance> nearestFactoryConnector(const Harness &harness, const LayoutGraph &graph,
+                                                       const QString &nodeId)
+{
+    const QHash<QString, double> distances = graph.distancesFrom(nodeId);
+    std::optional<FactoryDistance> nearest;
+    for (const LayoutNode &n : harness.layoutNodes) {
+        if (n.type != LayoutNodeType::Connector || n.id == nodeId || !distances.contains(n.id))
+            continue;
+        const auto c = std::find_if(harness.connectors.begin(), harness.connectors.end(),
+                                    [&](const Connector &c) { return c.id == n.refId; });
+        if (c == harness.connectors.end() || !c->factory)
+            continue;
+        const double d = distances.value(n.id);
+        if (!nearest || d < nearest->distanceMm)
+            nearest = FactoryDistance{c->id, d};
+    }
+    return nearest;
 }
 
 double roundUpToIncrement(double value, double increment)

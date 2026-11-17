@@ -36,7 +36,7 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
 - M1-M5 done and on `main`. M6 polish done (autosave/recovery, help, accessibility,
   translations scaffolding). Hands-on testing fixes on `main`: splices inside the loom
   (type a splice stub's length to place it that far from the connector, or drag it onto the
-  loom), several splices side by side at one loom point (`LayoutNode::sharedSpliceIds`),
+  loom), several splices side by side at one loom point (`LayoutNode::sharedRefIds`),
   Show Bundle Diameters on by default. Split view (View > Split Schematic and Layout, Ctrl+\,
   side by side or stacked; off by default), Place All for unplaced items, a splice partway
   along a run labeled with the run's total length on two lines ("N inches total" /
@@ -76,7 +76,11 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   warnings, layout labels with covers, zip ties, backshells/strain relief, cutting a wire
   (Cut Wire Here / Replace Cut with Splice) and factory wires/connectors left out of the
   BOM for add-on harnesses; wires remember the splice/free end lead they use, `Wire::leadA/leadB`;
-  schema 3). Tagged
+  schema 3). Since the draft: both cut ends of a cut share one layout point
+  (`LayoutNode::sharedRefIds`, was `sharedSpliceIds`), Cut Wire Here asks the cut's distance
+  along the route, cut points are labeled with the distance from the nearest factory connector,
+  factory-only layout parts are faded (View > Show Factory Harness hides them) and the PDF
+  prints the layout with and without them (plan section 5c). Tagged
   `v0.1.1` from that branch for a draft release the user is testing. **Not merged to `main`**:
   merge only when the user says so. Details and decisions: `docs/V0.1.1_PLAN.md`.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,

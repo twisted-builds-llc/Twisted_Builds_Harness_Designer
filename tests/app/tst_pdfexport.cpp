@@ -53,6 +53,24 @@ private slots:
         QCOMPARE(pageObjects(pdf), 4);
     }
 
+    void factoryHarnessPrintsLayoutTwice()
+    {
+        QTemporaryDir dir;
+        HarnessModel model;
+        Harness h = bomSample();
+        h.wires[2].factory = true; // w3 is the only wire in seg4 (splice - flying lead)
+        model.reset(h);
+        const QString path = dir.filePath(u"factory.pdf"_s);
+        // Layout with the factory harness, layout of the add-on only, schematic, cut list,
+        // pinouts: 5.
+        QCOMPARE(exportBuildPackage(model, path, PdfExportOptions{}, nullptr), 5);
+        QCOMPARE(pageObjects(readFile(path)), 5);
+        if (const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR"); !out.isEmpty()) {
+            QFile::remove(out + u"/factory.pdf"_s); // copy() does not overwrite
+            QFile::copy(path, out + u"/factory.pdf"_s);
+        }
+    }
+
     void severalSchematicSheets()
     {
         QTemporaryDir dir;

@@ -599,7 +599,7 @@ private slots:
             QVERIFY2(io::deserializeHarness(io::serializeHarness(f.model()->harness()), &error), qPrintable(error));
         };
 
-        f.view.cutWireAt(u"w1"_s, QPointF(300, 40));
+        f.view.cutWireAt(u"w1"_s, QPointF(300, 40), std::nullopt);
         const Harness &h = f.model()->harness();
         QCOMPARE(h.wires.size(), before.wires.size() + 1);
         const Wire &first = *f.model()->find<Wire>(u"w1"_s);
@@ -641,6 +641,83 @@ private slots:
         for (int i = 0; i < 3; ++i)
             f.document.undoStack()->redo();
         QVERIFY(!f.model()->find<FreeEnd>(cutB));
+    }
+
+    // A cut on a routed wire puts both cut ends at one point in the loom, so an add-on drawn
+    // from either cut end routes through the cut (hands-on test: two points, "not routed").
+    void cutWireIntoTheLoom()
+    {
+        Fixture f;
+        f.reset(placedSample()); // w1: ecu(n1) --seg1 300-- n2 --seg2 450-- sensor(n3)
+        const Harness before = f.model()->harness();
+        const Harness &h = f.model()->harness();
+        auto loadable = [&] {
+            QString error;
+            QVERIFY2(io::deserializeHarness(io::serializeHarness(h), &error), qPrintable(error));
+        };
+        auto cutNode = [&]() -> const LayoutNode * {
+            for (const LayoutNode &n : h.layoutNodes) {
+                if (!n.sharedRefIds.empty())
+                    return &n;
+            }
+            return nullptr;
+        };
+
+        // Not strictly inside the route (its full 750 mm), or on a connector: nothing changes.
+        QVERIFY(!f.view.cutWireAt(u"w1"_s, QPointF(300, 40), SchematicView::CutPosition{false, 750}));
+        QVERIFY(!f.view.cutWireAt(u"w1"_s, QPointF(300, 40), SchematicView::CutPosition{false, 0}));
+        QVERIFY(h == before);
+
+        // 500 mm from ECU: 300 along seg1, then 200 into seg2 (450 = 200 + 250).
+        QVERIFY(f.view.cutWireAt(u"w1"_s, QPointF(300, 40), SchematicView::CutPosition{false, 500}));
+        const Wire &first = *f.model()->find<Wire>(u"w1"_s);
+        const Wire &second = h.wires.back();
+        const QString cutA = std::get<FreeEndRef>(first.endB).freeEndId;
+        const QString cutB = std::get<FreeEndRef>(second.endA).freeEndId;
+        const LayoutNode *cut = cutNode();
+        QVERIFY(cut);
+        QCOMPARE(cut->type, LayoutNodeType::FlyingLead);
+        QCOMPARE(cut->refId, cutA);
+        QCOMPARE(cut->sharedRefIds, std::vector<QString>{cutB});
+        QCOMPARE(h.layoutSegments.size(), before.layoutSegments.size() + 1);
+        QCOMPARE(f.model()->find<LayoutSegment>(u"seg2"_s)->lengthMm, 200.0);
+        QCOMPARE(h.layoutSegments.back().lengthMm, 250.0);
+        // Each piece routes to the cut: 300 + 200 = 500 and 250.
+        const calc::LayoutGraph graph(h);
+        QCOMPARE(calc::wireLength(h, graph, first).baseMm, 500.0);
+        QCOMPARE(calc::wireLength(h, graph, second).baseMm, 250.0);
+        loadable();
+        f.document.undoStack()->undo(); // one undo step
+        QVERIFY(h == before);
+
+        // 100 mm from SENSOR (end B): seg2 keeps 350 from n2, 100 from the cut to SENSOR.
+        QVERIFY(f.view.cutWireAt(u"w1"_s, QPointF(300, 40), SchematicView::CutPosition{true, 100}));
+        QCOMPARE(f.model()->find<LayoutSegment>(u"seg2"_s)->lengthMm, 350.0);
+        QCOMPARE(h.layoutSegments.back().lengthMm, 100.0);
+        loadable();
+        f.document.undoStack()->undo();
+
+        // 300 mm from ECU is the fork n2: the cut takes its place, no new segment.
+        QVERIFY(f.view.cutWireAt(u"w1"_s, QPointF(300, 40), SchematicView::CutPosition{false, 300}));
+        cut = cutNode();
+        QVERIFY(cut);
+        QCOMPARE(cut->id, u"n2"_s);
+        QCOMPARE(h.layoutSegments.size(), before.layoutSegments.size());
+        loadable();
+
+        // An add-on wire from cut end A to the lamp, placed off the cut point, routes through it.
+        const QString cutPoint = cut->id;
+        const QString newCutA = cut->refId; // ids are new for each cut
+        f.document.undoStack()->push(
+            addWire(f.model(), testing::wire(u"addon"_s, FreeEndRef{newCutA}, PinRef{u"lamp"_s, u"lamp1"_s}), {}, {})
+                .release());
+        LayoutNode lamp = testing::node(u"n9"_s, LayoutNodeType::Connector, u"lamp"_s);
+        f.document.undoStack()->push(new AddEntityCommand<LayoutNode>(f.model(), lamp, {}, {}));
+        f.document.undoStack()->push(new AddEntityCommand<LayoutSegment>(
+            f.model(), testing::segment(u"seg9"_s, cutPoint, u"n9"_s, 500), {}, {}));
+        const calc::WireLength addon = calc::wireLength(h, calc::LayoutGraph(h), *f.model()->find<Wire>(u"addon"_s));
+        QCOMPARE(addon.status, calc::RouteStatus::Ok);
+        QCOMPARE(addon.baseMm, 500.0);
     }
 
     // A wire keeps the splice lead it was drawn from or dropped on, even when it heads off to
@@ -706,7 +783,7 @@ private slots:
         Harness start = placedSample();
         start.wires[0].factory = true; // w1: ECU 1 (x 0) to SENSOR 1 (x 600)
         f.reset(start);
-        f.view.cutWireAt(u"w1"_s, QPointF(300, 40));
+        f.view.cutWireAt(u"w1"_s, QPointF(300, 40), std::nullopt);
         const Harness &h = f.model()->harness();
         const QString secondId = h.wires.back().id;
         const QString cutB = std::get<FreeEndRef>(h.wires.back().endA).freeEndId; // SENSOR side
@@ -1333,7 +1410,7 @@ private slots:
         addOn.wires[0].baseColor = u"GRN"_s;
         addOn.wires[0].gauge = {18, GaugeSystem::Awg};
         f.reset(addOn);
-        f.view.cutWireAt(u"w1"_s, QPointF(510, 56)); // between ECU and SENSOR
+        f.view.cutWireAt(u"w1"_s, QPointF(510, 56), std::nullopt); // between ECU and SENSOR
         f.view.replaceWithSplice(std::get<FreeEndRef>(f.model()->find<Wire>(u"w1"_s)->endB).freeEndId);
         f.view.resize(1400, 900);
         f.view.zoomToFit();

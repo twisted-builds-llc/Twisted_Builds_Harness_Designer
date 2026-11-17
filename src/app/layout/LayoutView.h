@@ -83,6 +83,10 @@ public:
     // with nothing changed and `before` kept, when the splice or point does not qualify.
     bool placeSpliceOnPoint(const QString &spliceNodeId, const QString &pointId,
                             std::unique_ptr<QUndoCommand> *before = nullptr);
+    // Joins cut end node `cutNodeId`, which has no segments, into `pointId`, another point
+    // holding a cut end: both cut ends of a cut sit at one point. One undo step, with
+    // `before` first. False, with nothing changed and `before` kept, when they do not qualify.
+    bool joinCutEnds(const QString &cutNodeId, const QString &pointId, std::unique_ptr<QUndoCommand> *before = nullptr);
     // For a splice inside a bundle (on exactly two segments): types its distance from the
     // far end of its first segment; the bundle's total length stays the same.
     void editPositionAlongRun(const QString &nodeId);

@@ -750,10 +750,12 @@ void LayoutSegmentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
             for (const auto &[point, normal] : points)
                 line.append(point + normal * offset);
             // Slight overlap so antialiasing leaves no gaps between stripes.
-            painter->setPen(QPen(visibleWireColor(m_wires[i].base, pal), pitch + 0.4, Qt::SolidLine, Qt::FlatCap,
-                                 Qt::RoundJoin));
+            // Factory wires (already there) are grey, so the add-on stands out.
+            const QColor factory = mix(base, text, 0.45);
+            painter->setPen(QPen(m_wires[i].factory ? factory : visibleWireColor(m_wires[i].base, pal), pitch + 0.4,
+                                 Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
             painter->drawPolyline(line);
-            if (m_wires[i].stripe.isValid()) {
+            if (m_wires[i].stripe.isValid() && !m_wires[i].factory) {
                 painter->setPen(QPen(visibleWireColor(m_wires[i].stripe, pal), pitch * 0.4, Qt::SolidLine,
                                      Qt::FlatCap, Qt::RoundJoin));
                 painter->drawPolyline(line);

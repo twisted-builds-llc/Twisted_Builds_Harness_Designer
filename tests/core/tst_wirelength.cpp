@@ -137,6 +137,74 @@ private slots:
         QCOMPARE(usage.value(u"seg4"_s), (std::vector<QString>{u"w3"_s}));
     }
 
+    void pointAlongRoute()
+    {
+        const Harness h = sample();
+        const LayoutGraph g(h);
+        const Wire &w1 = wireById(h, u"w1"_s); // n1 --seg1 300-- n2 --seg2 450-- n3
+        // 100 from end A: inside seg1, 100 from n1 (its node A).
+        auto p = calc::pointAlongRoute(g, w1, false, 100);
+        QVERIFY(p);
+        QCOMPARE(p->segmentId, u"seg1"_s);
+        QVERIFY(p->fromNodeA);
+        QCOMPARE(p->offsetMm, 100.0);
+        // 300 from end A is exactly the branch point n2.
+        p = calc::pointAlongRoute(g, w1, false, 300);
+        QVERIFY(p);
+        QCOMPARE(p->atNodeId, u"n2"_s);
+        QVERIFY(p->segmentId.isEmpty());
+        // 500 from end A: 500 - 300 = 200 into seg2 from n2 (its node A).
+        p = calc::pointAlongRoute(g, w1, false, 500);
+        QVERIFY(p);
+        QCOMPARE(p->segmentId, u"seg2"_s);
+        QVERIFY(p->fromNodeA);
+        QCOMPARE(p->offsetMm, 200.0);
+        // 100 from end B (n3): inside seg2, 100 from n3, which is seg2's node B.
+        p = calc::pointAlongRoute(g, w1, true, 100);
+        QVERIFY(p);
+        QCOMPARE(p->segmentId, u"seg2"_s);
+        QVERIFY(!p->fromNodeA);
+        QCOMPARE(p->offsetMm, 100.0);
+        // Not strictly between the ends: 0, the full 750, beyond it; unrouted w5.
+        QVERIFY(!calc::pointAlongRoute(g, w1, false, 0));
+        QVERIFY(!calc::pointAlongRoute(g, w1, false, 750));
+        QVERIFY(!calc::pointAlongRoute(g, w1, false, 800));
+        QVERIFY(!calc::pointAlongRoute(g, wireById(h, u"w5"_s), false, 10));
+    }
+
+    void factoryParts()
+    {
+        Harness h = sample();
+        h.wires[0].factory = true; // w1
+        h.wires[3].factory = true; // w4
+        h.connectors[2].factory = true; // lamp, placed below with no segments
+        h.layoutNodes.push_back(node(u"n6"_s, LayoutNodeType::Connector, u"lamp"_s));
+        const LayoutGraph g(h);
+        const FactoryParts parts = factoryOnlyParts(h, wiresBySegment(h, g));
+        // seg1 also carries w2 (not factory); seg2 carries only w1 and w4.
+        QCOMPARE(parts.segmentIds, QSet<QString>{u"seg2"_s});
+        // n3 has only seg2; n2 and n1 also have seg1; n6 is a factory connector on its own.
+        QCOMPARE(parts.nodeIds, (QSet<QString>{u"n3"_s, u"n6"_s}));
+    }
+
+    void nearestFactoryConnector()
+    {
+        Harness h = sample();
+        QVERIFY(!calc::nearestFactoryConnector(h, LayoutGraph(h), u"n4"_s)); // none is factory
+        h.connectors[0].factory = true; // ecu (n1)
+        h.connectors[1].factory = true; // sensor (n3)
+        // From the splice n4: ecu 120 + 300 = 420, sensor 120 + 450 = 570.
+        auto nearest = calc::nearestFactoryConnector(h, LayoutGraph(h), u"n4"_s);
+        QVERIFY(nearest);
+        QCOMPARE(nearest->connectorId, u"ecu"_s);
+        QCOMPARE(nearest->distanceMm, 420.0);
+        h.connectors[0].factory = false;
+        nearest = calc::nearestFactoryConnector(h, LayoutGraph(h), u"n4"_s);
+        QVERIFY(nearest);
+        QCOMPARE(nearest->connectorId, u"sensor"_s);
+        QCOMPARE(nearest->distanceMm, 570.0);
+    }
+
     void spliceRunLength()
     {
         Harness h = sample();

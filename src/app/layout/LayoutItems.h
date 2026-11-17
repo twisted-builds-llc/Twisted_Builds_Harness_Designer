@@ -139,6 +139,7 @@ public:
     {
         QColor base;
         QColor stripe; // invalid = no stripe
+        bool factory = false; // an existing (factory) wire: drawn grey
         bool operator==(const WireStripe &) const = default;
     };
     // Wires routed through, in a stable order; heavier bundles draw thicker.

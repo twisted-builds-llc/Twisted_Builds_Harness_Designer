@@ -2,6 +2,7 @@
 #pragma once
 
 #include "calc/Highlight.h"
+#include "calc/WireLength.h"
 #include "layout/LayoutItems.h"
 #include "ui/NoteItem.h"
 #include "model/HarnessModel.h"
@@ -42,6 +43,9 @@ public:
 
     void setHighlight(const std::optional<calc::HighlightSet> &set);
     void setShowBundleDiameters(bool on);
+    // The existing (factory) harness (calc::factoryOnlyParts()) is drawn faded; off hides it,
+    // leaving the add-on.
+    void setShowFactoryHarness(bool on);
 
     // Called by LayoutNodeItem when it moves.
     void nodeMoved(LayoutNodeItem *item);
@@ -78,6 +82,8 @@ private:
     bool m_syncingSelection = false;
     bool m_refreshPending = false;
     bool m_showDiameters = false;
+    bool m_showFactory = true;
+    calc::FactoryParts m_factory;
     std::optional<calc::HighlightSet> m_highlight;
     void applyHighlight();
     QHash<QString, LayoutNodeItem *> m_nodes;

@@ -176,9 +176,10 @@ struct LayoutNode {
     QString refId; // connector/splice/free end id for those node types, else empty
     QPointF position;
     QJsonObject extra;
-    // Splice nodes only: further splices at the same point in the loom, side by side with
-    // `refId` (splices the same distance from a connector).
-    std::vector<QString> sharedSpliceIds;
+    // Splice and free end nodes only: further splices or free ends at the same point in the
+    // loom as `refId`: splices side by side (the same distance from a connector), or the two
+    // cut ends of a cut wire.
+    std::vector<QString> sharedRefIds;
 
     bool operator==(const LayoutNode &) const = default;
 };

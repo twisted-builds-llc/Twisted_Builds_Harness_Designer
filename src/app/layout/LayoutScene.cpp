@@ -256,15 +256,34 @@ void LayoutScene::scheduleRefresh()
 void LayoutScene::refreshCaptions()
 {
     const Harness &h = m_model->harness();
+    const calc::LayoutGraph graph(h);
+    const auto usage = calc::wiresBySegment(h, graph);
+    m_factory = calc::factoryOnlyParts(h, usage);
     QHash<QString, QString> labels;
     for (const LayoutRef &ref : layoutRefs(h))
         labels.insert(ref.refId, ref.label);
+    QSet<QString> cutEnds;
+    for (const FreeEnd &f : h.freeEnds) {
+        if (f.kind == FreeEndKind::Cut)
+            cutEnds.insert(f.id);
+    }
     for (LayoutNodeItem *item : std::as_const(m_nodes)) {
+        const LayoutNode &node = item->node();
+        // A cut (both its cut ends at this point) is labeled with how far it is from the
+        // nearest factory connector: where an installer measures from to find it.
+        if (cutEnds.contains(node.refId)) {
+            item->setNode(node, tr("Cut"));
+            const auto factory = calc::nearestFactoryConnector(h, graph, item->id());
+            const Connector *c = factory ? m_model->find<Connector>(factory->connectorId) : nullptr;
+            item->setSubLabel(c ? tr("%1 from %2").arg(formatLengthWords(factory->distanceMm, h.info.units), c->label)
+                                : QString());
+            continue;
+        }
         // Splices side by side at one point show together, e.g. "S1, S2".
-        QStringList names{labels.value(item->node().refId)};
-        for (const QString &id : item->node().sharedSpliceIds)
+        QStringList names{labels.value(node.refId)};
+        for (const QString &id : node.sharedRefIds)
             names.append(labels.value(id));
-        item->setNode(item->node(), names.join(tr(", ")));
+        item->setNode(node, names.join(tr(", ")));
         // A splice partway along a run shows the run's full length, which the two segment
         // captions beside it only show in pieces.
         const auto run = calc::spliceRunLengthMm(h, item->id());
@@ -272,8 +291,6 @@ void LayoutScene::refreshCaptions()
                               : QString());
     }
 
-    const calc::LayoutGraph graph(h);
-    const auto usage = calc::wiresBySegment(h, graph);
     const Library &library = m_model->library();
     QHash<QString, const Wire *> wiresById;
     for (const Wire &w : h.wires)
@@ -306,7 +323,8 @@ void LayoutScene::refreshCaptions()
         stripes.reserve(wires.size());
         for (const QString &id : wires) {
             const Wire *w = wiresById.value(id);
-            stripes.push_back({w ? wireColor(w->baseColor) : QColor(), w ? wireColor(w->stripeColor) : QColor()});
+            stripes.push_back({w ? wireColor(w->baseColor) : QColor(), w ? wireColor(w->stripeColor) : QColor(),
+                               w && w->factory});
         }
         item->setWires(std::move(stripes));
         item->update();
@@ -328,13 +346,32 @@ void LayoutScene::setHighlight(const std::optional<calc::HighlightSet> &set)
 void LayoutScene::applyHighlight()
 {
     constexpr qreal kDimmed = 0.18;
+    constexpr qreal kFactory = 0.5; // the existing (factory) harness, faded
     const calc::HighlightSet *set = m_highlight ? &*m_highlight : nullptr;
-    for (auto it = m_nodes.cbegin(); it != m_nodes.cend(); ++it)
-        it.value()->setOpacity(!set || set->layoutNodes.contains(it.key()) ? 1.0 : kDimmed);
-    for (auto it = m_segments.cbegin(); it != m_segments.cend(); ++it)
-        it.value()->setOpacity(!set || set->layoutSegments.contains(it.key()) ? 1.0 : kDimmed);
-    for (LayoutAccessoryItem *item : std::as_const(m_accessories))
-        item->setOpacity(!set || set->layoutSegments.contains(item->accessory().segmentId) ? 1.0 : kDimmed);
+    for (auto it = m_nodes.cbegin(); it != m_nodes.cend(); ++it) {
+        const bool factory = m_factory.nodeIds.contains(it.key());
+        it.value()->setVisible(m_showFactory || !factory);
+        it.value()->setOpacity((!set || set->layoutNodes.contains(it.key()) ? 1.0 : kDimmed)
+                               * (factory ? kFactory : 1.0));
+    }
+    for (auto it = m_segments.cbegin(); it != m_segments.cend(); ++it) {
+        const bool factory = m_factory.segmentIds.contains(it.key());
+        it.value()->setVisible(m_showFactory || !factory);
+        it.value()->setOpacity((!set || set->layoutSegments.contains(it.key()) ? 1.0 : kDimmed)
+                               * (factory ? kFactory : 1.0));
+    }
+    for (LayoutAccessoryItem *item : std::as_const(m_accessories)) {
+        const bool factory = m_factory.segmentIds.contains(item->accessory().segmentId);
+        item->setVisible(m_showFactory || !factory);
+        item->setOpacity((!set || set->layoutSegments.contains(item->accessory().segmentId) ? 1.0 : kDimmed)
+                         * (factory ? kFactory : 1.0));
+    }
+}
+
+void LayoutScene::setShowFactoryHarness(bool on)
+{
+    m_showFactory = on;
+    applyHighlight();
 }
 
 void LayoutScene::setShowBundleDiameters(bool on)

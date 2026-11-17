@@ -93,6 +93,33 @@ Harness sample()
     return h;
 }
 
+// An add-on to a factory harness: w1 (ECU - SENSOR) is factory and cut at a point c1 in
+// s2, 200 mm from the fork n2 (s2 now n2 - c1 200, s5 c1 - n3 250); an add-on wire runs
+// from cut end A to the lamp (n7, s6 c1 - n7 100).
+Harness factoryAddOn()
+{
+    Harness h = sample();
+    h.connectors[0].factory = true; // ECU
+    h.connectors[1].factory = true; // SENSOR
+    h.freeEnds.push_back(FreeEnd{u"cutA"_s, FreeEndKind::Cut, {}, {}, {}});
+    h.freeEnds.push_back(FreeEnd{u"cutB"_s, FreeEndKind::Cut, {}, {}, {}});
+    h.wires[0].endB = FreeEndRef{u"cutA"_s};
+    h.wires[0].factory = true;
+    Wire piece = wire(u"w1b"_s, FreeEndRef{u"cutB"_s}, PinRef{u"sensor"_s, u"sensor1"_s});
+    piece.factory = true;
+    h.wires.push_back(piece);
+    h.wires.push_back(wire(u"addon"_s, FreeEndRef{u"cutA"_s}, PinRef{u"lamp"_s, u"lamp1"_s}));
+    LayoutNode cut{u"c1"_s, LayoutNodeType::FlyingLead, u"cutA"_s, QPointF(450, 0), {}};
+    cut.sharedRefIds = {u"cutB"_s};
+    h.layoutNodes.push_back(cut);
+    h.layoutNodes.push_back(LayoutNode{u"n7"_s, LayoutNodeType::Connector, u"lamp"_s, QPointF(450, 200), {}});
+    h.layoutSegments[1].nodeB = u"c1"_s;
+    h.layoutSegments[1].lengthMm = 200;
+    h.layoutSegments.push_back(LayoutSegment{u"s5"_s, u"c1"_s, u"n3"_s, 250, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+    h.layoutSegments.push_back(LayoutSegment{u"s6"_s, u"c1"_s, u"n7"_s, 100, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+    return h;
+}
+
 // Every edit must leave a harness that still loads.
 void verifyLoadable(const Harness &h)
 {
@@ -713,6 +740,71 @@ private slots:
         QCOMPARE(model->find<LayoutSegment>(u"s6"_s)->nodeB, u"n6"_s);
     }
 
+    void factoryHarnessFadedOrHidden()
+    {
+        HarnessModel model;
+        SelectionModel selection(&model);
+        LayoutScene scene(&model, &selection);
+        model.reset(factoryAddOn());
+        verifyLoadable(model.harness());
+        scene.refreshCaptions();
+        // s2 carries only w1 and s5 only w1b (factory): faded, as is SENSOR (n3, only s5).
+        // s1 also carries w2 (not factory), s6 the add-on: drawn as usual, as are the fork n2
+        // and the cut c1, which have such segments too.
+        for (const QString &id : {u"s2"_s, u"s5"_s})
+            QCOMPARE(scene.segmentItem(id)->opacity(), 0.5);
+        QCOMPARE(scene.nodeItem(u"n3"_s)->opacity(), 0.5);
+        for (const QString &id : {u"s1"_s, u"s3"_s, u"s6"_s})
+            QCOMPARE(scene.segmentItem(id)->opacity(), 1.0);
+        for (const QString &id : {u"n2"_s, u"c1"_s})
+            QCOMPARE(scene.nodeItem(id)->opacity(), 1.0);
+        // The cut is one point, labeled with its distance from the nearest factory connector:
+        // ECU 300 + 200 = 500 mm, SENSOR 250 mm.
+        QCOMPARE(scene.nodeItem(u"c1"_s)->subLabel(),
+                 LayoutScene::tr("%1 from %2").arg(formatLengthWords(250, Units::Millimeters), u"SENSOR"_s));
+        // The add-on routes through the cut: 100 mm.
+        const Harness &h = model.harness();
+        QCOMPARE(calc::wireLength(h, calc::LayoutGraph(h), h.wires.back()).status, calc::RouteStatus::Ok);
+        // Hidden: only the factory-only parts go.
+        scene.setShowFactoryHarness(false);
+        QVERIFY(!scene.segmentItem(u"s5"_s)->isVisible());
+        QVERIFY(!scene.nodeItem(u"n3"_s)->isVisible());
+        QVERIFY(scene.segmentItem(u"s6"_s)->isVisible());
+        QVERIFY(scene.nodeItem(u"c1"_s)->isVisible());
+        scene.setShowFactoryHarness(true);
+        QVERIFY(scene.segmentItem(u"s5"_s)->isVisible());
+    }
+
+    void droppingCutEndOnCutJoinsThem()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        // The cut ends were placed apart: cutB on its own point c2 at (100, 300).
+        Harness h = factoryAddOn();
+        h.layoutNodes[5].sharedRefIds.clear(); // c1 holds cutA only
+        h.layoutNodes.push_back(LayoutNode{u"c2"_s, LayoutNodeType::FlyingLead, u"cutB"_s, QPointF(100, 300), {}});
+        document.model()->reset(h);
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(300, 150);
+        HarnessModel *model = document.model();
+        const QPoint from = view.mapFromScene(QPointF(100, 300));
+        const QPoint to = view.mapFromScene(QPointF(450, 0));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), from + QPoint(10, -10));
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        QVERIFY(!model->find<LayoutNode>(u"c2"_s));
+        QCOMPARE(model->find<LayoutNode>(u"c1"_s)->sharedRefIds, std::vector<QString>{u"cutB"_s});
+        verifyLoadable(model->harness());
+        document.undoStack()->undo();
+        QVERIFY(model->find<LayoutNode>(u"c2"_s));
+        QVERIFY(model->find<LayoutNode>(u"c1"_s)->sharedRefIds.empty());
+    }
+
     void splitSegmentAtAndDistanceAlongRun()
     {
         HarnessModel model;
@@ -936,7 +1028,7 @@ private slots:
         QVERIFY(view.placeSpliceAlongLoom(u"stub2"_s, 50));
         QVERIFY(!model->find<LayoutNode>(u"n7"_s));
         QVERIFY(!model->find<LayoutSegment>(u"stub2"_s));
-        QCOMPARE(model->find<LayoutNode>(u"n6"_s)->sharedSpliceIds, std::vector<QString>{u"sp3"_s});
+        QCOMPARE(model->find<LayoutNode>(u"n6"_s)->sharedRefIds, std::vector<QString>{u"sp3"_s});
         QCOMPARE(model->harness().layoutSegments.size(), size_t(5)); // s1 s2 s3 s4 + n6-n2
         verifyLoadable(model->harness());
         // w5 sp3 -> sensor routes like w4: 250 + 450 = 700 mm (not 50 + 50 + 250 + 450).
@@ -945,7 +1037,7 @@ private slots:
         // Deleting sp2 leaves sp3 holding the point.
         document.undoStack()->push(removeItems(model, {}, {u"sp2"_s}, {}, {}).release());
         QCOMPARE(model->find<LayoutNode>(u"n6"_s)->refId, u"sp3"_s);
-        QVERIFY(model->find<LayoutNode>(u"n6"_s)->sharedSpliceIds.empty());
+        QVERIFY(model->find<LayoutNode>(u"n6"_s)->sharedRefIds.empty());
         verifyLoadable(model->harness());
         document.undoStack()->undo();
         document.undoStack()->undo();
@@ -1166,7 +1258,7 @@ private slots:
         QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
         QVERIFY(!model->find<LayoutNode>(u"n6"_s));
         QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
-        QCOMPARE(model->find<LayoutNode>(u"n4"_s)->sharedSpliceIds, std::vector<QString>{u"sp2"_s});
+        QCOMPARE(model->find<LayoutNode>(u"n4"_s)->sharedRefIds, std::vector<QString>{u"sp2"_s});
         verifyLoadable(model->harness());
         // w4 ecu -> sp2: 300 + 120 = 420 mm.
         const calc::LayoutGraph graph(model->harness());

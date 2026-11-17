@@ -54,13 +54,15 @@ void clearLayoutRefs(HarnessModel *model, const QSet<QString> &refs, QUndoComman
         return;
     for (const LayoutNode &n : model->harness().layoutNodes) {
         LayoutNode updated = n;
-        std::erase_if(updated.sharedSpliceIds, [&](const QString &id) { return refs.contains(id); });
+        std::erase_if(updated.sharedRefIds, [&](const QString &id) { return refs.contains(id); });
         if (!updated.refId.isEmpty() && refs.contains(updated.refId)) {
             updated.refId.clear();
-            // A splice sharing the point takes it over.
-            if (!updated.sharedSpliceIds.empty()) {
-                updated.refId = updated.sharedSpliceIds.front();
-                updated.sharedSpliceIds.erase(updated.sharedSpliceIds.begin());
+            // A splice or free end sharing the point takes it over.
+            if (!updated.sharedRefIds.empty()) {
+                updated.refId = updated.sharedRefIds.front();
+                updated.sharedRefIds.erase(updated.sharedRefIds.begin());
+                const FreeEnd *free = findFreeEnd(model->harness(), updated.refId);
+                updated.type = free ? layoutNodeTypeFor(free->kind) : LayoutNodeType::Splice;
             }
         }
         if (updated != n)
@@ -529,7 +531,7 @@ std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QS
                                          [&](const LayoutNode &n) { return n.id == splice; });
     QSet<QString> spliceWires;
     std::vector<QString> spliceIds{spliceNode->refId};
-    spliceIds.insert(spliceIds.end(), spliceNode->sharedSpliceIds.begin(), spliceNode->sharedSpliceIds.end());
+    spliceIds.insert(spliceIds.end(), spliceNode->sharedRefIds.begin(), spliceNode->sharedRefIds.end());
     for (const QString &id : spliceIds) {
         for (const QString &wireId : wiresOnSplice(harness, id))
             spliceWires.insert(wireId);
@@ -715,7 +717,8 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
 }
 
 std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId, QPointF cutA,
-                                      QPointF cutB, const QString &sheetId, QString *newWireId)
+                                      QPointF cutB, const QString &sheetId, QString *newWireId,
+                                      std::pair<QString, QString> *cutEndIds)
 {
     const Wire *current = model->find<Wire>(wireId);
     if (!current)
@@ -757,6 +760,8 @@ std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId
     new AddEntityCommand<Wire>(model, second, std::move(secondPlacements), {}, macro.get());
     if (newWireId)
         *newWireId = second.id;
+    if (cutEndIds)
+        *cutEndIds = {endA.id, endB.id};
     return macro;
 }
 
@@ -782,12 +787,14 @@ std::unique_ptr<QUndoCommand> replaceFreeEndWithSplice(HarnessModel *model, cons
             new UpdateEntityCommand<Wire>(model, updated, {}, macro.get());
     }
     for (const LayoutNode &n : h.layoutNodes) {
-        if (n.refId != freeEndId)
-            continue;
         LayoutNode node = n;
-        node.type = LayoutNodeType::Splice;
-        node.refId = splice.id;
-        new UpdateEntityCommand<LayoutNode>(model, node, {}, macro.get());
+        if (n.refId == freeEndId) {
+            node.type = LayoutNodeType::Splice;
+            node.refId = splice.id;
+        }
+        std::replace(node.sharedRefIds.begin(), node.sharedRefIds.end(), freeEndId, splice.id);
+        if (node != n)
+            new UpdateEntityCommand<LayoutNode>(model, node, {}, macro.get());
     }
     new RemoveEntityCommand<FreeEnd>(model, freeEndId, {}, macro.get());
     return macro;

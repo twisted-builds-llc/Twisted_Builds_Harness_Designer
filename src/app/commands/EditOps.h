@@ -142,9 +142,12 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
 // wire keeps end A and now ends on a new cut end at `cutA`; a copy with a new id and the next
 // circuit id runs from a second cut end at `cutB` to the old end B. Both cut ends are placed
 // on `sheetId`. Routes and length overrides are dropped (each piece is shorter). Returns null
-// if there is no such wire. `newWireId`, if given, receives the id of the second piece.
+// if there is no such wire. `newWireId`, if given, receives the id of the second piece, and
+// `cutEndIds` the ids of the cut ends at `cutA` and `cutB`. The cut ends are not placed in
+// the layout (see SchematicView::cutWireAt()).
 std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId, QPointF cutA,
-                                      QPointF cutB, const QString &sheetId, QString *newWireId = nullptr);
+                                      QPointF cutB, const QString &sheetId, QString *newWireId = nullptr,
+                                      std::pair<QString, QString> *cutEndIds = nullptr);
 
 // Replaces a free end (e.g. a cut end) with `splice` where it is: on the schematic, in the
 // layout, and at the ends of its wires. Returns null if there is no such free end.

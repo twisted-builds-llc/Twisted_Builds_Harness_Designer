@@ -7,6 +7,7 @@
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "layout/LayoutScene.h"
+#include "model/Queries.h"
 #include "ui/Format.h"
 
 #include <QApplication>
@@ -388,9 +389,9 @@ bool LayoutView::placeSpliceOnPoint(const QString &spliceNodeId, const QString &
         // stub go away, and the point holds its splice too.
         LayoutNode joined = *model->find<LayoutNode>(pointId);
         const LayoutNode leaving = *model->find<LayoutNode>(spliceNodeId);
-        joined.sharedSpliceIds.push_back(leaving.refId);
-        joined.sharedSpliceIds.insert(joined.sharedSpliceIds.end(), leaving.sharedSpliceIds.begin(),
-                                      leaving.sharedSpliceIds.end());
+        joined.sharedRefIds.push_back(leaving.refId);
+        joined.sharedRefIds.insert(joined.sharedRefIds.end(), leaving.sharedRefIds.begin(),
+                                      leaving.sharedRefIds.end());
         stack->push(removeLayoutItems(model, {spliceNodeId}, {}, {}).release());
         stack->push(new UpdateEntityCommand<LayoutNode>(model, joined, {}));
     } else {
@@ -405,6 +406,34 @@ bool LayoutView::placeSpliceOnPoint(const QString &spliceNodeId, const QString &
         if (auto join = mergeBranchInto(model, pointId, spliceNodeId))
             stack->push(join.release());
     }
+    stack->endMacro();
+    return true;
+}
+
+bool LayoutView::joinCutEnds(const QString &cutNodeId, const QString &pointId, std::unique_ptr<QUndoCommand> *before)
+{
+    HarnessModel *model = m_document->model();
+    const Harness &h = model->harness();
+    auto holdsCut = [&](const LayoutNode *n) {
+        const FreeEnd *free = n ? findFreeEnd(h, n->refId) : nullptr;
+        return free && free->kind == FreeEndKind::Cut;
+    };
+    const LayoutNode *leaving = model->find<LayoutNode>(cutNodeId);
+    const LayoutNode *point = model->find<LayoutNode>(pointId);
+    if (cutNodeId == pointId || !holdsCut(leaving) || !holdsCut(point)
+        || std::any_of(h.layoutSegments.begin(), h.layoutSegments.end(), [&](const LayoutSegment &s) {
+               return s.nodeA == cutNodeId || s.nodeB == cutNodeId;
+           }))
+        return false;
+    LayoutNode joined = *point;
+    joined.sharedRefIds.push_back(leaving->refId);
+    joined.sharedRefIds.insert(joined.sharedRefIds.end(), leaving->sharedRefIds.begin(), leaving->sharedRefIds.end());
+    QUndoStack *stack = m_document->undoStack();
+    stack->beginMacro(tr("Join cut ends"));
+    if (before && *before)
+        stack->push(before->release());
+    stack->push(removeLayoutItems(model, {cutNodeId}, {}, {}).release());
+    stack->push(new UpdateEntityCommand<LayoutNode>(model, joined, {}));
     stack->endMacro();
     return true;
 }
@@ -662,7 +691,8 @@ void LayoutView::commitMoves()
     if (moved.size() == 1) {
         const QString id = *moved.begin();
         if (LayoutNodeItem *other = nodeNear(m_scene->nodeItem(id)->pos(), moved, 0.4, 5)) {
-            if (placeSpliceOnPoint(id, other->id(), &macro))
+            if (placeSpliceOnPoint(id, other->id(), &macro) || joinCutEnds(id, other->id(), &macro)
+                || joinCutEnds(other->id(), id, &macro))
                 return;
             if (model->find<LayoutNode>(id)->type == LayoutNodeType::Branch)
                 joins.emplace_back(id, other->id());
@@ -982,7 +1012,7 @@ void LayoutEditor::refreshUnplaced()
     QSet<QString> placed;
     for (const LayoutNode &n : h.layoutNodes) {
         placed.insert(n.refId);
-        for (const QString &id : n.sharedSpliceIds)
+        for (const QString &id : n.sharedRefIds)
             placed.insert(id);
     }
     const QString current = m_unplaced->currentItem() ? m_unplaced->currentItem()->data(Qt::UserRole).toString()
