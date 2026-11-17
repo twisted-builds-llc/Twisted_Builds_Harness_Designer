@@ -12,6 +12,7 @@ add_library(tbh_core STATIC
     bom/BuildSheets.h bom/BuildSheets.cpp
     calc/Bundle.h calc/Bundle.cpp
     calc/Highlight.h calc/Highlight.cpp
+    calc/PartFit.h calc/PartFit.cpp
     calc/WireLength.h calc/WireLength.cpp
     io/FileFormat.h
     io/HarnessJson.h io/HarnessJson.cpp

@@ -266,7 +266,7 @@ Presentation only: where items sit on the schematic canvas.
 
 ## `library.json`
 
-The wire types and sleeving the harness references, copied from the user's parts library
+The wire types, sleeving and connector parts the harness references, copied from the user's parts library
 on every save so the file opens the same on another machine. The same format is used for
 the per-user library file (`library.json` in the app data folder).
 
@@ -298,6 +298,41 @@ the per-user library file (`library.json` in the app data folder).
   them as approximate.
 - When opening, the user's own library wins for ids present in both; embedded entries fill
   in ids the user's library lacks.
+
+### Connector parts (`connectorParts`, `pinParts`; v0.1.1)
+
+```json
+{
+  "connectorParts": [
+    {
+      "approximate": true, "cavityLabels": ["1", "2"], "description": "2-way receptacle",
+      "family": "Deutsch DT", "gender": "male", "manufacturer": "Deutsch",
+      "partNumber": "DT04-2P", "plugs": ["114017"], "seals": [], "terminals": ["0460-202-16141"]
+    }
+  ],
+  "pinParts": [
+    {
+      "approximate": true, "description": "Size 16 pin", "insulationMaxMm": 3.0,
+      "insulationMinMm": 1.35, "kind": "terminal", "manufacturer": "Deutsch",
+      "partNumber": "0460-202-16141",
+      "wireMax": { "system": "awg", "value": 14 }, "wireMin": { "system": "awg", "value": 16 }
+    }
+  ]
+}
+```
+
+(Example values for the format only, not verified part data.)
+
+- Connector parts are identified by `partNumber`, unique per list; pin parts by `kind`
+  (`terminal` | `seal` | `plug`) plus `partNumber`. Connectors and pins refer to them by the
+  part numbers they store (`partNumber`, `terminalPartNumber`, `sealPartNumber`,
+  `plugPartNumber`, free end `terminalPartNumber`); those are what is embedded on save.
+- `cavityLabels`: one per cavity, in order. `terminals` / `seals` / `plugs`: part numbers made
+  for this housing.
+- `wireMin` / `wireMax`: conductor sizes the terminal takes (AWG or mm2, compared by
+  cross-section; either order). `insulationMinMm` / `insulationMaxMm`: insulation outer
+  diameter range. Each is omitted when not specified.
+- Older readers ignore these keys; files using them are schema 3.
 
 ## `bom.json`
 

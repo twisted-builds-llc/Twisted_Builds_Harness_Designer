@@ -32,6 +32,41 @@ const Sleeving *Library::sleeving(const QString &id) const
     return nullptr;
 }
 
+const QStringList &ConnectorPart::parts(PinPartKind kind) const
+{
+    switch (kind) {
+    case PinPartKind::Seal:
+        return seals;
+    case PinPartKind::Plug:
+        return plugs;
+    case PinPartKind::Terminal:
+        break;
+    }
+    return terminals;
+}
+
+const ConnectorPart *Library::connectorPart(const QString &partNumber) const
+{
+    if (partNumber.trimmed().isEmpty())
+        return nullptr;
+    for (const ConnectorPart &p : connectorParts) {
+        if (p.partNumber == partNumber.trimmed())
+            return &p;
+    }
+    return nullptr;
+}
+
+const PinPart *Library::pinPart(PinPartKind kind, const QString &partNumber) const
+{
+    if (partNumber.trimmed().isEmpty())
+        return nullptr;
+    for (const PinPart &p : pinParts) {
+        if (p.kind == kind && p.partNumber == partNumber.trimmed())
+            return &p;
+    }
+    return nullptr;
+}
+
 QStringList Library::sleevingFamilies() const
 {
     QStringList families;
@@ -53,6 +88,14 @@ Library mergeLibraries(const Library &user, const Library &embedded)
         if (!user.sleeving(s.id))
             merged.sleevings.push_back(s);
     }
+    for (const ConnectorPart &p : embedded.connectorParts) {
+        if (!user.connectorPart(p.partNumber))
+            merged.connectorParts.push_back(p);
+    }
+    for (const PinPart &p : embedded.pinParts) {
+        if (!user.pinPart(p.kind, p.partNumber))
+            merged.pinParts.push_back(p);
+    }
     return merged;
 }
 
@@ -64,7 +107,30 @@ Library usedLibraryEntries(const Harness &harness, const Library &library)
     QSet<QString> sleevings;
     for (const LayoutSegment &s : harness.layoutSegments)
         sleevings.insert(s.sleevingId);
+    QSet<QString> connectors;
+    QSet<QString> terminals, seals, plugs;
+    for (const Connector &c : harness.connectors) {
+        connectors.insert(c.partNumber.trimmed());
+        for (const Pin &p : c.pins) {
+            terminals.insert(p.terminalPartNumber.trimmed());
+            seals.insert(p.sealPartNumber.trimmed());
+            plugs.insert(p.plugPartNumber.trimmed());
+        }
+    }
+    for (const FreeEnd &f : harness.freeEnds)
+        terminals.insert(f.terminalPartNumber.trimmed());
     Library used;
+    for (const ConnectorPart &p : library.connectorParts) {
+        if (connectors.contains(p.partNumber))
+            used.connectorParts.push_back(p);
+    }
+    for (const PinPart &p : library.pinParts) {
+        const QSet<QString> &numbers = p.kind == PinPartKind::Terminal ? terminals
+                                       : p.kind == PinPartKind::Seal   ? seals
+                                                                       : plugs;
+        if (numbers.contains(p.partNumber))
+            used.pinParts.push_back(p);
+    }
     for (const WireType &t : library.wireTypes) {
         if (wireTypes.contains(t.id))
             used.wireTypes.push_back(t);

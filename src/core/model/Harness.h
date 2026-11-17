@@ -322,15 +322,66 @@ struct Sleeving {
     bool operator==(const Sleeving &) const = default;
 };
 
+// Connector parts are identified by part number (what pins and connectors store), unique
+// per kind.
+
+// A terminal, seal or cavity plug that goes in a connector cavity.
+enum class PinPartKind { Terminal, Seal, Plug };
+
+struct PinPart {
+    PinPartKind kind = PinPartKind::Terminal;
+    QString partNumber;
+    QString manufacturer;
+    QString description;
+    // Terminals: accepted conductor size, smallest and largest (each may be AWG or mm2,
+    // compared by cross-section). Empty = not specified.
+    std::optional<Gauge> wireMin;
+    std::optional<Gauge> wireMax;
+    // Terminals and seals: accepted insulation outer diameter.
+    std::optional<double> insulationMinMm;
+    std::optional<double> insulationMaxMm;
+    bool approximate = false; // see WireType::approximate
+    QJsonObject extra;
+
+    bool operator==(const PinPart &) const = default;
+};
+
+// A connector housing and the cavity parts made for it.
+struct ConnectorPart {
+    QString partNumber;
+    QString manufacturer;
+    QString family; // e.g. "Deutsch DT"
+    QString description;
+    Gender gender = Gender::None;
+    QStringList cavityLabels; // one per cavity, in order
+    QStringList terminals;    // compatible part numbers
+    QStringList seals;
+    QStringList plugs;
+    bool approximate = false; // see WireType::approximate
+    QJsonObject extra;
+
+    // Compatible part numbers of `kind`.
+    const QStringList &parts(PinPartKind kind) const;
+    bool operator==(const ConnectorPart &) const = default;
+};
+
 struct Library {
     std::vector<WireType> wireTypes;
     std::vector<Sleeving> sleevings;
+    std::vector<ConnectorPart> connectorParts;
+    std::vector<PinPart> pinParts;
 
     const WireType *wireType(const QString &id) const;
     const Sleeving *sleeving(const QString &id) const;
+    // By part number; empty part numbers match nothing.
+    const ConnectorPart *connectorPart(const QString &partNumber) const;
+    const PinPart *pinPart(PinPartKind kind, const QString &partNumber) const;
     // Distinct sleeving families in catalog order.
     QStringList sleevingFamilies() const;
-    bool isEmpty() const { return wireTypes.empty() && sleevings.empty(); }
+    bool isEmpty() const
+    {
+        return wireTypes.empty() && sleevings.empty() && connectorParts.empty() && pinParts.empty();
+    }
     bool operator==(const Library &) const = default;
 };
 

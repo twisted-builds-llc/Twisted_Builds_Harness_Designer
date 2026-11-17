@@ -45,6 +45,9 @@ struct EnumName
     const char *name;
 };
 
+constexpr EnumName<PinPartKind> kPinPartKinds[] = {{PinPartKind::Terminal, "terminal"},
+                                                   {PinPartKind::Seal, "seal"},
+                                                   {PinPartKind::Plug, "plug"}};
 constexpr EnumName<Gender> kGenders[] = {
     {Gender::None, "none"}, {Gender::Male, "male"}, {Gender::Female, "female"}};
 constexpr EnumName<GaugeSystem> kGaugeSystems[] = {
@@ -807,6 +810,63 @@ Library readLibrary(ObjectReader r)
             fail(Tr::tr("Duplicate wire type id \"%1\".").arg(t.id));
         library.wireTypes.push_back(t);
     }
+    auto strings = [](ObjectReader &reader, const char *key) {
+        QStringList list;
+        const QJsonArray values = reader.array(key);
+        for (qsizetype i = 0; i < values.size(); ++i) {
+            if (!values[i].isString())
+                fail(Tr::tr("%1 must be a string.")
+                         .arg(indexed(reader.context() + u'.' + QLatin1StringView(key), i)));
+            list << values[i].toString();
+        }
+        return list;
+    };
+    auto optionalGauge = [](ObjectReader &reader, const char *key) -> std::optional<Gauge> {
+        const QJsonObject o = reader.object(key);
+        if (o.isEmpty())
+            return std::nullopt;
+        return readGauge(ObjectReader(o, reader.context() + u'.' + QLatin1StringView(key)));
+    };
+    const QJsonArray connectorParts = r.array("connectorParts");
+    for (qsizetype i = 0; i < connectorParts.size(); ++i) {
+        const QString context = indexed(QStringLiteral("library.connectorParts"), i);
+        ObjectReader pr(requireObject(connectorParts[i], context), context);
+        ConnectorPart p;
+        p.partNumber = pr.id("partNumber").trimmed();
+        p.manufacturer = pr.string("manufacturer");
+        p.family = pr.string("family");
+        p.description = pr.string("description");
+        p.gender = pr.enumValue("gender", kGenders, Gender::None);
+        p.cavityLabels = strings(pr, "cavityLabels");
+        p.terminals = strings(pr, "terminals");
+        p.seals = strings(pr, "seals");
+        p.plugs = strings(pr, "plugs");
+        p.approximate = pr.boolean("approximate", false);
+        p.extra = pr.extra();
+        if (library.connectorPart(p.partNumber))
+            fail(Tr::tr("Duplicate connector part number \"%1\".").arg(p.partNumber));
+        library.connectorParts.push_back(p);
+    }
+    const QJsonArray pinParts = r.array("pinParts");
+    for (qsizetype i = 0; i < pinParts.size(); ++i) {
+        const QString context = indexed(QStringLiteral("library.pinParts"), i);
+        ObjectReader pr(requireObject(pinParts[i], context), context);
+        PinPart p;
+        p.kind = pr.enumValue("kind", kPinPartKinds, PinPartKind::Terminal);
+        p.partNumber = pr.id("partNumber").trimmed();
+        p.manufacturer = pr.string("manufacturer");
+        p.description = pr.string("description");
+        p.wireMin = optionalGauge(pr, "wireMin");
+        p.wireMax = optionalGauge(pr, "wireMax");
+        p.insulationMinMm = pr.optionalNumber("insulationMinMm");
+        p.insulationMaxMm = pr.optionalNumber("insulationMaxMm");
+        p.approximate = pr.boolean("approximate", false);
+        p.extra = pr.extra();
+        if (library.pinPart(p.kind, p.partNumber))
+            fail(Tr::tr("Duplicate %1 part number \"%2\".")
+                     .arg(enumToString(kPinPartKinds, p.kind), p.partNumber));
+        library.pinParts.push_back(p);
+    }
     const QJsonArray sleevings = r.array("sleevings");
     for (qsizetype i = 0; i < sleevings.size(); ++i) {
         const QString context = indexed(QStringLiteral("library.sleevings"), i);
@@ -856,7 +916,45 @@ QJsonObject writeLibrary(const Library &library)
             o.remove(u"recoveredDiameterMm");
         sleevings.append(o);
     }
-    return QJsonObject{{u"wireTypes"_s, types}, {u"sleevings"_s, sleevings}};
+    QJsonArray connectorParts;
+    for (const ConnectorPart &p : library.connectorParts) {
+        QJsonObject o = p.extra;
+        o[u"partNumber"] = p.partNumber;
+        o[u"manufacturer"] = p.manufacturer;
+        o[u"family"] = p.family;
+        o[u"description"] = p.description;
+        o[u"gender"] = enumToString(kGenders, p.gender);
+        o[u"cavityLabels"] = QJsonArray::fromStringList(p.cavityLabels);
+        o[u"terminals"] = QJsonArray::fromStringList(p.terminals);
+        o[u"seals"] = QJsonArray::fromStringList(p.seals);
+        o[u"plugs"] = QJsonArray::fromStringList(p.plugs);
+        o[u"approximate"] = p.approximate;
+        connectorParts.append(o);
+    }
+    QJsonArray pinParts;
+    for (const PinPart &p : library.pinParts) {
+        QJsonObject o = p.extra;
+        o[u"kind"] = enumToString(kPinPartKinds, p.kind);
+        o[u"partNumber"] = p.partNumber;
+        o[u"manufacturer"] = p.manufacturer;
+        o[u"description"] = p.description;
+        auto setOptional = [&o](const char16_t *key, const auto &value, auto write) {
+            if (value)
+                o[QStringView(key)] = write(*value);
+            else
+                o.remove(QStringView(key));
+        };
+        setOptional(u"wireMin", p.wireMin, writeGauge);
+        setOptional(u"wireMax", p.wireMax, writeGauge);
+        setOptional(u"insulationMinMm", p.insulationMinMm, [](double v) { return QJsonValue(v); });
+        setOptional(u"insulationMaxMm", p.insulationMaxMm, [](double v) { return QJsonValue(v); });
+        o[u"approximate"] = p.approximate;
+        pinParts.append(o);
+    }
+    return QJsonObject{{u"wireTypes"_s, types},
+                       {u"sleevings"_s, sleevings},
+                       {u"connectorParts"_s, connectorParts},
+                       {u"pinParts"_s, pinParts}};
 }
 
 // Placements whose item no longer exists carry no information; drop them.
