@@ -589,6 +589,39 @@ QPointF LayoutSegmentItem::midpoint() const
     return (m_a + 2 * bendControlPoint(m_a, m_b, m_segment.bend) + m_b) / 4;
 }
 
+QPointF LayoutSegmentItem::pointAt(qreal u, QPointF *tangent) const
+{
+    u = std::clamp(u, 0.0, 1.0);
+    const QPointF c = bendControlPoint(m_a, m_b, m_segment.bend);
+    if (tangent) {
+        QPointF t = 2 * (1 - u) * (c - m_a) + 2 * u * (m_b - c);
+        if (std::hypot(t.x(), t.y()) < 1e-6)
+            t = m_b - m_a;
+        const qreal length = std::hypot(t.x(), t.y());
+        *tangent = length > 1e-6 ? t / length : QPointF(1, 0);
+    }
+    return (1 - u) * (1 - u) * m_a + 2 * (1 - u) * u * c + u * u * m_b;
+}
+
+qreal LayoutSegmentItem::parameterNear(const QPointF &scenePos) const
+{
+    // Coarse search, then a finer one around the best sample.
+    auto distance = [&](qreal u) { return QLineF(pointAt(u), scenePos).length(); };
+    constexpr int kSteps = 64;
+    qreal best = 0;
+    for (int i = 1; i <= kSteps; ++i) {
+        if (distance(qreal(i) / kSteps) < distance(best))
+            best = qreal(i) / kSteps;
+    }
+    for (qreal step = 0.5 / kSteps; step > 1e-4; step /= 2) {
+        for (const qreal u : {best - step, best + step}) {
+            if (u >= 0 && u <= 1 && distance(u) < distance(best))
+                best = u;
+        }
+    }
+    return best;
+}
+
 std::vector<std::pair<QPointF, QPointF>> LayoutSegmentItem::samples() const
 {
     const QPointF c = bendControlPoint(m_a, m_b, m_segment.bend);
@@ -750,6 +783,136 @@ void LayoutSegmentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
                           Qt::AlignLeft | Qt::AlignBottom, m_detailText);
     }
     painter->restore();
+}
+
+// ---- LayoutAccessoryItem ----------------------------------------------------------
+
+namespace {
+constexpr qreal kBandHalfLength = 3;  // along the bundle
+constexpr qreal kCoverHalfLength = 9; // drawn cover, not to scale
+constexpr qreal kTagGap = 12;         // bundle edge to the label tag
+} // namespace
+
+LayoutAccessoryItem::LayoutAccessoryItem(const LayoutAccessory &accessory)
+    : m_accessory(accessory)
+{
+    setFlag(ItemIsSelectable);
+    setZValue(3);
+    layoutTag();
+}
+
+void LayoutAccessoryItem::setAccessory(const LayoutAccessory &accessory)
+{
+    prepareGeometryChange();
+    m_accessory = accessory;
+    layoutTag();
+    update();
+}
+
+void LayoutAccessoryItem::setPlacement(const QPointF &point, const QPointF &tangent, qreal lineWidth)
+{
+    prepareGeometryChange();
+    setPos(point);
+    m_tangent = tangent;
+    m_lineWidth = lineWidth;
+    layoutTag();
+}
+
+QString LayoutAccessoryItem::tagText() const
+{
+    if (m_accessory.kind != AccessoryKind::Label)
+        return {};
+    return m_accessory.text.isEmpty() ? QCoreApplication::translate("tbh::app::LayoutAccessoryItem", "Label")
+                                      : m_accessory.text;
+}
+
+void LayoutAccessoryItem::layoutTag()
+{
+    if (m_accessory.kind != AccessoryKind::Label) {
+        m_tag = {};
+        return;
+    }
+    // Beside the bundle on the side facing down (or right), away from the length caption.
+    QPointF normal(-m_tangent.y(), m_tangent.x());
+    if (normal.y() < 0 || (std::abs(normal.y()) < 1e-6 && normal.x() < 0))
+        normal = -normal;
+    const QFontMetricsF metrics(captionFont(false));
+    const QSizeF size(std::min(metrics.horizontalAdvance(tagText()), 160.0) + 10, kCaptionHeight + 2);
+    const QPointF anchor = normal * (m_lineWidth / 2 + kTagGap + size.height() / 2);
+    m_tag = QRectF(anchor - QPointF(size.width() / 2, size.height() / 2), size);
+}
+
+QPolygonF LayoutAccessoryItem::bandPolygon(qreal halfLength, qreal extra) const
+{
+    const QPointF along = m_tangent * halfLength;
+    const QPointF across = QPointF(-m_tangent.y(), m_tangent.x()) * (m_lineWidth / 2 + extra);
+    return QPolygonF({-along - across, along - across, along + across, -along + across});
+}
+
+QRectF LayoutAccessoryItem::boundingRect() const
+{
+    QRectF rect = bandPolygon(kCoverHalfLength, 6).boundingRect();
+    if (!m_tag.isNull())
+        rect |= m_tag;
+    return rect.adjusted(-3, -3, 3, 3);
+}
+
+QPainterPath LayoutAccessoryItem::shape() const
+{
+    QPainterPath path;
+    path.setFillRule(Qt::WindingFill);
+    path.addPolygon(bandPolygon(kBandHalfLength + 2, 5));
+    path.closeSubpath();
+    if (!m_tag.isNull())
+        path.addRect(m_tag);
+    return path;
+}
+
+void LayoutAccessoryItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
+{
+    const QPalette pal = paletteOf(this);
+    const QColor text = pal.color(QPalette::Text);
+    const QColor base = pal.color(QPalette::Base);
+    painter->setRenderHint(QPainter::Antialiasing);
+    if (isSelected()) {
+        painter->setPen(QPen(pal.color(QPalette::Highlight), 3));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawPolygon(bandPolygon(kBandHalfLength + 2, 5));
+        if (!m_tag.isNull())
+            painter->drawRect(m_tag.adjusted(-2, -2, 2, 2));
+    }
+    if (m_accessory.kind == AccessoryKind::Tie) {
+        // A zip tie: a thin dark band with its head on one side.
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(text);
+        painter->drawPolygon(bandPolygon(1.2, 3));
+        const QPointF across = QPointF(-m_tangent.y(), m_tangent.x()) * (m_lineWidth / 2 + 3);
+        painter->drawEllipse(across, 2.5, 2.5);
+        return;
+    }
+    // Cover (e.g. clear heat shrink): a light outline around the label band.
+    if (!m_accessory.coverSleevingId.isEmpty()) {
+        QColor cover = pal.color(QPalette::Highlight);
+        cover.setAlphaF(0.25f);
+        painter->setPen(QPen(pal.color(QPalette::Highlight), 1, Qt::DashLine));
+        painter->setBrush(cover);
+        painter->drawPolygon(bandPolygon(kCoverHalfLength, 3));
+    }
+    painter->setPen(QPen(text, 1));
+    painter->setBrush(base);
+    painter->drawPolygon(bandPolygon(kBandHalfLength, 2));
+    // Leader from the band to the tag, then the tag with the label text.
+    const QPointF tagCenter = m_tag.center();
+    const qreal tagLength = std::hypot(tagCenter.x(), tagCenter.y());
+    if (tagLength > 1e-6) {
+        const QPointF unit = tagCenter / tagLength;
+        painter->drawLine(unit * (m_lineWidth / 2 + 2), unit * (tagLength - m_tag.height() / 2));
+    }
+    painter->drawRect(m_tag);
+    painter->setFont(captionFont(false));
+    const QFontMetricsF metrics(captionFont(false));
+    painter->drawText(m_tag, Qt::AlignCenter,
+                      metrics.elidedText(tagText(), Qt::ElideRight, m_tag.width() - 6));
 }
 
 } // namespace tbh::app

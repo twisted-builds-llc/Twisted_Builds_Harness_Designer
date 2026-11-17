@@ -20,6 +20,7 @@ namespace tbh::app {
 enum LayoutItemType {
     LayoutNodeItemType = QGraphicsItem::UserType + 20,
     LayoutSegmentItemType,
+    LayoutAccessoryItemType,
 };
 
 // Curved segments (LayoutSegment::bend): quadratic Bezier from `a` to `b`.
@@ -147,6 +148,10 @@ public:
     static qreal lineWidthFor(int wireCount);
     // Point halfway along the (possibly curved) segment; the bend handle sits here.
     QPointF midpoint() const;
+    // Point at curve parameter `u` (0 at endA, 1 at endB) and the unit tangent there.
+    QPointF pointAt(qreal u, QPointF *tangent = nullptr) const;
+    // Curve parameter of the point on the segment nearest `scenePos`.
+    qreal parameterNear(const QPointF &scenePos) const;
     QPointF endA() const { return m_a; }
     QPointF endB() const { return m_b; }
     // True if `scenePos` is within `tolerance` of the bend handle (shown when selected).
@@ -174,6 +179,38 @@ private:
     qreal m_lengthWidth = 0; // text widths at the caption font
     qreal m_detailWidth = 0;
     std::vector<WireStripe> m_wires;
+};
+
+// A label or tie on a segment (LayoutAccessory). Drawn as a band across the bundle at its
+// place; a label also shows its text in a tag beside the bundle, and its cover around it.
+class LayoutAccessoryItem : public QGraphicsItem
+{
+public:
+    explicit LayoutAccessoryItem(const LayoutAccessory &accessory);
+
+    int type() const override { return LayoutAccessoryItemType; }
+    QString id() const { return m_accessory.id; }
+    const LayoutAccessory &accessory() const { return m_accessory; }
+    void setAccessory(const LayoutAccessory &accessory);
+    // Where it sits: scene point on the segment, unit tangent there, bundle line width.
+    void setPlacement(const QPointF &point, const QPointF &tangent, qreal lineWidth);
+    // The label's text tag, in item coordinates (empty for ties).
+    QRectF tagRect() const { return m_tag; }
+
+    QRectF boundingRect() const override;
+    QPainterPath shape() const override;
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
+
+private:
+    void layoutTag();
+    // Band across the bundle (and cover), in item coordinates.
+    QPolygonF bandPolygon(qreal halfLength, qreal extra) const;
+    QString tagText() const;
+
+    LayoutAccessory m_accessory;
+    QPointF m_tangent{1, 0};
+    qreal m_lineWidth = 4;
+    QRectF m_tag;
 };
 
 } // namespace tbh::app

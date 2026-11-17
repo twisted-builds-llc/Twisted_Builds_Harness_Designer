@@ -50,6 +50,7 @@ void LayoutScene::rebuild()
     m_nodes.clear();
     m_segments.clear();
     m_notes.clear();
+    m_accessories.clear();
     const Harness &h = m_model->harness();
     for (const LayoutNode &n : h.layoutNodes)
         addNode(n);
@@ -57,6 +58,8 @@ void LayoutScene::rebuild()
         addSegment(s);
     for (const Note &n : h.notes)
         addNote(n);
+    for (const LayoutAccessory &a : h.accessories)
+        addAccessory(a);
     refreshCaptions();
 }
 
@@ -84,6 +87,44 @@ void LayoutScene::addNote(const Note &note)
     m_notes.insert(note.id, item);
 }
 
+void LayoutScene::addAccessory(const LayoutAccessory &accessory)
+{
+    auto *item = new LayoutAccessoryItem(accessory);
+    addItem(item);
+    m_accessories.insert(accessory.id, item);
+    placeAccessory(item);
+}
+
+qreal LayoutScene::accessoryParameter(const LayoutAccessory &accessory, const LayoutSegment &segment)
+{
+    return segment.lengthMm > 0 ? std::clamp(accessory.offsetMm / segment.lengthMm, 0.0, 1.0) : 0.5;
+}
+
+void LayoutScene::placeAccessory(LayoutAccessoryItem *item, std::optional<qreal> u)
+{
+    LayoutSegmentItem *segment = m_segments.value(item->accessory().segmentId);
+    if (!segment)
+        return;
+    QPointF tangent;
+    const QPointF point = segment->pointAt(u.value_or(accessoryParameter(item->accessory(), segment->segment())),
+                                           &tangent);
+    item->setPlacement(point, tangent, segment->lineWidth());
+}
+
+void LayoutScene::placeAccessoriesOn(const QString &segmentId)
+{
+    for (LayoutAccessoryItem *item : std::as_const(m_accessories)) {
+        if (item->accessory().segmentId == segmentId)
+            placeAccessory(item);
+    }
+}
+
+void LayoutScene::previewAccessory(const QString &id, qreal u)
+{
+    if (LayoutAccessoryItem *item = m_accessories.value(id))
+        placeAccessory(item, u);
+}
+
 void LayoutScene::previewSegment(const LayoutSegment &segment)
 {
     if (LayoutSegmentItem *item = m_segments.value(segment.id)) {
@@ -100,6 +141,7 @@ void LayoutScene::updateSegmentEnds(LayoutSegmentItem *item)
         item->setEnds(a->pos(), b->pos());
     updateLegs(a);
     updateLegs(b);
+    placeAccessoriesOn(item->id());
 }
 
 void LayoutScene::updateLegs(LayoutNodeItem *node)
@@ -144,6 +186,8 @@ void LayoutScene::onAdded(EntityKind kind, const QString &id)
         addSegment(*m_model->find<LayoutSegment>(id));
     else if (kind == EntityKind::Note)
         addNote(*m_model->find<Note>(id));
+    else if (kind == EntityKind::LayoutAccessory)
+        addAccessory(*m_model->find<LayoutAccessory>(id));
     scheduleRefresh();
 }
 
@@ -166,6 +210,12 @@ void LayoutScene::onChanged(EntityKind kind, const QString &id)
         if (NoteItem *item = m_notes.value(id))
             item->setNote(*m_model->find<Note>(id));
         return; // notes do not affect captions
+    } else if (kind == EntityKind::LayoutAccessory) {
+        if (LayoutAccessoryItem *item = m_accessories.value(id)) {
+            item->setAccessory(*m_model->find<LayoutAccessory>(id));
+            placeAccessory(item);
+        }
+        return;
     }
     scheduleRefresh();
 }
@@ -174,6 +224,10 @@ void LayoutScene::onRemoved(EntityKind kind, const QString &id)
 {
     if (kind == EntityKind::Note) {
         delete m_notes.take(id);
+        return;
+    }
+    if (kind == EntityKind::LayoutAccessory) {
+        delete m_accessories.take(id);
         return;
     }
     if (kind == EntityKind::LayoutNode)
@@ -257,9 +311,11 @@ void LayoutScene::refreshCaptions()
         item->setWires(std::move(stripes));
         item->update();
     }
-    // Branch boots follow the segment widths.
+    // Branch boots follow the segment widths, accessories the bundle width.
     for (LayoutNodeItem *node : std::as_const(m_nodes))
         updateLegs(node);
+    for (LayoutAccessoryItem *item : std::as_const(m_accessories))
+        placeAccessory(item);
     applyHighlight();
 }
 
@@ -277,6 +333,8 @@ void LayoutScene::applyHighlight()
         it.value()->setOpacity(!set || set->layoutNodes.contains(it.key()) ? 1.0 : kDimmed);
     for (auto it = m_segments.cbegin(); it != m_segments.cend(); ++it)
         it.value()->setOpacity(!set || set->layoutSegments.contains(it.key()) ? 1.0 : kDimmed);
+    for (LayoutAccessoryItem *item : std::as_const(m_accessories))
+        item->setOpacity(!set || set->layoutSegments.contains(item->accessory().segmentId) ? 1.0 : kDimmed);
 }
 
 void LayoutScene::setShowBundleDiameters(bool on)
@@ -298,6 +356,8 @@ void LayoutScene::syncSelectionToModel()
             selection.layoutSegments.insert(static_cast<LayoutSegmentItem *>(item)->id());
         else if (item->type() == NoteItemType)
             selection.notes.insert(static_cast<NoteItem *>(item)->id());
+        else if (item->type() == LayoutAccessoryItemType)
+            selection.accessories.insert(static_cast<LayoutAccessoryItem *>(item)->id());
     }
     m_syncingSelection = true;
     m_selection->setSelection(selection);
@@ -316,6 +376,8 @@ void LayoutScene::syncSelectionFromModel()
         it.value()->setSelected(s.layoutSegments.contains(it.key()));
     for (auto it = m_notes.cbegin(); it != m_notes.cend(); ++it)
         it.value()->setSelected(s.notes.contains(it.key()));
+    for (auto it = m_accessories.cbegin(); it != m_accessories.cend(); ++it)
+        it.value()->setSelected(s.accessories.contains(it.key()));
     m_syncingSelection = false;
 }
 

@@ -13,6 +13,7 @@ class QPushButton;
 
 namespace tbh::app {
 
+class CommitTextEdit;
 class Document;
 
 // One layout segment: entered length, label, and the wires routed through it.
@@ -67,6 +68,34 @@ private:
     QString m_id;
     QComboBox *m_ref;
     QLabel *m_segments;
+};
+
+// One label or tie on the layout: text, part number, protective cover, where it sits.
+class AccessoryPanel : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit AccessoryPanel(Document *document, QWidget *parent = nullptr);
+    void setAccessory(const QString &id);
+    void refresh();
+
+private:
+    void commit();
+
+    Document *m_document;
+    QString m_id;
+    QComboBox *m_kind;
+    QLineEdit *m_text;
+    QLineEdit *m_partNumber;
+    QComboBox *m_cover;
+    QLineEdit *m_coverLength;
+    QLabel *m_coverUnits;
+    QLineEdit *m_distance;
+    QLabel *m_distanceUnits;
+    QLabel *m_distanceNote;
+    CommitTextEdit *m_notes;
+    QWidget *m_labelFields; // text and cover rows, labels only
 };
 
 } // namespace tbh::app

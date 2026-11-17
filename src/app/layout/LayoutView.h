@@ -17,6 +17,7 @@ class QListWidgetItem;
 namespace tbh::app {
 
 class Document;
+class LayoutAccessoryItem;
 class LayoutNodeItem;
 class LayoutSegmentItem;
 class LayoutScene;
@@ -59,6 +60,11 @@ public:
     void deleteSelection();
     void selectAll();
     void editSegmentLength(const QString &segmentId);
+    // Adds a label or tie on segment `segmentId` at the point nearest `scenePos` and selects
+    // it; a label's text editor opens at once. Returns the new accessory's id.
+    QString addAccessoryAt(const QString &segmentId, const QPointF &scenePos, AccessoryKind kind);
+    // Types a label's text in place.
+    void editAccessoryText(const QString &accessoryId);
     // A splice drawn as a stub off a point on a loom goes inside that loom, `distanceMm`
     // from the point (loomPositionForStub()); the stub is removed. One undo step. False,
     // with nothing changed, when the stub does not qualify.
@@ -89,6 +95,7 @@ protected:
 
 private:
     LayoutNodeItem *nodeAt(const QPoint &viewPos) const;
+    LayoutAccessoryItem *accessoryAt(const QPoint &viewPos) const;
     // Nearest node to `scenePos`, skipping `exclude`, within `toleranceGrid` grid steps or
     // `tolerancePixels` screen pixels (whichever is farther), or null.
     LayoutNodeItem *nodeNear(const QPointF &scenePos, const QSet<QString> &exclude, qreal toleranceGrid = 1,
@@ -126,6 +133,9 @@ private:
     QGraphicsLineItem *m_preview = nullptr;
     QString m_hoveredLead; // node id whose lead is under the pointer
     QString m_bendSegment; // segment id while its bend handle is dragged
+    QString m_dragAccessory; // accessory id while it is dragged along its segment
+    QPoint m_accessoryPress;
+    std::optional<qreal> m_accessoryDrop; // curve parameter it would land at
     std::map<QString, QPointF> m_pressPositions;     // selected nodes at mouse press
     std::map<QString, QPointF> m_notePressPositions; // selected notes at mouse press
     int m_placeCount = 0;

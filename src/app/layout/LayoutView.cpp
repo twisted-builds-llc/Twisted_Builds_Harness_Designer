@@ -8,6 +8,7 @@
 #include "layout/LayoutScene.h"
 #include "ui/Format.h"
 
+#include <QApplication>
 #include <QGraphicsLineItem>
 #include <QLineF>
 #include <QKeyEvent>
@@ -186,10 +187,63 @@ void LayoutView::straightenSegment(const QString &segmentId)
 void LayoutView::deleteSelection()
 {
     const Selection &s = m_selection->selection();
-    if (s.layoutNodes.isEmpty() && s.layoutSegments.isEmpty() && s.notes.isEmpty())
+    if (s.layoutNodes.isEmpty() && s.layoutSegments.isEmpty() && s.notes.isEmpty() && s.accessories.isEmpty())
         return;
     m_document->undoStack()->push(
-        removeLayoutItems(m_document->model(), s.layoutNodes, s.layoutSegments, s.notes).release());
+        removeLayoutItems(m_document->model(), s.layoutNodes, s.layoutSegments, s.notes, s.accessories).release());
+}
+
+LayoutAccessoryItem *LayoutView::accessoryAt(const QPoint &viewPos) const
+{
+    for (QGraphicsItem *item : items(viewPos)) {
+        if (item->type() == LayoutAccessoryItemType)
+            return static_cast<LayoutAccessoryItem *>(item);
+    }
+    return nullptr;
+}
+
+QString LayoutView::addAccessoryAt(const QString &segmentId, const QPointF &scenePos, AccessoryKind kind)
+{
+    HarnessModel *model = m_document->model();
+    const LayoutSegment *segment = model->find<LayoutSegment>(segmentId);
+    LayoutSegmentItem *item = m_scene->segmentItem(segmentId);
+    if (!segment || !item)
+        return {};
+    LayoutAccessory accessory;
+    accessory.id = newId();
+    accessory.kind = kind;
+    accessory.segmentId = segmentId;
+    accessory.offsetMm = segment->lengthMm > 0
+                             ? std::round(item->parameterNear(scenePos) * segment->lengthMm * 10) / 10
+                             : 0;
+    const QString id = accessory.id;
+    m_document->undoStack()->push(new AddEntityCommand<LayoutAccessory>(
+        model, std::move(accessory), {}, kind == AccessoryKind::Label ? tr("Add label") : tr("Add tie")));
+    Selection selection;
+    selection.accessories.insert(id);
+    m_selection->setSelection(selection);
+    if (kind == AccessoryKind::Label)
+        editAccessoryText(id);
+    return id;
+}
+
+void LayoutView::editAccessoryText(const QString &accessoryId)
+{
+    LayoutAccessoryItem *item = m_scene->accessoryItem(accessoryId);
+    const LayoutAccessory *accessory = m_document->model()->find<LayoutAccessory>(accessoryId);
+    if (!item || !accessory || accessory->kind != AccessoryKind::Label)
+        return;
+    QRectF rect = item->mapRectToScene(item->tagRect());
+    rect.setWidth(std::max(rect.width(), 120.0));
+    editText(rect, accessory->text, [this, accessoryId](const QString &text, Nav) {
+        HarnessModel *model = m_document->model();
+        const LayoutAccessory *current = model->find<LayoutAccessory>(accessoryId);
+        if (!current || current->text == text.trimmed())
+            return;
+        LayoutAccessory updated = *current;
+        updated.text = text.trimmed();
+        m_document->undoStack()->push(new UpdateEntityCommand<LayoutAccessory>(model, updated, tr("Edit label text")));
+    });
 }
 
 void LayoutView::selectAll()
@@ -356,6 +410,13 @@ void LayoutView::mousePressEvent(QMouseEvent *event)
             m_bendSegment = segment->id();
             return;
         }
+        if (LayoutAccessoryItem *accessory = accessoryAt(event->pos())) {
+            CanvasView::mousePressEvent(event); // selects it
+            m_dragAccessory = accessory->id();
+            m_accessoryPress = event->pos();
+            m_accessoryDrop.reset();
+            return;
+        }
     }
     if (event->button() == Qt::LeftButton) {
         LayoutNodeItem *node = m_tool == Tool::Segment ? nodeAt(event->pos()) : nodeLeadAt(event->pos());
@@ -375,6 +436,16 @@ void LayoutView::mousePressEvent(QMouseEvent *event)
 
 void LayoutView::mouseMoveEvent(QMouseEvent *event)
 {
+    if (!m_dragAccessory.isEmpty()) {
+        const LayoutAccessory *accessory = m_document->model()->find<LayoutAccessory>(m_dragAccessory);
+        LayoutSegmentItem *segment = accessory ? m_scene->segmentItem(accessory->segmentId) : nullptr;
+        if (segment && (m_accessoryDrop
+                        || (event->pos() - m_accessoryPress).manhattanLength() >= QApplication::startDragDistance())) {
+            m_accessoryDrop = segment->parameterNear(mapToScene(event->pos()));
+            m_scene->previewAccessory(m_dragAccessory, *m_accessoryDrop);
+        }
+        return;
+    }
     if (!m_bendSegment.isEmpty()) {
         if (const LayoutSegment *current = m_document->model()->find<LayoutSegment>(m_bendSegment)) {
             LayoutSegment preview = *current;
@@ -403,6 +474,24 @@ void LayoutView::mouseMoveEvent(QMouseEvent *event)
 
 void LayoutView::mouseReleaseEvent(QMouseEvent *event)
 {
+    if (!m_dragAccessory.isEmpty() && event->button() == Qt::LeftButton) {
+        const QString id = std::exchange(m_dragAccessory, QString());
+        CanvasView::mouseReleaseEvent(event);
+        HarnessModel *model = m_document->model();
+        const LayoutAccessory *current = model->find<LayoutAccessory>(id);
+        const LayoutSegment *segment = current ? model->find<LayoutSegment>(current->segmentId) : nullptr;
+        if (!m_accessoryDrop || !segment)
+            return;
+        LayoutAccessory updated = *current;
+        // Along the entered length; a segment without a length has no distance to keep.
+        updated.offsetMm = segment->lengthMm > 0 ? std::round(*m_accessoryDrop * segment->lengthMm * 10) / 10 : 0;
+        if (updated != *current)
+            m_document->undoStack()->push(new UpdateEntityCommand<LayoutAccessory>(
+                model, updated, updated.kind == AccessoryKind::Label ? tr("Move label") : tr("Move tie")));
+        else
+            m_scene->previewAccessory(id, LayoutScene::accessoryParameter(*current, *segment));
+        return;
+    }
     if (!m_bendSegment.isEmpty() && event->button() == Qt::LeftButton) {
         const QString id = std::exchange(m_bendSegment, QString());
         HarnessModel *model = m_document->model();
@@ -701,6 +790,10 @@ void LayoutView::mouseDoubleClickEvent(QMouseEvent *event)
                 editNote(static_cast<NoteItem *>(item)->id());
                 return;
             }
+            if (item->type() == LayoutAccessoryItemType) {
+                editAccessoryText(static_cast<LayoutAccessoryItem *>(item)->id());
+                return;
+            }
             if (item->type() == LayoutSegmentItemType) {
                 editSegmentLength(static_cast<LayoutSegmentItem *>(item)->id());
                 return;
@@ -739,10 +832,21 @@ void LayoutView::contextMenuEvent(QContextMenuEvent *event)
         if (item->type() == NoteItemType) {
             const QString id = static_cast<NoteItem *>(item)->id();
             menu.addAction(tr("Edit Note"), this, [this, id] { editNote(id); });
+        } else if (item->type() == LayoutAccessoryItemType) {
+            const auto *accessory = static_cast<LayoutAccessoryItem *>(item);
+            const QString id = accessory->id();
+            if (accessory->accessory().kind == AccessoryKind::Label)
+                menu.addAction(tr("Edit Label Text"), this, [this, id] { editAccessoryText(id); });
+            menu.addAction(tr("Delete"), this, [this, id] {
+                m_document->undoStack()->push(removeLayoutItems(m_document->model(), {}, {}, {}, {id}).release());
+            });
         } else if (item->type() == LayoutSegmentItemType) {
             const auto *segment = static_cast<LayoutSegmentItem *>(item);
             const QString id = segment->id();
+            const QPointF scenePos = mapToScene(event->pos());
             menu.addAction(tr("Edit Length"), this, [this, id] { editSegmentLength(id); });
+            menu.addAction(tr("Add Label Here"), this,
+                           [this, id, scenePos] { addAccessoryAt(id, scenePos, AccessoryKind::Label); });
             QAction *straighten = menu.addAction(tr("Straighten Segment"), this, [this, id] { straightenSegment(id); });
             straighten->setEnabled(segment->segment().bend.has_value());
         } else if (item->type() == LayoutNodeItemType) {

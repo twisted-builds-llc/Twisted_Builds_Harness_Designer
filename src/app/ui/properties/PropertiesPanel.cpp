@@ -21,6 +21,7 @@ PropertiesPanel::PropertiesPanel(Document *document, SelectionModel *selection, 
     , m_freeEnd(new FreeEndEditor(document, this))
     , m_segment(new SegmentPanel(document, this))
     , m_node(new LayoutNodePanel(document, this))
+    , m_accessory(new AccessoryPanel(document, this))
     , m_mixed(new QLabel(this))
 {
     m_mixed->setAlignment(Qt::AlignCenter);
@@ -29,6 +30,7 @@ PropertiesPanel::PropertiesPanel(Document *document, SelectionModel *selection, 
                           static_cast<QWidget *>(m_wires), static_cast<QWidget *>(m_splice),
                           static_cast<QWidget *>(m_freeEnd),
                           static_cast<QWidget *>(m_segment), static_cast<QWidget *>(m_node),
+                          static_cast<QWidget *>(m_accessory),
                           static_cast<QWidget *>(m_mixed)})
         addWidget(page);
     connect(selection, &SelectionModel::selectionChanged, this, &PropertiesPanel::update);
@@ -39,13 +41,16 @@ void PropertiesPanel::update()
 {
     const Selection &s = m_selection->selection();
     const qsizetype items = s.connectors.size() + s.splices.size() + s.freeEnds.size();
-    const qsizetype layoutItems = s.layoutNodes.size() + s.layoutSegments.size();
+    const qsizetype layoutItems = s.layoutNodes.size() + s.layoutSegments.size() + s.accessories.size();
     const qsizetype total = items + s.wires.size() + layoutItems;
     if (s.isEmpty()) {
         setCurrentWidget(m_harness);
     } else if (s.layoutSegments.size() == 1 && total == 1) {
         m_segment->setSegment(*s.layoutSegments.begin());
         setCurrentWidget(m_segment);
+    } else if (s.accessories.size() == 1 && total == 1) {
+        m_accessory->setAccessory(*s.accessories.begin());
+        setCurrentWidget(m_accessory);
     } else if (s.layoutNodes.size() == 1 && total == 1) {
         m_node->setNode(*s.layoutNodes.begin());
         setCurrentWidget(m_node);

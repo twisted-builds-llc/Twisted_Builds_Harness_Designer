@@ -11,6 +11,7 @@ class ConnectorPanel;
 class Document;
 class FreeEndEditor;
 class HarnessPanel;
+class AccessoryPanel;
 class LayoutNodePanel;
 class SegmentPanel;
 class SelectionModel;
@@ -39,6 +40,7 @@ private:
     FreeEndEditor *m_freeEnd;
     SegmentPanel *m_segment;
     LayoutNodePanel *m_node;
+    AccessoryPanel *m_accessory;
     QLabel *m_mixed;
 };
 

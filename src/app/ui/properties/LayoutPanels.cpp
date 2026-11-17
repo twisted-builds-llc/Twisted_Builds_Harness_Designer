@@ -7,6 +7,7 @@
 #include "commands/EntityCommands.h"
 #include "model/Queries.h"
 #include "ui/Format.h"
+#include "ui/properties/PanelWidgets.h"
 
 #include <QComboBox>
 #include <QFormLayout>
@@ -328,6 +329,155 @@ void LayoutNodePanel::commit()
         updated.sharedSpliceIds.clear(); // only a splice point holds splices side by side
     if (updated != *current)
         m_document->undoStack()->push(new UpdateEntityCommand<LayoutNode>(model, updated, tr("Edit layout node")));
+}
+
+// ---- AccessoryPanel ------------------------------------------------------------------
+
+AccessoryPanel::AccessoryPanel(Document *document, QWidget *parent)
+    : QWidget(parent)
+    , m_document(document)
+    , m_kind(new QComboBox(this))
+    , m_text(new QLineEdit(this))
+    , m_partNumber(new QLineEdit(this))
+    , m_cover(new QComboBox(this))
+    , m_coverLength(new QLineEdit(this))
+    , m_coverUnits(new QLabel(this))
+    , m_distance(new QLineEdit(this))
+    , m_distanceUnits(new QLabel(this))
+    , m_distanceNote(new QLabel(this))
+    , m_notes(new CommitTextEdit(this))
+    , m_labelFields(new QWidget(this))
+{
+    m_kind->addItem(tr("Label"), int(AccessoryKind::Label));
+    m_kind->addItem(tr("Zip tie / strain relief"), int(AccessoryKind::Tie));
+    m_kind->setAccessibleName(tr("Accessory kind"));
+    m_text->setAccessibleName(tr("Label text"));
+    m_text->setPlaceholderText(tr("what is printed, e.g. ECU or a logo"));
+    m_partNumber->setAccessibleName(tr("Accessory part number"));
+    m_partNumber->setPlaceholderText(tr("label stock or tie part number"));
+    m_cover->setAccessibleName(tr("Label cover"));
+    m_cover->setToolTip(tr("Protective cover over the label, e.g. clear heat shrink, from the sleeving "
+                           "library. Its length is added to the sleeving totals in the BOM."));
+    m_coverLength->setAccessibleName(tr("Cover length"));
+    m_distance->setAccessibleName(tr("Distance along the segment"));
+    m_distanceNote->setWordWrap(true);
+    m_distanceNote->setEnabled(false);
+
+    auto *coverLengthRow = new QHBoxLayout;
+    coverLengthRow->addWidget(m_coverLength, 1);
+    coverLengthRow->addWidget(m_coverUnits);
+    auto *labelForm = new QFormLayout(m_labelFields);
+    labelForm->setContentsMargins(0, 0, 0, 0);
+    labelForm->addRow(tr("&Text:"), m_text);
+    labelForm->addRow(tr("&Cover:"), m_cover);
+    labelForm->addRow(tr("Cover length:"), coverLengthRow);
+
+    auto *distanceRow = new QHBoxLayout;
+    distanceRow->addWidget(m_distance, 1);
+    distanceRow->addWidget(m_distanceUnits);
+    auto *form = new QFormLayout;
+    form->addRow(tr("&Kind:"), m_kind);
+    form->addRow(tr("&Part number:"), m_partNumber);
+    form->addRow(m_labelFields);
+    form->addRow(tr("&Distance:"), distanceRow);
+    form->addRow(m_distanceNote);
+    form->addRow(tr("&Notes:"), m_notes);
+    auto *layout = new QVBoxLayout(this);
+    layout->addLayout(form);
+    layout->addStretch();
+
+    for (QLineEdit *edit : {m_text, m_partNumber, m_coverLength, m_distance})
+        connect(edit, &QLineEdit::editingFinished, this, &AccessoryPanel::commit);
+    connect(m_kind, &QComboBox::activated, this, &AccessoryPanel::commit);
+    connect(m_cover, &QComboBox::activated, this, &AccessoryPanel::commit);
+    m_notes->onCommit = [this] { commit(); };
+    HarnessModel *model = document->model();
+    connect(model, &HarnessModel::entityChanged, this, [this](EntityKind kind, const QString &) {
+        if (kind == EntityKind::LayoutAccessory || kind == EntityKind::LayoutSegment || kind == EntityKind::LayoutNode)
+            refresh();
+    });
+    connect(model, &HarnessModel::libraryChanged, this, &AccessoryPanel::refresh);
+    connect(model, &HarnessModel::infoChanged, this, &AccessoryPanel::refresh);
+}
+
+void AccessoryPanel::setAccessory(const QString &id)
+{
+    m_id = id;
+    refresh();
+}
+
+void AccessoryPanel::refresh()
+{
+    HarnessModel *model = m_document->model();
+    const LayoutAccessory *a = model->find<LayoutAccessory>(m_id);
+    if (!a)
+        return;
+    const Harness &h = model->harness();
+    const Units units = h.info.units;
+    const QSignalBlocker b1(m_kind), b2(m_text), b3(m_partNumber), b4(m_cover), b5(m_coverLength), b6(m_distance);
+    m_kind->setCurrentIndex(m_kind->findData(int(a->kind)));
+    m_labelFields->setVisible(a->kind == AccessoryKind::Label);
+    m_text->setText(a->text);
+    m_partNumber->setText(a->partNumber);
+    // Heat shrink first: the usual label cover.
+    m_cover->clear();
+    m_cover->addItem(tr("None"), QString());
+    const Library &library = model->library();
+    for (const bool shrink : {true, false}) {
+        for (const Sleeving &s : library.sleevings) {
+            if ((s.kind == SleevingKind::HeatShrink) == shrink)
+                m_cover->addItem(QStringLiteral("%1 %2").arg(s.family, s.sizeLabel), s.id);
+        }
+    }
+    if (!a->coverSleevingId.isEmpty() && m_cover->findData(a->coverSleevingId) < 0)
+        m_cover->addItem(tr("%1 (not in library)").arg(a->coverSleevingId), a->coverSleevingId);
+    m_cover->setCurrentIndex(m_cover->findData(a->coverSleevingId));
+    m_coverLength->setText(a->coverLengthMm > 0 ? formatLength(a->coverLengthMm, units, false) : QString());
+    m_coverLength->setEnabled(!a->coverSleevingId.isEmpty());
+    m_coverUnits->setText(unitsSymbol(units));
+    m_distanceUnits->setText(unitsSymbol(units));
+    m_distance->setText(formatLength(a->offsetMm, units, false));
+    const LayoutSegment *segment = model->find<LayoutSegment>(a->segmentId);
+    const LayoutNode *from = segment ? model->find<LayoutNode>(segment->nodeA) : nullptr;
+    QString fromName = from ? layoutRefLabel(h, from->refId) : QString();
+    if (fromName.isEmpty())
+        fromName = tr("the branch point");
+    m_distanceNote->setText(segment && segment->lengthMm > 0
+                                ? tr("From %1, along a segment %2 long.").arg(fromName, formatLength(segment->lengthMm, units))
+                                : tr("From %1. Give the segment a length to place it by distance.").arg(fromName));
+    m_distance->setEnabled(segment && segment->lengthMm > 0);
+    m_notes->setTextIfDifferent(a->notes);
+}
+
+void AccessoryPanel::commit()
+{
+    HarnessModel *model = m_document->model();
+    const LayoutAccessory *current = model->find<LayoutAccessory>(m_id);
+    if (!current)
+        return;
+    const Units units = model->harness().info.units;
+    LayoutAccessory updated = *current;
+    updated.kind = AccessoryKind(m_kind->currentData().toInt());
+    updated.text = m_text->text().trimmed();
+    updated.partNumber = m_partNumber->text().trimmed();
+    updated.coverSleevingId = updated.kind == AccessoryKind::Label ? m_cover->currentData().toString() : QString();
+    if (updated.coverSleevingId.isEmpty()) {
+        updated.coverLengthMm = 0;
+    } else if (m_coverLength->text().trimmed().isEmpty()) {
+        updated.coverLengthMm = 0;
+    } else if (const auto length = parseLength(m_coverLength->text(), units); length && *length >= 0) {
+        updated.coverLengthMm = *length;
+    }
+    const LayoutSegment *segment = model->find<LayoutSegment>(updated.segmentId);
+    if (const auto distance = parseLength(m_distance->text(), units);
+        distance && segment && segment->lengthMm > 0)
+        updated.offsetMm = std::clamp(*distance, 0.0, segment->lengthMm);
+    updated.notes = m_notes->toPlainText();
+    if (updated != *current)
+        m_document->undoStack()->push(new UpdateEntityCommand<LayoutAccessory>(
+            model, updated, updated.kind == AccessoryKind::Label ? tr("Edit label") : tr("Edit tie")));
+    else
+        refresh(); // undo invalid input
 }
 
 } // namespace tbh::app

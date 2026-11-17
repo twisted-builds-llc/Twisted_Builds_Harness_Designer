@@ -30,6 +30,13 @@ public:
     LayoutNodeItem *nodeItem(const QString &id) const { return m_nodes.value(id); }
     LayoutSegmentItem *segmentItem(const QString &id) const { return m_segments.value(id); }
     NoteItem *noteItem(const QString &id) const { return m_notes.value(id); }
+    LayoutAccessoryItem *accessoryItem(const QString &id) const { return m_accessories.value(id); }
+    // Draws accessory `id` at curve parameter `u` of its segment (while it is dragged)
+    // without changing the model.
+    void previewAccessory(const QString &id, qreal u);
+    // Curve parameter where `accessory` is drawn on its segment: offset over the entered
+    // length, halfway when the segment has no length.
+    static qreal accessoryParameter(const LayoutAccessory &accessory, const LayoutSegment &segment);
     // Draws `segment` (e.g. while its bend is dragged) without changing the model.
     void previewSegment(const LayoutSegment &segment);
 
@@ -54,6 +61,9 @@ private:
     void addNode(const LayoutNode &node);
     void addSegment(const LayoutSegment &segment);
     void addNote(const Note &note);
+    void addAccessory(const LayoutAccessory &accessory);
+    void placeAccessory(LayoutAccessoryItem *item, std::optional<qreal> u = std::nullopt);
+    void placeAccessoriesOn(const QString &segmentId);
     void updateSegmentEnds(LayoutSegmentItem *item);
     // Tells a node which way its segments leave (branch point drawing).
     void updateLegs(LayoutNodeItem *node);
@@ -73,6 +83,7 @@ private:
     QHash<QString, LayoutNodeItem *> m_nodes;
     QHash<QString, LayoutSegmentItem *> m_segments;
     QHash<QString, NoteItem *> m_notes;
+    QHash<QString, LayoutAccessoryItem *> m_accessories;
 };
 
 } // namespace tbh::app

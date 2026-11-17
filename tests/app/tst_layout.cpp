@@ -12,6 +12,7 @@
 #include "schematic/SchematicScene.h"
 #include "schematic/SchematicView.h"
 #include "ui/Format.h"
+#include "ui/properties/LayoutPanels.h"
 #include "ui/MainWindow.h"
 #include "ui/ProblemsPanel.h"
 #include "ui/theme/Theme.h"
@@ -567,6 +568,76 @@ private slots:
         verifyLoadable(model.harness());
         stack.undo();
         QVERIFY(model.harness() == h);
+    }
+
+    void labelsOnTheLayout()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        view.resize(1000, 700);
+        view.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&view));
+        document.model()->reset(sample());
+        QTest::qWait(1);
+        view.resetTransform();
+        view.centerOn(300, 50);
+        HarnessModel *model = document.model();
+        const int undoBase = document.undoStack()->count();
+
+        // s2 runs (300, 0) to (600, 0), 450 mm: (400, 0) is a third along: 150 mm.
+        const QString id = view.addAccessoryAt(u"s2"_s, QPointF(400, 0), AccessoryKind::Label);
+        QCOMPARE(model->find<LayoutAccessory>(id)->offsetMm, 150.0);
+        QVERIFY(selection.selection().accessories.contains(id));
+        // Its text editor opens at once.
+        QLineEdit *editor = visibleEditor(view.viewport());
+        QVERIFY(editor);
+        editor->setText(u"ECU"_s);
+        QTest::keyClick(editor, Qt::Key_Return);
+        QCOMPARE(model->find<LayoutAccessory>(id)->text, u"ECU"_s);
+        QCOMPARE(view.layoutScene()->accessoryItem(id)->pos(), QPointF(400, 0));
+        verifyLoadable(model->harness());
+
+        // Dragging moves it along the segment only: to (500, 0), two thirds along: 300 mm.
+        const QPoint from = view.mapFromScene(QPointF(400, 0));
+        const QPoint to = view.mapFromScene(QPointF(500, 40));
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, from);
+        QTest::mouseMove(view.viewport(), from + QPoint(10, 0));
+        QTest::mouseMove(view.viewport(), to);
+        QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, to);
+        QVERIFY(std::abs(model->find<LayoutAccessory>(id)->offsetMm - 300.0) < 1.0);
+        QVERIFY(std::abs(view.layoutScene()->accessoryItem(id)->pos().y()) < 1e-6);
+        QCOMPARE(document.undoStack()->count(), undoBase + 3); // add, text, move
+        document.undoStack()->undo();
+        QCOMPARE(model->find<LayoutAccessory>(id)->offsetMm, 150.0);
+
+        // Properties: distance, part number, kind.
+        AccessoryPanel panel(&document);
+        panel.setAccessory(id);
+        auto field = [&](const QString &name) {
+            for (auto *w : panel.findChildren<QLineEdit *>()) {
+                if (w->accessibleName() == name)
+                    return w;
+            }
+            return static_cast<QLineEdit *>(nullptr);
+        };
+        field(u"Distance along the segment"_s)->setText(u"200"_s);
+        emit field(u"Distance along the segment"_s)->editingFinished();
+        QCOMPARE(model->find<LayoutAccessory>(id)->offsetMm, 200.0);
+        field(u"Distance along the segment"_s)->setText(u"900"_s); // past the end: kept on it
+        emit field(u"Distance along the segment"_s)->editingFinished();
+        QCOMPARE(model->find<LayoutAccessory>(id)->offsetMm, 450.0);
+        field(u"Accessory part number"_s)->setText(u"LBL-9"_s);
+        emit field(u"Accessory part number"_s)->editingFinished();
+        QCOMPARE(model->find<LayoutAccessory>(id)->partNumber, u"LBL-9"_s);
+
+        // Delete removes it.
+        Selection s;
+        s.accessories.insert(id);
+        selection.setSelection(s);
+        view.deleteSelection();
+        QVERIFY(!model->find<LayoutAccessory>(id));
+        QVERIFY(!view.layoutScene()->accessoryItem(id));
     }
 
     void removingLayoutItemsRemovesTheirAccessories()
@@ -1407,6 +1478,19 @@ private slots:
             auto loaded = io::readTbhFile(file, &error);
             QVERIFY2(loaded, qPrintable(error));
             h = *loaded;
+        } else {
+            // A covered label, a plain one and a tie.
+            h.library.sleevings = {Sleeving{u"hs"_s, u"Heat shrink clear"_s, SleevingKind::HeatShrink, u"1/2 in"_s,
+                                            12.7, 6.4, false, {}}};
+            LayoutAccessory covered = accessory(u"a1"_s, u"s2"_s, 120);
+            covered.text = u"SENSOR HARNESS"_s;
+            covered.coverSleevingId = u"hs"_s;
+            covered.coverLengthMm = 40;
+            LayoutAccessory plain = accessory(u"a2"_s, u"s1"_s, 60);
+            plain.text = u"ECU"_s;
+            LayoutAccessory tie = accessory(u"a3"_s, u"s3"_s, 20);
+            tie.kind = AccessoryKind::Tie;
+            h.accessories = {covered, plain, tie};
         }
         Theme theme;
         theme.setMode(Theme::Mode::Dark);
