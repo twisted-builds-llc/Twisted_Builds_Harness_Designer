@@ -40,6 +40,37 @@ QString nextPinLabel(const QString &previous)
     return match.captured(1) + formatNumber(next, digits.size());
 }
 
+QString compressPinLabels(const QStringList &labels)
+{
+    static const QRegularExpression numbered(QStringLiteral("^(.*?)(\\d{1,6})$"));
+    QStringList tokens;
+    for (qsizetype i = 0; i < labels.size();) {
+        const auto match = numbered.match(labels[i]);
+        qsizetype end = i + 1; // one past the run
+        if (match.hasMatch()) {
+            const QString prefix = match.captured(1);
+            const QString digits = match.captured(2);
+            const qsizetype width = digits.startsWith(QLatin1Char('0')) ? digits.size() : 0;
+            const qint64 start = digits.toLongLong();
+            while (end < labels.size()
+                   && labels[end] == prefix + formatNumber(start + (end - i), width))
+                ++end;
+            if (end - i >= 3) {
+                tokens << labels[i] + QLatin1Char('-') + labels[end - 1];
+                i = end;
+                continue;
+            }
+            end = i + 1;
+        }
+        tokens << labels[i];
+        i = end;
+    }
+    const QString pattern = tokens.join(QStringLiteral(", "));
+    if (expandPinPattern(pattern, 1, false, nullptr) == std::optional<QStringList>(labels))
+        return pattern;
+    return labels.join(QStringLiteral(", "));
+}
+
 std::optional<QStringList> expandPinPattern(const QString &pattern, int step, bool reverse,
                                             QString *error)
 {

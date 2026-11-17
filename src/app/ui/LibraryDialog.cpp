@@ -2,6 +2,7 @@
 #include "ui/LibraryDialog.h"
 
 #include "LibraryStore.h"
+#include "ui/LibraryPartsPages.h"
 
 #include <QComboBox>
 #include <QCoreApplication>
@@ -76,6 +77,8 @@ LibraryDialog::LibraryDialog(const Library &library, QWidget *parent)
     , m_typeName(new QLineEdit(this))
     , m_ods(new QTableWidget(0, 3, this))
     , m_sleevings(new QTableWidget(0, 6, this))
+    , m_connectorParts(new ConnectorPartsPage(this))
+    , m_pinParts(new PinPartsPage(this))
 {
     setWindowTitle(tr("Parts Library"));
     resize(820, 560);
@@ -150,6 +153,8 @@ LibraryDialog::LibraryDialog(const Library &library, QWidget *parent)
     auto *tabs = new QTabWidget(this);
     tabs->addTab(typesPage, tr("Wire Types"));
     tabs->addTab(sleevingPage, tr("Sleeving"));
+    tabs->addTab(m_connectorParts, tr("Connectors"));
+    tabs->addTab(m_pinParts, tr("Terminals, Seals && Plugs"));
 
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel
                                              | QDialogButtonBox::RestoreDefaults,
@@ -172,6 +177,8 @@ LibraryDialog::LibraryDialog(const Library &library, QWidget *parent)
         m_currentType = -1;
         loadTypes();
         loadSleevings();
+        m_connectorParts->load(m_library.connectorParts);
+        m_pinParts->load(m_library.pinParts);
     });
     connect(m_types, &QListWidget::currentRowChanged, this, [this](int row) {
         QString error;
@@ -219,6 +226,8 @@ LibraryDialog::LibraryDialog(const Library &library, QWidget *parent)
 
     loadTypes();
     loadSleevings();
+    m_connectorParts->load(m_library.connectorParts);
+    m_pinParts->load(m_library.pinParts);
 }
 
 void LibraryDialog::loadTypes()
@@ -350,7 +359,9 @@ bool LibraryDialog::storeSleevings(QString *error)
 void LibraryDialog::accept()
 {
     QString error;
-    if (!storeType(m_currentType, &error) || !storeSleevings(&error)) {
+    if (!storeType(m_currentType, &error) || !storeSleevings(&error)
+        || !m_connectorParts->store(&m_library.connectorParts, &error)
+        || !m_pinParts->store(&m_library.pinParts, &error)) {
         QMessageBox::warning(this, tr("Parts Library"), error);
         return;
     }
@@ -368,6 +379,31 @@ void LibraryDialog::accept()
         compare.approximate = s.approximate;
         if (compare != s)
             s.approximate = false;
+    }
+    // Connector parts are matched by part number: a renamed one counts as edited.
+    for (ConnectorPart &p : m_library.connectorParts) {
+        const ConnectorPart *old = m_original.connectorPart(p.partNumber);
+        if (!old) {
+            p.approximate = false;
+            continue;
+        }
+        ConnectorPart compare = *old;
+        compare.approximate = p.approximate;
+        compare.extra = p.extra;
+        if (compare != p)
+            p.approximate = false;
+    }
+    for (PinPart &p : m_library.pinParts) {
+        const PinPart *old = m_original.pinPart(p.kind, p.partNumber);
+        if (!old) {
+            p.approximate = false;
+            continue;
+        }
+        PinPart compare = *old;
+        compare.approximate = p.approximate;
+        compare.extra = p.extra;
+        if (compare != p)
+            p.approximate = false;
     }
     QDialog::accept();
 }

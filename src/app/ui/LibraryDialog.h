@@ -11,8 +11,12 @@ class QTableWidget;
 
 namespace tbh::app {
 
-// Edits the user's parts library: wire types with outer diameter per gauge, and the
-// sleeving catalog. Edited entries lose their "approximate" flag.
+class ConnectorPartsPage;
+class PinPartsPage;
+
+// Edits the user's parts library: wire types with outer diameter per gauge, the sleeving
+// catalog, connector housings, and terminals, seals and plugs. Edited entries lose their
+// "approximate" flag.
 class LibraryDialog : public QDialog
 {
     Q_OBJECT
@@ -41,6 +45,8 @@ private:
     QLineEdit *m_typeName;
     QTableWidget *m_ods;
     QTableWidget *m_sleevings;
+    ConnectorPartsPage *m_connectorParts;
+    PinPartsPage *m_pinParts;
 };
 
 } // namespace tbh::app

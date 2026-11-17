@@ -79,6 +79,23 @@ private slots:
         QCOMPARE(labels->last(), u"120"_s);
     }
 
+    void compress()
+    {
+        auto check = [](const QString &pattern, const QString &expected) {
+            const auto labels = expandPinPattern(pattern, 1, false, nullptr);
+            QVERIFY(labels);
+            QCOMPARE(compressPinLabels(*labels), expected);
+        };
+        check(u"1-12"_s, u"1-12"_s);
+        check(u"A1-A8, B1-B2"_s, u"A1-A8, B1, B2"_s); // runs of two stay separate
+        check(u"08-11"_s, u"08-11"_s);                 // padding kept: 08 09 10 11
+        check(u"1-3, 5-7, X"_s, u"1-3, 5-7, X"_s);
+        check(u"3-1"_s, u"3, 2, 1"_s);                 // descending is not compressed
+        // A label a pattern cannot express: all labels, comma separated.
+        QCOMPARE(compressPinLabels({u"1"_s, u"2"_s, u"3"_s, u"4-5"_s}), u"1, 2, 3, 4-5"_s);
+        QCOMPARE(compressPinLabels({}), QString());
+    }
+
     void errors()
     {
         QString error;

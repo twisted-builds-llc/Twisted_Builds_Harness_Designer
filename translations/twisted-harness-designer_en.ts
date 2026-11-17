@@ -12,7 +12,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/bom/BomView.cpp" line="273"/>
+        <location filename="../src/app/bom/BomView.cpp" line="274"/>
         <source>%n line(s) need attention (marked with a warning).</source>
         <translation>
             <numerusform>%n line needs attention (marked with a warning).</numerusform>
@@ -23,7 +23,7 @@
 <context>
     <name>tbh::app::ConnectorEdits</name>
     <message numerus="yes">
-        <location filename="../src/app/ui/ConnectorEdits.cpp" line="40"/>
+        <location filename="../src/app/ui/ConnectorEdits.cpp" line="41"/>
         <source>...and %n more</source>
         <translation>
             <numerusform>...and %n more</numerusform>
@@ -31,11 +31,22 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/ui/ConnectorEdits.cpp" line="43"/>
+        <location filename="../src/app/ui/ConnectorEdits.cpp" line="44"/>
         <source>%1 also deletes %n wire(s):</source>
         <translation>
             <numerusform>%1 also deletes %n wire:</numerusform>
             <numerusform>%1 also deletes %n wires:</numerusform>
+        </translation>
+    </message>
+</context>
+<context>
+    <name>tbh::app::ConnectorPartsPage</name>
+    <message numerus="yes">
+        <location filename="../src/app/ui/LibraryPartsPages.cpp" line="181"/>
+        <source>%n cavity(s)</source>
+        <translation>
+            <numerusform>%n cavity</numerusform>
+            <numerusform>%n cavities</numerusform>
         </translation>
     </message>
 </context>
@@ -53,7 +64,7 @@
 <context>
     <name>tbh::app::MainWindow</name>
     <message numerus="yes">
-        <location filename="../src/app/ui/MainWindow.cpp" line="626"/>
+        <location filename="../src/app/ui/MainWindow.cpp" line="656"/>
         <source>%n item(s) selected</source>
         <translation>
             <numerusform>%n item selected</numerusform>
@@ -61,7 +72,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/ui/MainWindow.cpp" line="721"/>
+        <location filename="../src/app/ui/MainWindow.cpp" line="762"/>
         <source>Exported %n sheet(s) to %1</source>
         <translation>
             <numerusform>Exported %n sheet to %1</numerusform>
@@ -69,7 +80,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/ui/MainWindow.cpp" line="797"/>
+        <location filename="../src/app/ui/MainWindow.cpp" line="838"/>
         <source>%1 - %n pin(s)</source>
         <translation>
             <numerusform>%1 - %n pin</numerusform>
@@ -122,7 +133,7 @@
 <context>
     <name>tbh::app::WirePanel</name>
     <message numerus="yes">
-        <location filename="../src/app/ui/properties/WirePanel.cpp" line="192"/>
+        <location filename="../src/app/ui/properties/WirePanel.cpp" line="200"/>
         <source>%n selected wire(s) not routed and not counted.</source>
         <translation>
             <numerusform>%n selected wire is not routed and not counted.</numerusform>
@@ -130,7 +141,7 @@
         </translation>
     </message>
     <message numerus="yes">
-        <location filename="../src/app/ui/properties/WirePanel.cpp" line="238"/>
+        <location filename="../src/app/ui/properties/WirePanel.cpp" line="249"/>
         <source>%n wires selected</source>
         <translation>
             <numerusform>%n wire selected</numerusform>

@@ -26,6 +26,7 @@ add_library(tbh_app_lib STATIC
     ui/Format.h ui/Format.cpp
     ui/HelpDialog.h ui/HelpDialog.cpp
     ui/LibraryDialog.h ui/LibraryDialog.cpp
+    ui/LibraryPartsPages.h ui/LibraryPartsPages.cpp
     ui/MainWindow.h ui/MainWindow.cpp
     ui/PinPatternDialog.h ui/PinPatternDialog.cpp
     ui/ProblemsPanel.h ui/ProblemsPanel.cpp

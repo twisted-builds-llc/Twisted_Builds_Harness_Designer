@@ -21,4 +21,10 @@ QString nextPinLabel(const QString &previous);
 std::optional<QStringList> expandPinPattern(const QString &pattern, int step, bool reverse,
                                             QString *error);
 
+// The shortest pattern expandPinPattern() turns back into `labels`: runs of three or more
+// consecutive numbers with the same prefix (and padding) become ranges, e.g.
+// {"1".."12"} -> "1-12", {"A1".."A8", "B1", "B2"} -> "A1-A8, B1, B2". Labels a pattern
+// cannot express (e.g. containing a comma) give them all comma separated.
+QString compressPinLabels(const QStringList &labels);
+
 } // namespace tbh

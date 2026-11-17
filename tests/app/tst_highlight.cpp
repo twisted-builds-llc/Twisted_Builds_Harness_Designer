@@ -13,6 +13,7 @@
 #include "schematic/SchematicView.h"
 #include "io/TbhFile.h"
 #include "ui/LibraryDialog.h"
+#include "ui/LibraryPartsPages.h"
 #include "ui/MainWindow.h"
 #include "ui/theme/Theme.h"
 #include "ui/properties/LayoutPanels.h"
@@ -305,12 +306,15 @@ private slots:
         Library lib = testLibrary();
         lib.wireTypes.push_back(WireType{u"txl"_s, u"TXL"_s, {{Gauge{18, GaugeSystem::Awg}, 1.57}}, true, {}});
         LibraryDialog dialog(lib);
-        auto *types = dialog.findChild<QListWidget *>();
-        QTableWidget *ods = nullptr;
-        for (auto *table : dialog.findChildren<QTableWidget *>()) {
-            if (table->columnCount() == 3)
-                ods = table;
-        }
+        auto named = [](QWidget *parent, const QString &name) -> QWidget * {
+            for (QWidget *w : parent->findChildren<QWidget *>()) {
+                if (w->accessibleName() == name)
+                    return w;
+            }
+            return nullptr;
+        };
+        auto *types = qobject_cast<QListWidget *>(named(&dialog, u"Wire types"_s));
+        auto *ods = qobject_cast<QTableWidget *>(named(&dialog, u"Outer diameters by gauge"_s));
         QVERIFY(types && ods);
         types->setCurrentRow(1); // TXL
         QCOMPARE(ods->rowCount(), 1);
@@ -324,9 +328,7 @@ private slots:
 
         // Invalid input keeps the dialog open.
         LibraryDialog bad(lib);
-        auto *badOds = bad.findChildren<QTableWidget *>().constFirst()->columnCount() == 3
-                           ? bad.findChildren<QTableWidget *>().constFirst()
-                           : bad.findChildren<QTableWidget *>().constLast();
+        auto *badOds = qobject_cast<QTableWidget *>(named(&bad, u"Outer diameters by gauge"_s));
         badOds->item(0, 2)->setText(u"-1"_s);
         QTimer::singleShot(0, [] {
             for (QWidget *w : QApplication::topLevelWidgets()) {
@@ -382,6 +384,95 @@ private slots:
         QTest::qWait(20);
         window.grab().save(out + u"/m4-segment.png"_s);
         QFile::remove(libraryStore::userLibraryPath());
+    }
+
+    void connectorPartsPages()
+    {
+        auto named = [](QWidget *parent, const QString &name) -> QWidget * {
+            for (QWidget *w : parent->findChildren<QWidget *>()) {
+                if (w->accessibleName() == name)
+                    return w;
+            }
+            return nullptr;
+        };
+        ConnectorPart dt;
+        dt.partNumber = u"DT04-2P"_s;
+        dt.cavityLabels = {u"1"_s, u"2"_s};
+        dt.approximate = true;
+        ConnectorPart other;
+        other.partNumber = u"X-1"_s;
+        other.cavityLabels = {u"1"_s};
+        ConnectorPartsPage housings;
+        housings.load({dt, other});
+        auto *cavities = qobject_cast<QLineEdit *>(named(&housings, u"Cavity labels"_s));
+        auto *terminals = qobject_cast<QLineEdit *>(named(&housings, u"Compatible terminals"_s));
+        auto *partNumber = qobject_cast<QLineEdit *>(named(&housings, u"Housing part number"_s));
+        QVERIFY(cavities && terminals && partNumber);
+        QCOMPARE(cavities->text(), u"1, 2"_s); // first housing shown; two labels stay a list
+        cavities->setText(u"A1-A3, B1"_s);
+        terminals->setText(u"T1, , T2 "_s);
+        std::vector<ConnectorPart> stored;
+        QString error;
+        QVERIFY2(housings.store(&stored, &error), qPrintable(error));
+        QCOMPARE(stored[0].cavityLabels, (QStringList{u"A1"_s, u"A2"_s, u"A3"_s, u"B1"_s}));
+        QCOMPARE(stored[0].terminals, (QStringList{u"T1"_s, u"T2"_s}));
+        QVERIFY(stored[0].approximate); // the dialog decides about the flag
+        cavities->setText(u"A1-B3"_s); // a range with two prefixes
+        QVERIFY(!housings.store(&stored, &error));
+        QVERIFY(!error.isEmpty());
+        cavities->setText(u"1-2"_s);
+        partNumber->setText(u"X-1"_s); // same as the other housing
+        QVERIFY(!housings.store(&stored, &error));
+        QVERIFY(error.contains(u"X-1"_s));
+
+        PinPart terminal;
+        terminal.partNumber = u"T1"_s;
+        terminal.wireMin = Gauge{20, GaugeSystem::Awg};
+        terminal.approximate = true;
+        PinPartsPage pins;
+        pins.load({terminal});
+        auto *table = pins.findChild<QTableWidget *>();
+        QCOMPARE(table->item(0, PinPartsPage::WireMin)->text(), u"20 AWG"_s);
+        table->item(0, PinPartsPage::WireMax)->setText(u"0.5 mm2"_s);
+        table->item(0, PinPartsPage::InsulationMax)->setText(u"3.05"_s);
+        std::vector<PinPart> storedPins;
+        QVERIFY2(pins.store(&storedPins, &error), qPrintable(error));
+        QCOMPARE(storedPins[0].wireMax, std::optional<Gauge>(Gauge{0.5, GaugeSystem::Mm2}));
+        QCOMPARE(storedPins[0].insulationMaxMm, std::optional<double>(3.05));
+        QVERIFY(!storedPins[0].insulationMinMm);
+        table->item(0, PinPartsPage::WireMin)->setText(u"thick"_s);
+        QVERIFY(!pins.store(&storedPins, &error));
+        table->item(0, PinPartsPage::WireMin)->setText(u"18"_s); // no unit: AWG
+        table->item(0, PinPartsPage::InsulationMin)->setText(u"-1"_s);
+        QVERIFY(!pins.store(&storedPins, &error));
+
+        // In the dialog, edited parts lose "approximate"; untouched ones keep it.
+        Library lib;
+        lib.connectorParts = {dt};
+        lib.pinParts = {terminal};
+        LibraryDialog dialog(lib);
+        auto *dialogPins = qobject_cast<QTableWidget *>(named(&dialog, u"Terminals, seals and plugs"_s));
+        QVERIFY(dialogPins);
+        dialogPins->item(0, PinPartsPage::Description)->setText(u"checked against drawing"_s);
+        dialog.accept();
+        QCOMPARE(dialog.result(), int(QDialog::Accepted));
+        QVERIFY(!dialog.library().pinPart(PinPartKind::Terminal, u"T1"_s)->approximate);
+        QVERIFY(dialog.library().connectorPart(u"DT04-2P"_s)->approximate);
+
+        // Optional look at both tabs with the shipped seed parts.
+        const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR");
+        if (!out.isEmpty()) {
+            LibraryDialog seeded(libraryStore::defaultLibrary());
+            seeded.resize(1000, 620);
+            seeded.show();
+            auto *tabs = seeded.findChild<QTabWidget *>();
+            tabs->setCurrentIndex(2);
+            QTest::qWait(50);
+            seeded.grab().save(out + u"/library-connectors.png"_s);
+            tabs->setCurrentIndex(3);
+            QTest::qWait(50);
+            seeded.grab().save(out + u"/library-pin-parts.png"_s);
+        }
     }
 
     void libraryStore()
