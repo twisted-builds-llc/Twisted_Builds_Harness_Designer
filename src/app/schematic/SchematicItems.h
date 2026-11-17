@@ -216,6 +216,8 @@ public:
     std::optional<qreal> runDistance(const QPointF &scenePos) const;
     // Selected wires are drawn above the others.
     static constexpr qreal kSelectedZ = 0.5;
+    // Radius of the grab handles drawn on a selected wire's ends (scene units).
+    static constexpr qreal kEndHandleRadius = 4.5;
 
     // Off-sheet: the other end is on another sheet. The wire is drawn as a lead out of `a`
     // to a tag reading `tag` (e.g. "J3 : 2 (Dash)"); setRoute() turns it back to normal.

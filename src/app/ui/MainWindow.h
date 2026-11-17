@@ -6,6 +6,7 @@
 
 #include <QMainWindow>
 
+class QLabel;
 class QLineEdit;
 class QTabWidget;
 class QMenu;
@@ -94,6 +95,7 @@ private:
     BomView *m_bom = nullptr;
     Highlighter *m_highlighter = nullptr;
     Autosave *m_autosave = nullptr;
+    QLabel *m_autosaveStatus = nullptr; // "Autosaved 12:03" in the status bar
     QTabWidget *m_tabs = nullptr;
     QSplitter *m_splitter = nullptr;
     QAction *m_splitAction = nullptr;

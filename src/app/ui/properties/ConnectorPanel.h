@@ -60,6 +60,8 @@ public:
     // housing first (pinPartChoices()); empty for other columns.
     std::vector<PartChoice> partChoices(int column) const;
     QString housingPartNumber() const;
+    // The harness the table edits.
+    const Harness &harness() const;
 
 signals:
     // Typed Wired names that match no pin, splice or free end (nothing was changed).

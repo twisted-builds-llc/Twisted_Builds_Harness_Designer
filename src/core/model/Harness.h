@@ -10,6 +10,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QPointF>
+#include <QSizeF>
 #include <QString>
 
 #include <map>
@@ -44,6 +45,9 @@ enum class ConductorKind { Single };
 // Which lead of a splice or free end a wire end uses on the schematic (in the item's own
 // left/right). Auto: a splice wire meets the dot, a free end wire the lead facing it.
 enum class WireLead { Auto, Left, Right };
+// Drawn on a splice or free end on the schematic only, so a ground or supply point stands out
+// at a glance. The part itself (layout, BOM) does not change.
+enum class SchematicSymbol { None, Ground, ChassisGround, Power };
 enum class LayoutNodeType { Connector, Branch, Splice, FlyingLead, Eyelet };
 // Only Full in v1 (sleeving covers the whole segment).
 enum class SleevingCoverage { Full };
@@ -153,6 +157,7 @@ struct Splice {
     QString id;
     QString label;
     QString partNumber;
+    SchematicSymbol symbol = SchematicSymbol::None;
     QJsonObject extra;
 
     bool operator==(const Splice &) const = default;
@@ -165,6 +170,7 @@ struct FreeEnd {
     FreeEndKind kind = FreeEndKind::FlyingLead;
     QString label;              // empty = none
     QString terminalPartNumber; // empty = none
+    SchematicSymbol symbol = SchematicSymbol::None; // Power: the label names the supply, e.g. "12V+"
     QJsonObject extra;
 
     bool operator==(const FreeEnd &) const = default;
@@ -231,6 +237,10 @@ struct Note {
     QString text;
     QPointF position; // top left of the text
     QString sheetId;  // schematic notes: the sheet it is on; empty = first sheet
+    // Schematic notes only: set = an outline (e.g. an assembly such as a steering wheel),
+    // drawn as a dashed box of this size from `position` with the text as its title.
+    // Moving the outline moves what lies inside it. Drawing only, like any note.
+    std::optional<QSizeF> frameSize;
     QJsonObject extra;
 
     bool operator==(const Note &) const = default;

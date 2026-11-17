@@ -56,7 +56,9 @@ std::unique_ptr<QUndoCommand> addWire(HarnessModel *model, Wire wire, Placements
 
 // Replaces a connector with `updated`. For pins whose circuit text was changed to a
 // non-empty value, empty circuit text at the other end of their wires, and through
-// splices, is filled (fillEmptyCircuitText). Returns null if nothing changes.
+// splices, is filled (fillEmptyCircuitText). A pin whose text was renamed takes the
+// rename along its net: pins and wires there that still had the old text get the new one
+// (renameCircuitText). Returns null if nothing changes.
 std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connector &updated,
                                               const QString &text);
 
@@ -72,8 +74,8 @@ std::unique_ptr<QUndoCommand> removeLayoutItems(HarnessModel *model, const QSet<
                                                 const QSet<QString> &noteIds = {},
                                                 const QSet<QString> &accessoryIds = {});
 
-// Sets a note's text (trimmed). Empty text deletes the note. Returns null if the note is
-// missing or nothing changes.
+// Sets a note's text (trimmed). Empty text deletes the note, except an outline (frameSize),
+// which keeps no title. Returns null if the note is missing or nothing changes.
 std::unique_ptr<QUndoCommand> setNoteText(HarnessModel *model, const QString &noteId, const QString &text);
 
 // Joins branch point `branchId` into node `intoId`: its segments are re-attached to

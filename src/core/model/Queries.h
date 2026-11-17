@@ -41,6 +41,12 @@ struct CircuitTextFill
     QSet<QString> wireIds;      // wires whose name changed
 };
 CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString> &wireIds);
+// A renamed circuit text follows across the nets of the listed wires (same nets as
+// fillEmptyCircuitText): every pin whose text is exactly `oldText` and every wire named
+// exactly `oldText` gets `newText`. Pins and wires named something else are left alone.
+// Does nothing if either text is empty or they are equal.
+CircuitTextFill renameCircuitText(Harness &harness, const std::vector<QString> &wireIds,
+                                  const QString &oldText, const QString &newText);
 
 // Human-readable end description, e.g. "ECU-A : A1", "S1", "Ring terminal".
 QString describeWireEnd(const Harness &harness, const WireEnd &end);

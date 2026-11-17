@@ -66,13 +66,36 @@ private slots:
         QVERIFY(!QFile::exists(autosave.recoveryFile())); // nothing unsaved
 
         rename(document, u"Work in progress"_s);
+        QSignalSpy saved(&autosave, &Autosave::saved);
         QVERIFY(autosave.saveNow());
         QVERIFY(QFile::exists(autosave.recoveryFile()));
+        QCOMPARE(saved.size(), 1); // reported, so the status bar can show it
 
         // Saving the harness makes the recovery file pointless: it goes away.
         QTemporaryDir dir;
         QVERIFY(document.saveAs(dir.filePath(u"saved.tbh"_s), nullptr));
         QVERIFY(!QFile::exists(autosave.recoveryFile()));
+    }
+
+    void failureIsReported()
+    {
+        // The recovery folder is replaced by a plain file: writing must fail, and say so.
+        Document document;
+        Autosave autosave(&document);
+        rename(document, u"Unprotected"_s);
+        QDir(Autosave::recoveryDirectory()).removeRecursively();
+        QFile blocker(Autosave::recoveryDirectory());
+        QVERIFY(blocker.open(QIODevice::WriteOnly));
+        blocker.close();
+        QSignalSpy failed(&autosave, &Autosave::saveFailed);
+        QSignalSpy saved(&autosave, &Autosave::saved);
+        QString error;
+        QVERIFY(!autosave.saveNow(&error));
+        QVERIFY(!error.isEmpty());
+        QCOMPARE(failed.size(), 1);
+        QCOMPARE(failed.front().front().toString(), error);
+        QCOMPARE(saved.size(), 0);
+        QFile::remove(Autosave::recoveryDirectory());
     }
 
     void ownSessionIsNotOffered()

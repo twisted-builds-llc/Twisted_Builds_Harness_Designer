@@ -65,6 +65,10 @@ constexpr EnumName<EndType> kEndTypes[] = {{EndType::Pin, "pin"},
                                            {EndType::Eyelet, "eyelet"},
                                            {EndType::RingTerminal, "ringTerminal"},
                                            {EndType::Bare, "bare"}};
+constexpr EnumName<SchematicSymbol> kSchematicSymbols[] = {{SchematicSymbol::None, "none"},
+                                                           {SchematicSymbol::Ground, "ground"},
+                                                           {SchematicSymbol::ChassisGround, "chassisGround"},
+                                                           {SchematicSymbol::Power, "power"}};
 constexpr EnumName<ConductorKind> kConductorKinds[] = {{ConductorKind::Single, "single"}};
 constexpr EnumName<WireLead> kWireLeads[] = {
     {WireLead::Auto, "auto"}, {WireLead::Left, "left"}, {WireLead::Right, "right"}};
@@ -352,6 +356,7 @@ Splice readSplice(ObjectReader r)
     s.id = r.id();
     s.label = r.string("label");
     s.partNumber = r.string("partNumber");
+    s.symbol = r.enumValue("symbol", kSchematicSymbols, SchematicSymbol::None);
     s.extra = r.extra();
     return s;
 }
@@ -363,6 +368,7 @@ FreeEnd readFreeEnd(ObjectReader r)
     f.kind = r.enumValue("kind", kFreeEndKinds, FreeEndKind::FlyingLead);
     f.label = r.string("label");
     f.terminalPartNumber = r.string("terminalPartNumber");
+    f.symbol = r.enumValue("symbol", kSchematicSymbols, SchematicSymbol::None);
     f.extra = r.extra();
     return f;
 }
@@ -431,8 +437,16 @@ Note readNote(ObjectReader r, NoteCanvas canvas)
     n.text = r.string("text");
     ObjectReader pos(r.object("position"), r.context() + QStringLiteral(".position"));
     n.position = QPointF(pos.number("x", 0.0), pos.number("y", 0.0));
-    if (canvas == NoteCanvas::Schematic)
+    if (canvas == NoteCanvas::Schematic) {
         n.sheetId = r.string("sheet");
+        if (const QJsonObject frame = r.object("frame"); !frame.isEmpty()) {
+            ObjectReader f(frame, r.context() + QStringLiteral(".frame"));
+            const QSizeF size(f.number("width", 0.0, true), f.number("height", 0.0, true));
+            if (!(size.width() > 0 && size.height() > 0))
+                fail(Tr::tr("%1: an outline must be wider and taller than zero.").arg(f.context()));
+            n.frameSize = size;
+        }
+    }
     n.extra = r.extra();
     return n;
 }
@@ -675,12 +689,22 @@ QJsonObject writeWire(const Wire &w)
     return o;
 }
 
+// Written only when there is one.
+void writeSymbol(QJsonObject &o, SchematicSymbol symbol)
+{
+    if (symbol == SchematicSymbol::None)
+        o.remove(u"symbol");
+    else
+        o[u"symbol"] = enumToString(kSchematicSymbols, symbol);
+}
+
 QJsonObject writeSplice(const Splice &s)
 {
     QJsonObject o = s.extra;
     o[u"id"] = s.id;
     o[u"label"] = s.label;
     o[u"partNumber"] = s.partNumber;
+    writeSymbol(o, s.symbol);
     return o;
 }
 
@@ -691,6 +715,7 @@ QJsonObject writeFreeEnd(const FreeEnd &f)
     o[u"kind"] = enumToString(kFreeEndKinds, f.kind);
     o[u"label"] = f.label;
     o[u"terminalPartNumber"] = f.terminalPartNumber;
+    writeSymbol(o, f.symbol);
     return o;
 }
 
@@ -748,6 +773,10 @@ QJsonObject writeNote(const Note &n)
     o[u"position"] = QJsonObject{{u"x"_s, n.position.x()}, {u"y"_s, n.position.y()}};
     if (!n.sheetId.isEmpty())
         o[u"sheet"] = n.sheetId;
+    if (n.frameSize)
+        o[u"frame"] = QJsonObject{{u"width"_s, n.frameSize->width()}, {u"height"_s, n.frameSize->height()}};
+    else
+        o.remove(u"frame");
     return o;
 }
 

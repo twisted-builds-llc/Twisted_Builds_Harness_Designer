@@ -9,6 +9,7 @@
 #include <QDialogButtonBox>
 #include <QFormLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QSpinBox>
 #include <QVBoxLayout>
 
@@ -20,6 +21,8 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     , m_autosave(new QSpinBox(this))
     , m_panInput(new QComboBox(this))
     , m_wheelPans(new QCheckBox(tr("Scroll &wheel pans (Ctrl+wheel or pinch zooms)"), this))
+    , m_circuitSuggestions(new QCheckBox(tr("&Suggest circuit text while typing"), this))
+    , m_suggestionDefaults(new QLineEdit(this))
 {
     setWindowTitle(tr("Preferences"));
     fillUnitsCombo(m_defaultUnits);
@@ -45,6 +48,15 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     m_wheelPans->setToolTip(tr("For touchpads: two-finger scrolling moves the view instead of "
                                "zooming."));
     form->addRow(m_wheelPans);
+    m_circuitSuggestions->setChecked(preferences::circuitSuggestions());
+    m_circuitSuggestions->setToolTip(tr("While you type a pin's circuit text, a list offers the quick "
+                                        "choices below and the texts already used in the harness."));
+    form->addRow(m_circuitSuggestions);
+    m_suggestionDefaults->setText(preferences::circuitSuggestionDefaults().join(QStringLiteral(", ")));
+    m_suggestionDefaults->setToolTip(tr("Comma separated, offered first."));
+    m_suggestionDefaults->setEnabled(m_circuitSuggestions->isChecked());
+    connect(m_circuitSuggestions, &QCheckBox::toggled, m_suggestionDefaults, &QWidget::setEnabled);
+    form->addRow(tr("&Quick choices:"), m_suggestionDefaults);
     auto *hint = new QLabel(tr("Each harness file keeps its own units; change them in the "
                                "harness properties."),
                             this);
@@ -68,6 +80,12 @@ void PreferencesDialog::accept()
     preferences::setAutosaveMinutes(m_autosave->value());
     preferences::setPanInput(preferences::PanInput(m_panInput->currentData().toInt()));
     preferences::setWheelPans(m_wheelPans->isChecked());
+    preferences::setCircuitSuggestions(m_circuitSuggestions->isChecked());
+    QStringList defaults;
+    for (const QString &text : m_suggestionDefaults->text().split(u','))
+        if (!text.trimmed().isEmpty())
+            defaults << text.trimmed();
+    preferences::setCircuitSuggestionDefaults(defaults);
     QDialog::accept();
 }
 

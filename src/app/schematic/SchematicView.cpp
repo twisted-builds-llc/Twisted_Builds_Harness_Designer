@@ -2,6 +2,7 @@
 #include "schematic/SchematicView.h"
 
 #include "Document.h"
+#include "Preferences.h"
 #include "SelectionModel.h"
 #include "calc/Highlight.h"
 #include "calc/WireLength.h"
@@ -185,6 +186,15 @@ void SchematicView::mousePressEvent(QMouseEvent *event)
         return;
     }
     QGraphicsItem *item = itemAt(event->pos());
+    if (item && item->type() == NoteItemType) {
+        auto *note = static_cast<NoteItem *>(item);
+        if (note->isResizeHandleAt(note->mapFromScene(scenePos))) {
+            m_resizeNote = note->id();
+            m_resizePressScene = scenePos;
+            m_resizeStartSize = *note->note().frameSize;
+            return;
+        }
+    }
     if (item && item->type() == ConnectorItemType) {
         auto *connector = static_cast<ConnectorItem *>(item);
         const auto hit = connector->hitTest(connector->mapFromScene(scenePos));
@@ -266,6 +276,18 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
     }
     if (m_wirePending)
         return;
+    if (!m_resizeNote.isEmpty()) {
+        if (NoteItem *note = m_scene->noteItem(m_resizeNote)) {
+            QSizeF size = m_resizeStartSize + QSizeF(mapToScene(event->pos()).x() - m_resizePressScene.x(),
+                                                     mapToScene(event->pos()).y() - m_resizePressScene.y());
+            if (m_scene->snapToGrid()) {
+                const QPointF corner = SchematicScene::snapped(note->pos() + QPointF(size.width(), size.height()));
+                size = QSizeF(corner.x() - note->pos().x(), corner.y() - note->pos().y());
+            }
+            note->previewFrameSize(size);
+        }
+        return;
+    }
     if (!m_reattachWire.isEmpty()) {
         const QPointF scenePos = mapToScene(event->pos());
         const DropTarget target = targetAt(scenePos);
@@ -301,13 +323,20 @@ void SchematicView::mouseMoveEvent(QMouseEvent *event)
         const QPointF scenePos = mapToScene(event->pos());
         const QGraphicsItem *item = itemAt(event->pos());
         Qt::CursorShape cursor = Qt::ArrowCursor;
-        if (isLeadAt(scenePos))
+        if (selectedWireEndAt(event->pos()))
+            cursor = Qt::SizeAllCursor; // grab handle: drag the end elsewhere
+        else if (isLeadAt(scenePos))
             cursor = Qt::CrossCursor;
         else if (item && item->type() == WireItemType)
             cursor = Qt::SizeHorCursor;
+        else if (item && item->type() == NoteItemType
+                 && static_cast<const NoteItem *>(item)->isResizeHandleAt(item->mapFromScene(scenePos)))
+            cursor = Qt::SizeFDiagCursor;
         viewport()->setCursor(cursor);
     }
     CanvasView::mouseMoveEvent(event);
+    if (event->buttons() & Qt::LeftButton)
+        moveFollowers();
 }
 
 void SchematicView::mouseReleaseEvent(QMouseEvent *event)
@@ -327,6 +356,18 @@ void SchematicView::mouseReleaseEvent(QMouseEvent *event)
                 selection.pins.insert(calc::pinKey(pin->connectorId, pin->pinId));
                 m_selection->setSelection(selection);
             }
+        }
+        return;
+    }
+    if (!m_resizeNote.isEmpty() && event->button() == Qt::LeftButton) {
+        const QString id = std::exchange(m_resizeNote, {});
+        NoteItem *item = m_scene->noteItem(id);
+        const Note *note = m_document->model()->find<Note>(id);
+        if (item && note && item->note().frameSize != note->frameSize) {
+            Note updated = *note;
+            updated.frameSize = item->note().frameSize;
+            m_document->undoStack()->push(
+                new UpdateEntityCommand<Note>(m_document->model(), updated, tr("Resize outline")));
         }
         return;
     }
@@ -524,15 +565,21 @@ std::optional<bool> SchematicView::selectedWireEndAt(const QPoint &viewPos) cons
     const Wire *wire = m_document->model()->find<Wire>(*s.wires.begin());
     if (!wire)
         return std::nullopt;
-    constexpr int kGrabRadius = 8; // pixels
+    // Generous, so the end handle is easy to hit at any zoom; the nearer end wins.
+    constexpr qreal kGrabRadius = 12; // pixels
+    std::optional<bool> nearest;
+    qreal best = kGrabRadius;
     for (bool endB : {false, true}) {
         if (!m_scene->isEndOnCurrentSheet(*wire, endB))
             continue; // that end is on another sheet
-        const QPoint anchor = mapFromScene(m_scene->endAnchor(*wire, endB).point);
-        if ((anchor - viewPos).manhattanLength() <= kGrabRadius)
-            return endB;
+        const QPointF anchor = mapFromScene(m_scene->endAnchor(*wire, endB).point);
+        const qreal distance = QLineF(anchor, QPointF(viewPos)).length();
+        if (distance <= best) {
+            best = distance;
+            nearest = endB;
+        }
     }
-    return std::nullopt;
+    return nearest;
 }
 
 void SchematicView::finishReattach(const QPointF &scenePos)
@@ -600,6 +647,51 @@ void SchematicView::rememberPressPositions()
         if (item->type() == NoteItemType)
             m_notePressPositions[static_cast<NoteItem *>(item)->id()] = item->pos();
     }
+    // What lies wholly inside a selected outline moves with it.
+    m_followerPositions.clear();
+    m_followerNotePositions.clear();
+    m_followLeader.clear();
+    for (const auto &[id, pos] : std::map(m_notePressPositions)) {
+        NoteItem *frame = m_scene->noteItem(id);
+        if (!frame || !frame->isFrame())
+            continue;
+        if (m_followLeader.isEmpty()) {
+            m_followLeader = id;
+            m_leaderPressPos = pos;
+        }
+        for (QGraphicsItem *inside : m_scene->items(frame->frameSceneRect(), Qt::ContainsItemBoundingRect)) {
+            if (!inside->isVisible() || inside->isSelected() || inside == frame)
+                continue;
+            const int type = inside->type();
+            if (type == ConnectorItemType || type == SpliceItemType || type == FreeEndItemType) {
+                const QString key = static_cast<PlacedItem *>(inside)->placementKey();
+                m_followerPositions.emplace(key, inside->pos());
+                m_pressPositions.emplace(key, inside->pos());
+            } else if (type == NoteItemType) {
+                const QString note = static_cast<NoteItem *>(inside)->id();
+                m_followerNotePositions.emplace(note, inside->pos());
+                m_notePressPositions.emplace(note, inside->pos());
+            }
+        }
+    }
+}
+
+void SchematicView::moveFollowers()
+{
+    if (m_followLeader.isEmpty())
+        return;
+    NoteItem *leader = m_scene->noteItem(m_followLeader);
+    if (!leader)
+        return;
+    const QPointF delta = leader->pos() - m_leaderPressPos;
+    for (const auto &[key, pos] : m_followerPositions) {
+        if (PlacedItem *item = m_scene->placedItem(key); item && item->pos() != pos + delta)
+            item->setPos(pos + delta);
+    }
+    for (const auto &[id, pos] : m_followerNotePositions) {
+        if (NoteItem *item = m_scene->noteItem(id); item && item->pos() != pos + delta)
+            item->setPos(pos + delta);
+    }
 }
 
 SchematicPlacement SchematicView::placementAt(const QString &key, const QPointF &position) const
@@ -637,6 +729,9 @@ void SchematicView::commitMoves()
         new UpdateEntityCommand<Note>(model, updated, {}, macro.get());
     }
     m_notePressPositions.clear();
+    m_followerPositions.clear();
+    m_followerNotePositions.clear();
+    m_followLeader.clear();
     if (macro->childCount() > 0)
         m_document->undoStack()->push(macro.release());
 }
@@ -646,8 +741,8 @@ bool SchematicView::nudgeSelection(const QPointF &delta)
     rememberPressPositions();
     if (m_pressPositions.empty() && m_notePressPositions.empty())
         return false;
-    for (PlacedItem *item : selectedPlacedItems())
-        item->setPos(item->pos() + delta);
+    for (const auto &[key, pos] : m_pressPositions) // the selection and what its outlines hold
+        m_scene->placedItem(key)->setPos(pos + delta);
     for (const auto &[id, pos] : m_notePressPositions)
         m_scene->noteItem(id)->setPos(pos + delta);
     commitMoves();
@@ -732,7 +827,8 @@ void SchematicView::editPinCell(const QString &connectorId, int row, int column)
                  QTimer::singleShot(0, this, [this, connectorId, nextRow, nextColumn] {
                      editPinCell(connectorId, nextRow, nextColumn);
                  });
-             });
+             },
+             column == 1 ? preferences::circuitSuggestionsFor(m_document->model()->harness()) : QStringList{});
 }
 
 void SchematicView::editConnectorTitle(const QString &connectorId)
@@ -929,18 +1025,22 @@ FreeEndRef SchematicView::addFreeEndAt(FreeEndKind kind, const QPointF &scenePos
     return FreeEndRef{id};
 }
 
-void SchematicView::addFreeEnd(FreeEndKind kind)
+void SchematicView::addFreeEnd(FreeEndKind kind, SchematicSymbol symbol, const QString &label)
 {
     FreeEnd end;
     end.id = newId();
     end.kind = kind;
+    end.symbol = symbol;
+    end.label = label;
     SchematicPlacement placement;
     placement.position = unoccupiedPosition(viewCenterSnapped());
     placement.sheetId = m_scene->currentSheet();
     const QString id = end.id;
     m_document->undoStack()->push(
         new AddEntityCommand<FreeEnd>(m_document->model(), std::move(end), {{id, placement}},
-                                      kind == FreeEndKind::Eyelet ? tr("Add eyelet") : tr("Add flying lead")));
+                                      symbol == SchematicSymbol::Ground ? tr("Add ground")
+                                      : kind == FreeEndKind::Eyelet   ? tr("Add eyelet")
+                                                                      : tr("Add flying lead")));
     Selection selection;
     selection.freeEnds.insert(id);
     m_selection->setSelection(selection);
@@ -968,11 +1068,41 @@ void SchematicView::editNote(const QString &noteId)
     NoteItem *item = m_scene->noteItem(noteId);
     if (!item)
         return;
-    editText(QRectF(item->pos(), QSizeF(NoteItem::kWidth, 18)), item->note().text,
-             [this, noteId](const QString &value, Nav) {
-                 if (auto command = setNoteText(m_document->model(), noteId, value)) // empty text deletes
-                     m_document->undoStack()->push(command.release());
-             });
+    const QRectF area = item->isFrame()
+                            ? QRectF(item->pos() + QPointF(6, 4),
+                                     QSizeF(std::clamp(item->note().frameSize->width() - 12, 60.0, 260.0), 18))
+                            : QRectF(item->pos(), QSizeF(NoteItem::kWidth, 18));
+    editText(area, item->note().text, [this, noteId](const QString &value, Nav) {
+        if (auto command = setNoteText(m_document->model(), noteId, value)) // empty text deletes a note
+            m_document->undoStack()->push(command.release());
+    });
+}
+
+void SchematicView::addOutline()
+{
+    // Around the selected items with a margin (room for the title on top), else a box at
+    // the view center.
+    QRectF around;
+    for (QGraphicsItem *item : m_scene->selectedItems()) {
+        const int type = item->type();
+        if (type == ConnectorItemType || type == SpliceItemType || type == FreeEndItemType || type == NoteItemType)
+            around = around.united(item->sceneBoundingRect());
+    }
+    QRectF box = around.isNull() ? QRectF(viewCenterSnapped() - QPointF(160, 100), QSizeF(320, 200))
+                                 : around.adjusted(-20, -40, 20, 20);
+    if (m_scene->snapToGrid()) {
+        const QPointF topLeft = SchematicScene::snapped(box.topLeft());
+        const QPointF bottomRight = SchematicScene::snapped(box.bottomRight());
+        box = QRectF(topLeft, bottomRight);
+    }
+    box.setSize(box.size().expandedTo(NoteItem::kMinFrameSize));
+    Note note{newId(), NoteCanvas::Schematic, {}, box.topLeft(), m_scene->currentSheet(), box.size(), {}};
+    const QString id = note.id;
+    m_document->undoStack()->push(new AddEntityCommand<Note>(m_document->model(), std::move(note), {}, tr("Add outline")));
+    Selection selection;
+    selection.notes.insert(id);
+    m_selection->setSelection(selection);
+    editNote(id); // type its title, e.g. "Steering wheel"
 }
 
 void SchematicView::deleteSelection()

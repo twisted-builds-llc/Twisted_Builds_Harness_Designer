@@ -46,8 +46,10 @@ protected:
     // Shift+Tab = Previous, focus loss = None. Esc cancels without a commit.
     enum class Nav { None, Down, Up, Next, Previous };
 
+    // `suggestions`, if any, are offered in a list while typing (all of them when the text
+    // starts empty).
     void editText(const QRectF &sceneRect, const QString &text,
-                  std::function<void(const QString &, Nav)> commit);
+                  std::function<void(const QString &, Nav)> commit, const QStringList &suggestions = {});
     void closeEditor();
     // Lets subclasses use the wheel over an item (e.g. scroll rows). Return true if handled.
     virtual bool wheelOverItem(QWheelEvent *) { return false; }

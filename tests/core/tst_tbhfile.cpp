@@ -55,7 +55,7 @@ Harness sampleHarness()
     sensor.factory = true;
     h.connectors = {ecu, sensor};
 
-    h.splices.push_back(Splice{u"sp1"_s, u"S1"_s, u"SPL-1"_s, {}});
+    h.splices.push_back(Splice{u"sp1"_s, u"S1"_s, u"SPL-1"_s, SchematicSymbol::Power, {}});
 
     Wire pinToPin;
     pinToPin.id = u"w1"_s;
@@ -85,7 +85,7 @@ Harness sampleHarness()
     toRing.baseColor = u"BLK"_s;
     toRing.leadA = WireLead::Right;
     h.wires = {pinToPin, toSplice, toRing};
-    h.freeEnds = {FreeEnd{u"fe-ring"_s, FreeEndKind::RingTerminal, u"GND"_s, u"RING-M6"_s, {}},
+    h.freeEnds = {FreeEnd{u"fe-ring"_s, FreeEndKind::RingTerminal, u"GND"_s, u"RING-M6"_s, SchematicSymbol::Ground},
                   FreeEnd{u"fe-cut"_s, FreeEndKind::Cut, {}, {}, {}}};
 
     h.layoutNodes = {
@@ -533,6 +533,61 @@ private slots:
         const auto loaded = io::deserializeHarness(entries, nullptr);
         QVERIFY(loaded);
         QCOMPARE(loaded->notes[1].canvas, NoteCanvas::Schematic);
+    }
+
+    void schematicSymbolsAreWrittenOnlyWhenSet()
+    {
+        // Sample: ring terminal fe-ring is a ground, cut end fe-cut has no symbol, splice sp1
+        // is a power point.
+        const io::ZipEntries entries = io::serializeHarness(sampleHarness());
+        const QJsonArray freeEnds = QJsonDocument::fromJson(entries.at(u"freeEnds.json"_s)).array();
+        QCOMPARE(freeEnds[0].toObject()[u"symbol"].toString(), u"ground"_s);
+        QVERIFY(!freeEnds[1].toObject().contains(u"symbol"_s));
+        const QJsonArray splices = QJsonDocument::fromJson(entries.at(u"splices.json"_s)).array();
+        QCOMPARE(splices[0].toObject()[u"symbol"].toString(), u"power"_s);
+
+        // An unknown symbol is an error, not silently dropped.
+        const QString error = readErrorAfter([](io::ZipEntries &e) {
+            QJsonArray array = QJsonDocument::fromJson(e[u"freeEnds.json"_s]).array();
+            QJsonObject end = array[0].toObject();
+            end[u"symbol"] = u"lightning"_s;
+            array[0] = end;
+            e[u"freeEnds.json"_s] = QJsonDocument(array).toJson();
+        });
+        QVERIFY2(error.contains(u"lightning"_s), qPrintable(error));
+    }
+
+    void outlinesRoundTrip()
+    {
+        // A schematic note with a frame (an assembly outline) keeps its size; a plain note
+        // writes no "frame".
+        Harness h = sampleHarness();
+        h.notes.push_back(Note{u"outline"_s, NoteCanvas::Schematic, u"Steering wheel"_s, QPointF(20, 40), {},
+                               QSizeF(320.5, 180), {}});
+        const io::ZipEntries entries = io::serializeHarness(h);
+        const QJsonArray notes =
+            QJsonDocument::fromJson(entries.at(u"schematic.json"_s)).object()[u"notes"].toArray();
+        QCOMPARE(notes.size(), 2);
+        QVERIFY(!notes[0].toObject().contains(u"frame"_s));
+        const QJsonObject frame = notes[1].toObject()[u"frame"].toObject();
+        QCOMPARE(frame[u"width"].toDouble(), 320.5);
+        QCOMPARE(frame[u"height"].toDouble(), 180.0);
+        const auto loaded = io::deserializeHarness(entries, nullptr);
+        QVERIFY(loaded);
+        QVERIFY(loaded->notes == h.notes);
+
+        // A zero-size outline is rejected.
+        io::ZipEntries broken = entries;
+        QJsonObject schematic = QJsonDocument::fromJson(broken.at(u"schematic.json"_s)).object();
+        QJsonArray edited = schematic[u"notes"].toArray();
+        QJsonObject outline = edited[1].toObject();
+        outline[u"frame"] = QJsonObject{{u"width"_s, 0}, {u"height"_s, 10}};
+        edited[1] = outline;
+        schematic[u"notes"] = edited;
+        broken[u"schematic.json"_s] = QJsonDocument(schematic).toJson();
+        QString error;
+        QVERIFY(!io::deserializeHarness(broken, &error));
+        QVERIFY2(error.contains(u"outline"_s), qPrintable(error));
     }
 
     void malformedBendAndDuplicateNotesAreRejected()

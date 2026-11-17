@@ -46,6 +46,12 @@ public:
     static std::vector<RecoveryInfo> orphanedRecoveries();
     static void removeRecovery(const RecoveryInfo &info);
 
+signals:
+    // The recovery file was written (at `when`, local time).
+    void saved(const QDateTime &when);
+    // Writing the recovery file failed; unsaved work is not protected until it succeeds.
+    void saveFailed(const QString &error);
+
 private:
     void discard();
 

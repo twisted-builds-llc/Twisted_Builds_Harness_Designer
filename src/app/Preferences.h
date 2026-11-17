@@ -25,4 +25,16 @@ void setPanInput(PanInput input);
 bool wheelPans();
 void setWheelPans(bool pans);
 
+// True: while circuit text is typed (schematic pin cells, pin table), a list suggests
+// circuitSuggestionDefaults() plus the circuit texts and wire names already in the harness.
+// Default: false.
+bool circuitSuggestions();
+void setCircuitSuggestions(bool on);
+// The quick choices offered first. Default: 12V+, 5V+, GND, Sensor GND, Unused.
+QStringList circuitSuggestionDefaults();
+void setCircuitSuggestionDefaults(const QStringList &texts);
+// What to suggest for circuit text in `harness`: empty when suggestions are off, else the
+// defaults, then the texts used in the harness, each text once (ignoring case).
+QStringList circuitSuggestionsFor(const Harness &harness);
+
 } // namespace tbh::app::preferences

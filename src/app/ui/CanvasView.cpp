@@ -4,6 +4,7 @@
 #include "Preferences.h"
 
 #include <QApplication>
+#include <QCompleter>
 #include <QContextMenuEvent>
 #include <QGraphicsItem>
 #include <QKeyEvent>
@@ -468,7 +469,7 @@ void CanvasView::resizeEvent(QResizeEvent *event)
 }
 
 void CanvasView::editText(const QRectF &sceneRect, const QString &text,
-                          std::function<void(const QString &, Nav)> commit)
+                          std::function<void(const QString &, Nav)> commit, const QStringList &suggestions)
 {
     closeEditor();
     m_editor = new InlineEdit(viewport(), [commit](const QString &value, int nav) {
@@ -484,6 +485,19 @@ void CanvasView::editText(const QRectF &sceneRect, const QString &text,
     m_editor->show();
     m_editor->setFocus();
     InlineEdit *editor = m_editor;
+    if (!suggestions.isEmpty()) {
+        auto *completer = new QCompleter(suggestions, editor);
+        completer->setCaseSensitivity(Qt::CaseInsensitive);
+        completer->setFilterMode(Qt::MatchContains);
+        completer->setMaxVisibleItems(12);
+        editor->setCompleter(completer);
+        if (text.isEmpty()) {
+            QTimer::singleShot(0, editor, [completer] {
+                completer->setCompletionPrefix({});
+                completer->complete();
+            });
+        }
+    }
     connect(m_editor, &QObject::destroyed, this, [this, editor] {
         if (m_editor == editor)
             m_editor = nullptr;

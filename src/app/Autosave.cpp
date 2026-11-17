@@ -68,8 +68,15 @@ bool Autosave::saveNow(QString *error)
         discard();
         return true;
     }
-    if (!m_document->writeCopy(recoveryFile(), error))
+    QString why;
+    auto fail = [&](const QString &message) {
+        if (error)
+            *error = message;
+        emit saveFailed(message);
         return false;
+    };
+    if (!m_document->writeCopy(recoveryFile(), &why))
+        return fail(why);
     const QJsonObject meta{
         {QStringLiteral("originalPath"), m_document->filePath()},
         {QStringLiteral("harnessName"), m_document->model()->harness().info.name},
@@ -77,11 +84,9 @@ bool Autosave::saveNow(QString *error)
     };
     QSaveFile file(pathFor(m_id, ".json"));
     const QByteArray data = QJsonDocument(meta).toJson();
-    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit()) {
-        if (error)
-            *error = file.errorString();
-        return false;
-    }
+    if (!file.open(QIODevice::WriteOnly) || file.write(data) != data.size() || !file.commit())
+        return fail(file.errorString());
+    emit saved(QDateTime::currentDateTime());
     return true;
 }
 

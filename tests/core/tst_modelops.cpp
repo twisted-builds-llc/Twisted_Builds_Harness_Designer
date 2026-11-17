@@ -308,6 +308,45 @@ private slots:
         QCOMPARE(r.wires[3].name, u"POWER B"_s);
         QCOMPARE(r.wires[1].name, u"POWER"_s);
     }
+
+    void renameCircuitTextFollowsAcrossTheNet()
+    {
+        // J1.2 -w2- S1 -w3- flying lead, plus S1 -w4- J3.1 and S1 -w5- J4.1.
+        // J1.2, J3.1 have "POWER"; J4.1 was renamed "POWER B"; w2, w4 are named "POWER",
+        // w5 "AUX", w3 is unnamed. Renaming "POWER" to "12V+" from w2:
+        // J1.2 and J3.1 -> "12V+" (connectors j1, j3); J4.1 keeps "POWER B";
+        // w2, w4 -> "12V+"; w5 keeps "AUX"; unnamed w3 stays unnamed.
+        Harness h = sample();
+        h.connectors.push_back(connector(u"j3"_s, u"J3"_s, 1));
+        h.connectors.push_back(connector(u"j4"_s, u"J4"_s, 1));
+        h.wires.push_back(wire(u"w4"_s, SpliceRef{u"s1"_s}, PinRef{u"j3"_s, u"j3-p1"_s}));
+        h.wires.push_back(wire(u"w5"_s, PinRef{u"j4"_s, u"j4-p1"_s}, SpliceRef{u"s1"_s}));
+        h.connectors[0].pins[1].circuitText = u"POWER"_s;
+        h.connectors[2].pins[0].circuitText = u"POWER"_s;
+        h.connectors[3].pins[0].circuitText = u"POWER B"_s;
+        h.wires[1].name = u"POWER"_s;
+        h.wires[3].name = u"POWER"_s;
+        h.wires[4].name = u"AUX"_s;
+        const CircuitTextFill fill = renameCircuitText(h, {u"w2"_s}, u"POWER"_s, u"12V+"_s);
+        QCOMPARE(h.connectors[0].pins[1].circuitText, u"12V+"_s);
+        QCOMPARE(h.connectors[2].pins[0].circuitText, u"12V+"_s);
+        QCOMPARE(h.connectors[3].pins[0].circuitText, u"POWER B"_s);
+        QCOMPARE(h.wires[1].name, u"12V+"_s);
+        QCOMPARE(h.wires[3].name, u"12V+"_s);
+        QCOMPARE(h.wires[4].name, u"AUX"_s);
+        QVERIFY(h.wires[2].name.isEmpty());
+        QCOMPARE(fill.connectorIds, (QSet<QString>{u"j1"_s, u"j3"_s}));
+        QCOMPARE(fill.wireIds, (QSet<QString>{u"w2"_s, u"w4"_s}));
+        // w1 (J1.1 to J2.1) is not on S1: untouched.
+        QCOMPARE(h.wires[0].name, u"5V"_s);
+
+        // Empty or equal texts rename nothing.
+        const Harness before = h;
+        QVERIFY(renameCircuitText(h, {u"w2"_s}, u"12V+"_s, {}).wireIds.isEmpty());
+        QVERIFY(renameCircuitText(h, {u"w2"_s}, {}, u"X"_s).wireIds.isEmpty());
+        QVERIFY(renameCircuitText(h, {u"w2"_s}, u"12V+"_s, u"12V+"_s).wireIds.isEmpty());
+        QCOMPARE(h, before);
+    }
 };
 
 QTEST_GUILESS_MAIN(TestModelOps)

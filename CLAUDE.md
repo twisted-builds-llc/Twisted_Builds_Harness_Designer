@@ -80,7 +80,11 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   (`LayoutNode::sharedRefIds`, was `sharedSpliceIds`), Cut Wire Here asks the cut's distance
   along the route, cut points are labeled with the distance from the nearest factory connector,
   factory-only layout parts are faded (View > Show Factory Harness hides them) and the PDF
-  prints the layout with and without them (plan section 5c). Tagged
+  prints the layout with and without them (plan section 5c). Tester requests (plan section
+  5d): schematic outlines (notes with `frameSize`, Place > Add Outline, O; dragging the edge
+  moves what is inside), ground/chassis/power `symbol` on splices and free ends (Add Ground,
+  G), autosave status in the status bar, wire end handles, renamed circuit text follows its
+  net (`renameCircuitText`), optional circuit text suggestions (off by default). Tagged
   `v0.1.1` from that branch for a draft release the user is testing. **Not merged to `main`**:
   merge only when the user says so. Details and decisions: `docs/V0.1.1_PLAN.md`.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,

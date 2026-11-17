@@ -5,6 +5,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QLineEdit;
 class QSpinBox;
 
 namespace tbh::app {
@@ -24,6 +25,8 @@ private:
     QSpinBox *m_autosave;
     QComboBox *m_panInput;
     QCheckBox *m_wheelPans;
+    QCheckBox *m_circuitSuggestions;
+    QLineEdit *m_suggestionDefaults;
 };
 
 } // namespace tbh::app

@@ -38,6 +38,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QLocale>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QScrollArea>
@@ -142,6 +143,24 @@ MainWindow::MainWindow(Theme *theme, QWidget *parent)
 
     m_autosave = new Autosave(m_document, this);
     m_autosave->setIntervalMinutes(preferences::autosaveMinutes());
+    m_autosaveStatus = new QLabel(this);
+    m_autosaveStatus->setObjectName(QStringLiteral("autosaveStatus"));
+    statusBar()->addPermanentWidget(m_autosaveStatus);
+    connect(m_autosave, &Autosave::saved, this, [this](const QDateTime &when) {
+        m_autosaveStatus->setText(tr("Autosaved %1").arg(QLocale().toString(when.time(), QLocale::ShortFormat)));
+        m_autosaveStatus->setToolTip(tr("Unsaved changes are kept in a recovery file. If the application "
+                                        "closes unexpectedly, File > Recover Unsaved Work opens them."));
+    });
+    connect(m_autosave, &Autosave::saveFailed, this, [this](const QString &error) {
+        m_autosaveStatus->setText(tr("Autosave failed"));
+        m_autosaveStatus->setToolTip(error);
+        statusBar()->showMessage(tr("Autosave failed: %1. Save your work.").arg(error), 15000);
+    });
+    // Saved, new or opened: nothing unsaved is protected by the recovery file any more.
+    connect(m_document, &Document::modifiedChanged, this, [this](bool modified) {
+        if (!modified)
+            m_autosaveStatus->clear();
+    });
     QTimer::singleShot(0, this, [this] { offerRecovery(true); });
     qApp->installEventFilter(this);
 
@@ -429,6 +448,11 @@ void MainWindow::createMenus()
     QAction *addEyelet = toolAction(view, nullptr, tr("Add Eyelet"), QKeySequence(Qt::Key_E),
                                     tr("Add an eyelet; drag from its lead to wire it (E)"),
                                     [view] { view->addFreeEnd(FreeEndKind::Eyelet); });
+    QAction *addGround = toolAction(view, nullptr, tr("Add Ground"), QKeySequence(Qt::Key_G),
+                                    tr("Add a ground eyelet drawn with the ground symbol; set the symbol of "
+                                       "any splice or free end in its properties (G)"),
+                                    [view] { view->addFreeEnd(FreeEndKind::Eyelet, SchematicSymbol::Ground,
+                                                              QStringLiteral("GND")); });
     auto *layoutTools = new QActionGroup(this);
     QAction *layoutSelect = toolAction(layout, layoutTools, tr("Select"), QKeySequence(Qt::Key_V),
                                        tr("Select and move layout points; double-click a segment to "
@@ -444,7 +468,12 @@ void MainWindow::createMenus()
     place->addSection(tr("Schematic"));
     QAction *addSchematicNote = toolAction(view, nullptr, tr("Add Note"), QKeySequence(Qt::Key_N),
                                            tr("Add a text note to the schematic (N)"), [view] { view->addNote(); });
-    place->addActions({addConnector, addSplice, addFlyingLead, addEyelet, addSchematicNote, selectTool, wireTool});
+    QAction *addOutline = toolAction(view, nullptr, tr("Add Outline"), QKeySequence(Qt::Key_O),
+                                     tr("Draw a dashed outline around the selected items, e.g. the connectors "
+                                        "of one assembly; dragging its edge moves everything inside (O)"),
+                                     [view] { view->addOutline(); });
+    place->addActions({addConnector, addSplice, addFlyingLead, addEyelet, addGround, addSchematicNote, addOutline,
+                       selectTool, wireTool});
     QMenu *existing = place->addMenu(tr("Add E&xisting Item to Sheet"));
     existing->setToolTip(tr("Show a connector, splice or free end from another sheet on this one: the same item, not a copy"));
     connect(existing, &QMenu::aboutToShow, view, [view, existing] {
@@ -577,7 +606,7 @@ void MainWindow::createMenus()
     schematicBar->setMovable(false);
     schematicBar->addActions({selectTool, wireTool});
     schematicBar->addSeparator();
-    schematicBar->addActions({addConnector, addSplice, addFlyingLead, addEyelet});
+    schematicBar->addActions({addConnector, addSplice, addFlyingLead, addEyelet, addGround});
     schematicBar->addSeparator();
     schematicBar->addAction(fit);
     schematicBar->addSeparator();

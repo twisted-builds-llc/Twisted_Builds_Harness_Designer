@@ -118,17 +118,16 @@ Pin *findPin(Harness &harness, const WireEnd &end)
     return nullptr;
 }
 
-} // namespace
-
-CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString> &wireIds)
+// The nets of the listed wires: each is the wire plus every wire reachable through splices
+// (connector pins end a net). A wire already in an earlier net does not start another.
+// Unknown wire ids are skipped.
+std::vector<std::vector<Wire *>> circuitNets(Harness &harness, const std::vector<QString> &wireIds)
 {
-    CircuitTextFill changed;
+    std::vector<std::vector<Wire *>> nets;
     QSet<QString> done; // wires already handled as part of an earlier net
     for (const QString &id : wireIds) {
         if (done.contains(id))
             continue;
-        // Collect the net: the seed wire plus every wire reachable through splices.
-        // Connector pins are leaves; text only flows through a splice.
         std::vector<Wire *> net;
         std::vector<QString> pendingSplices;
         QSet<QString> seenSplices;
@@ -161,7 +160,17 @@ CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString
                     addWire(w);
             }
         }
+        nets.push_back(std::move(net));
+    }
+    return nets;
+}
 
+} // namespace
+
+CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString> &wireIds)
+{
+    CircuitTextFill changed;
+    for (const std::vector<Wire *> &net : circuitNets(harness, wireIds)) {
         // The net's text: the first non-empty pin text, seed wire's own pins first.
         QString text;
         for (const Wire *w : net) {
@@ -193,6 +202,30 @@ CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString
                     }
                 }
                 w->name = name;
+                changed.wireIds.insert(w->id);
+            }
+        }
+    }
+    return changed;
+}
+
+CircuitTextFill renameCircuitText(Harness &harness, const std::vector<QString> &wireIds,
+                                  const QString &oldText, const QString &newText)
+{
+    CircuitTextFill changed;
+    if (oldText.isEmpty() || newText.isEmpty() || oldText == newText)
+        return changed;
+    for (const std::vector<Wire *> &net : circuitNets(harness, wireIds)) {
+        for (Wire *w : net) {
+            for (const WireEnd *end : {&w->endA, &w->endB}) {
+                Pin *p = findPin(harness, *end);
+                if (p && p->circuitText == oldText) {
+                    p->circuitText = newText;
+                    changed.connectorIds.insert(std::get<PinRef>(*end).connectorId);
+                }
+            }
+            if (w->name == oldText) {
+                w->name = newText;
                 changed.wireIds.insert(w->id);
             }
         }

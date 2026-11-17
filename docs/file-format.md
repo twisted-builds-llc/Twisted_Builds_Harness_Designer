@@ -179,6 +179,10 @@ Loading fails with a message if:
 [ { "id": "sp1", "label": "S1", "partNumber": "" } ]
 ```
 
+- `symbol` (schema 3, optional, default `none`, written only when set): `ground` |
+  `chassisGround` | `power`, drawn on the schematic only so a ground or supply point stands
+  out. The splice itself (layout, BOM) does not change. Unknown values are refused.
+
 ## `freeEnds.json`
 
 A wire end that is not on a connector or splice. Placed on the schematic on its own; one or
@@ -190,6 +194,8 @@ more wires end on it.
 
 - `kind`: `flyingLead` | `eyelet` | `ringTerminal` | `bare` | `cut` (schema 3: where a wire
   was cut, e.g. a factory wire cut to splice in an add-on; never counted in the BOM).
+- `symbol` (schema 3, optional): as on splices. With `power` the `label` names the supply,
+  e.g. `"12V+"`.
 
 ## `layout.json`
 
@@ -290,6 +296,10 @@ Presentation only: where items sit on the schematic canvas.
   sheet, and older versions keep the keys but draw every sheet on one canvas.
 - `notes` (optional): free text on the schematic canvas, same shape as the layout notes:
   `[ { "id": "note2", "position": { "x": 500, "y": -80 }, "text": "Check ECU pinout" } ]`.
+- `frame` (schema 3, optional, schematic notes only): `{ "width": 320, "height": 200 }`
+  makes the note an outline, e.g. around the connectors of one assembly: a dashed box of
+  that size from `position`, with `text` as its title (may be empty). Both sizes must be
+  greater than zero. Older versions keep the key and draw the title as a plain note.
 - Items without a placement are laid out automatically when the file is opened.
 - Placements whose item no longer exists are dropped on load.
 
@@ -394,8 +404,9 @@ supports are refused, never silently downgraded.
   number in `sealPartNumber`; the 2 to 3 migration moves it to `plugPartNumber` on pins with
   `isCavityPlug` and clears the seal. Wires gained `circuitId`; the migration numbers
   wires without one C001, C002, ... in file order. Other v0.1.1 schema additions also go in
-  schema 3: `factory` on connectors and wires, the `cut` free end kind and wire
-  `leadA`/`leadB` (no migration; absent means not factory and `auto` leads).
+  schema 3: `factory` on connectors and wires, the `cut` free end kind, wire
+  `leadA`/`leadB`, splice and free end `symbol` and schematic note `frame` (no migration;
+  absent means not factory, `auto` leads, no symbol and a plain note).
 
 ## Parts CSV import (Parts Library > Import Parts CSV...)
 

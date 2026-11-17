@@ -9,6 +9,7 @@
 #include "ui/Format.h"
 #include "ui/properties/PanelWidgets.h"
 
+#include <QCoreApplication>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
@@ -359,12 +360,35 @@ void WirePanel::rememberStyle()
 
 // ---- FreeEndEditor -----------------------------------------------------------------
 
+namespace {
+
+class SymbolTr
+{
+    Q_DECLARE_TR_FUNCTIONS(SchematicSymbol)
+};
+
+// The schematic symbol choices of a splice or free end.
+QComboBox *symbolCombo(QWidget *parent)
+{
+    auto *combo = new QComboBox(parent);
+    combo->addItem(SymbolTr::tr("None"), int(SchematicSymbol::None));
+    combo->addItem(SymbolTr::tr("Ground"), int(SchematicSymbol::Ground));
+    combo->addItem(SymbolTr::tr("Chassis ground"), int(SchematicSymbol::ChassisGround));
+    combo->addItem(SymbolTr::tr("Power (label names the supply)"), int(SchematicSymbol::Power));
+    combo->setToolTip(SymbolTr::tr("Drawn on the schematic so a ground or supply point stands out. "
+                                   "The part itself does not change."));
+    return combo;
+}
+
+} // namespace
+
 FreeEndEditor::FreeEndEditor(Document *document, QWidget *parent)
     : QWidget(parent)
     , m_document(document)
     , m_kind(new QComboBox(this))
     , m_terminal(new QLineEdit(this))
     , m_label(new QLineEdit(this))
+    , m_symbol(symbolCombo(this))
 {
     m_kind->addItem(tr("Flying lead"), int(FreeEndKind::FlyingLead));
     m_kind->addItem(tr("Eyelet"), int(FreeEndKind::Eyelet));
@@ -376,7 +400,9 @@ FreeEndEditor::FreeEndEditor(Document *document, QWidget *parent)
     form->addRow(tr("End type:"), m_kind);
     form->addRow(tr("Terminal P/N:"), m_terminal);
     form->addRow(tr("Label:"), m_label);
+    form->addRow(tr("Symbol:"), m_symbol);
     connect(m_kind, &QComboBox::activated, this, &FreeEndEditor::commit);
+    connect(m_symbol, &QComboBox::activated, this, &FreeEndEditor::commit);
     connect(m_terminal, &QLineEdit::editingFinished, this, &FreeEndEditor::commit);
     connect(m_label, &QLineEdit::editingFinished, this, &FreeEndEditor::commit);
     connect(document->model(), &HarnessModel::entityChanged, this, [this](EntityKind kind, const QString &id) {
@@ -396,10 +422,11 @@ void FreeEndEditor::refresh()
     const FreeEnd *f = m_document->model()->find<FreeEnd>(m_id);
     if (!f)
         return;
-    const QSignalBlocker b1(m_kind), b2(m_terminal), b3(m_label);
+    const QSignalBlocker b1(m_kind), b2(m_terminal), b3(m_label), b4(m_symbol);
     m_kind->setCurrentIndex(m_kind->findData(int(f->kind)));
     m_terminal->setText(f->terminalPartNumber);
     m_label->setText(f->label);
+    m_symbol->setCurrentIndex(m_symbol->findData(int(f->symbol)));
 }
 
 void FreeEndEditor::commit()
@@ -411,6 +438,7 @@ void FreeEndEditor::commit()
     updated.kind = FreeEndKind(m_kind->currentData().toInt());
     updated.terminalPartNumber = m_terminal->text();
     updated.label = m_label->text();
+    updated.symbol = SchematicSymbol(m_symbol->currentData().toInt());
     if (auto command = updateFreeEnd(m_document->model(), updated, tr("Edit free end")))
         m_document->undoStack()->push(command.release());
 }
@@ -422,10 +450,13 @@ SplicePanel::SplicePanel(Document *document, QWidget *parent)
     , m_document(document)
     , m_label(new QLineEdit(this))
     , m_partNumber(new QLineEdit(this))
+    , m_symbol(symbolCombo(this))
 {
     auto *form = new QFormLayout(this);
     form->addRow(tr("&Label:"), m_label);
     form->addRow(tr("&Part number:"), m_partNumber);
+    form->addRow(tr("S&ymbol:"), m_symbol);
+    connect(m_symbol, &QComboBox::activated, this, &SplicePanel::commit);
     connect(m_label, &QLineEdit::editingFinished, this, &SplicePanel::commit);
     connect(m_partNumber, &QLineEdit::editingFinished, this, &SplicePanel::commit);
     connect(document->model(), &HarnessModel::entityChanged, this, [this](EntityKind kind, const QString &id) {
@@ -445,9 +476,10 @@ void SplicePanel::refresh()
     const Splice *s = m_document->model()->find<Splice>(m_id);
     if (!s)
         return;
-    const QSignalBlocker b1(m_label), b2(m_partNumber);
+    const QSignalBlocker b1(m_label), b2(m_partNumber), b3(m_symbol);
     m_label->setText(s->label);
     m_partNumber->setText(s->partNumber);
+    m_symbol->setCurrentIndex(m_symbol->findData(int(s->symbol)));
 }
 
 void SplicePanel::commit()
@@ -458,6 +490,7 @@ void SplicePanel::commit()
     Splice updated = *current;
     updated.label = m_label->text();
     updated.partNumber = m_partNumber->text();
+    updated.symbol = SchematicSymbol(m_symbol->currentData().toInt());
     if (updated != *current)
         m_document->undoStack()->push(
             new UpdateEntityCommand<Splice>(m_document->model(), updated, tr("Edit splice")));

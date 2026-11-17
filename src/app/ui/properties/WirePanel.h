@@ -90,6 +90,7 @@ private:
     QComboBox *m_kind;
     QLineEdit *m_terminal;
     QLineEdit *m_label;
+    QComboBox *m_symbol;
 };
 
 class SplicePanel : public QWidget
@@ -108,6 +109,7 @@ private:
     QString m_id;
     QLineEdit *m_label;
     QLineEdit *m_partNumber;
+    QComboBox *m_symbol;
 };
 
 } // namespace tbh::app

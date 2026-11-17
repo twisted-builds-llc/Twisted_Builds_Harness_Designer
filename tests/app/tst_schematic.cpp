@@ -4,6 +4,7 @@
 #include "calc/Highlight.h"
 #include "Document.h"
 #include "SelectionModel.h"
+#include "Preferences.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "io/HarnessJson.h"
@@ -499,7 +500,7 @@ private slots:
         QVERIFY(f.model()->placement(splice.id)->position.x() > 400);
     }
 
-    void circuitTextCopiesOnceAndStaysEditable()
+    void circuitTextCopiesAndRenamesFollow()
     {
         Fixture f;
         Harness h;
@@ -522,23 +523,30 @@ private slots:
         QCOMPARE(circuitOf(1), u"IGN"_s);
         QCOMPARE(f.model()->harness().wires[0].name, u"IGN"_s);
 
-        // Renaming either side afterwards is not mirrored.
+        // Renaming A afterwards follows: B:1 and the wire still had "IGN", so both take
+        // "IGN SW", in the same undo step.
         a.pins[0].circuitText = u"IGN SW"_s;
         stack->push(updateConnector(f.model(), a, u"Edit"_s).release());
         QCOMPARE(circuitOf(0), u"IGN SW"_s);
-        QCOMPARE(circuitOf(1), u"IGN"_s);
+        QCOMPARE(circuitOf(1), u"IGN SW"_s);
+        QCOMPARE(f.model()->harness().wires[0].name, u"IGN SW"_s);
+
+        // Clearing B:1 and typing new text there gives it its own text: clearing renames
+        // nothing, and A:1 is not empty, so nothing is filled.
         Connector b = *f.model()->find<Connector>(h.connectors[1].id);
+        b.pins[0].circuitText.clear();
+        stack->push(updateConnector(f.model(), b, u"Edit"_s).release());
         b.pins[0].circuitText = u"IGN B"_s;
         stack->push(updateConnector(f.model(), b, u"Edit"_s).release());
         QCOMPARE(circuitOf(0), u"IGN SW"_s);
-        QCOMPARE(f.model()->harness().wires[0].name, u"IGN"_s);
+        QCOMPARE(circuitOf(1), u"IGN B"_s);
+        QCOMPARE(f.model()->harness().wires[0].name, u"IGN SW"_s);
 
         // No change -> no command.
         QVERIFY(!updateConnector(f.model(), b, u"Edit"_s));
 
-        stack->undo();
-        stack->undo();
-        stack->undo();
+        for (int i = 0; i < 4; ++i)
+            stack->undo();
         QVERIFY(f.model()->harness() == h);
     }
 
@@ -567,6 +575,144 @@ private slots:
         QVERIFY(next);
         QCOMPARE(next->text(), h.connectors[0].pins[1].label);
         QTest::keyClick(next, Qt::Key_Escape);
+    }
+
+    void outlineMovesWhatIsInsideIt()
+    {
+        Fixture f;
+        Harness h;
+        h.connectors = {makeConnector(u"Wheel"_s, 2), makeConnector(u"ECU"_s, 2)};
+        h.schematic.placements[h.connectors[0].id] = SchematicPlacement{QPointF(0, 0), false, 0, {}, {}};
+        h.schematic.placements[h.connectors[1].id] = SchematicPlacement{QPointF(600, 0), false, 0, {}, {}};
+        f.reset(h);
+        const QString wheel = h.connectors[0].id;
+        const QString ecu = h.connectors[1].id;
+
+        // Outline around the selected Wheel connector, then its title.
+        Selection s;
+        s.connectors.insert(wheel);
+        f.selection.setSelection(s);
+        f.view.addOutline();
+        QCOMPARE(f.model()->harness().notes.size(), size_t(1));
+        const Note outline = f.model()->harness().notes[0];
+        QVERIFY(outline.frameSize);
+        const QRectF wheelRect = f.scene()->connectorItem(wheel)->sceneBoundingRect();
+        QVERIFY(QRectF(outline.position, *outline.frameSize).contains(wheelRect));
+        QVERIFY(!QRectF(outline.position, *outline.frameSize)
+                     .intersects(f.scene()->connectorItem(ecu)->sceneBoundingRect()));
+        QLineEdit *editor = nullptr;
+        for (auto *e : f.view.viewport()->findChildren<QLineEdit *>()) {
+            if (e->isVisible())
+                editor = e;
+        }
+        QVERIFY(editor);
+        editor->setText(u"Steering wheel"_s);
+        QTest::keyClick(editor, Qt::Key_Return);
+        QTest::qWait(1);
+        QCOMPARE(f.model()->harness().notes[0].text, u"Steering wheel"_s);
+        // Clearing an outline's title keeps the outline.
+        auto clear = setNoteText(f.model(), outline.id, {});
+        QVERIFY(clear);
+        f.document.undoStack()->push(clear.release());
+        QCOMPARE(f.model()->harness().notes.size(), size_t(1));
+        QVERIFY(f.model()->harness().notes[0].text.isEmpty());
+        f.document.undoStack()->undo();
+
+        // Drag the outline by its left edge 100 right: the Wheel connector inside follows,
+        // the ECU outside stays; one undo step puts both back.
+        const QPointF edge = outline.position + QPointF(0, outline.frameSize->height() / 2);
+        const QPointF wheelBefore = f.model()->placement(wheel)->position;
+        const QPointF ecuBefore = f.model()->placement(ecu)->position;
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, f.toView(edge));
+        QTest::mouseMove(f.view.viewport(), f.toView(edge + QPointF(30, 0)));
+        QTest::mouseMove(f.view.viewport(), f.toView(edge + QPointF(100, 0)));
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, f.toView(edge + QPointF(100, 0)));
+        QCOMPARE(f.model()->harness().notes[0].position, outline.position + QPointF(100, 0));
+        QCOMPARE(f.model()->placement(wheel)->position, wheelBefore + QPointF(100, 0));
+        QCOMPARE(f.model()->placement(ecu)->position, ecuBefore);
+        f.document.undoStack()->undo();
+        QCOMPARE(f.model()->harness().notes[0].position, outline.position);
+        QCOMPARE(f.model()->placement(wheel)->position, wheelBefore);
+
+        // Resize from the bottom-right handle (the outline is selected): 60 wider, 40 taller.
+        Selection only;
+        only.notes.insert(outline.id);
+        f.selection.setSelection(only);
+        const QSizeF size = *f.model()->harness().notes[0].frameSize;
+        const QPointF corner = outline.position + QPointF(size.width(), size.height());
+        QTest::mousePress(f.view.viewport(), Qt::LeftButton, {}, f.toView(corner));
+        QTest::mouseMove(f.view.viewport(), f.toView(corner + QPointF(30, 20)));
+        QTest::mouseMove(f.view.viewport(), f.toView(corner + QPointF(60, 40)));
+        QTest::mouseRelease(f.view.viewport(), Qt::LeftButton, {}, f.toView(corner + QPointF(60, 40)));
+        QCOMPARE(*f.model()->harness().notes[0].frameSize, size + QSizeF(60, 40));
+        QCOMPARE(f.model()->harness().notes[0].position, outline.position); // only the size changed
+    }
+
+    void addGroundPlacesAGroundEyelet()
+    {
+        Fixture f;
+        f.reset(Harness{});
+        f.view.addFreeEnd(FreeEndKind::Eyelet, SchematicSymbol::Ground, u"GND"_s);
+        QCOMPARE(f.model()->harness().freeEnds.size(), size_t(1));
+        const FreeEnd end = f.model()->harness().freeEnds[0];
+        QCOMPARE(end.kind, FreeEndKind::Eyelet);
+        QCOMPARE(end.symbol, SchematicSymbol::Ground);
+        QCOMPARE(end.label, u"GND"_s);
+        // The symbol hangs below the eyelet and can be grabbed there.
+        FreeEndItem *item = f.scene()->freeEndItem(end.id);
+        QVERIFY(item->shape().contains(QPointF(0, FreeEndItem::kHalfWidth + 12)));
+        FreeEnd plain = end;
+        plain.symbol = SchematicSymbol::None;
+        f.document.undoStack()->push(new UpdateEntityCommand<FreeEnd>(f.model(), plain, u"Edit"_s));
+        QVERIFY(!item->shape().contains(QPointF(0, FreeEndItem::kHalfWidth + 12)));
+    }
+
+    void circuitTextSuggestionsAreOptional()
+    {
+        Fixture f;
+        Harness h;
+        h.connectors = {makeConnector(u"A"_s, 2)};
+        h.connectors[0].pins[0].circuitText = u"IGN"_s;
+        h.connectors[0].pins[1].circuitText.clear();
+        h.schematic.placements[h.connectors[0].id] = SchematicPlacement{};
+        f.reset(h);
+        ConnectorItem *item = f.scene()->connectorItem(h.connectors[0].id);
+        auto openCircuitCell = [&] {
+            QTest::mouseDClick(f.view.viewport(), Qt::LeftButton, {},
+                               f.toView(item->mapToScene(item->circuitCellRect(1).center())));
+            QLineEdit *editor = nullptr;
+            for (auto *e : f.view.viewport()->findChildren<QLineEdit *>()) {
+                if (e->isVisible())
+                    editor = e;
+            }
+            return editor;
+        };
+
+        // Off by default: no list.
+        QVERIFY(!preferences::circuitSuggestions());
+        QLineEdit *editor = openCircuitCell();
+        QVERIFY(editor);
+        QVERIFY(!editor->completer());
+        QTest::keyClick(editor, Qt::Key_Escape);
+        QTest::qWait(1);
+
+        // On: the quick choices first, then the texts in the harness ("IGN"); "gnd" in the
+        // defaults list is the same as "GND" and is offered once.
+        preferences::setCircuitSuggestions(true);
+        preferences::setCircuitSuggestionDefaults({u"12V+"_s, u"GND"_s, u"gnd"_s});
+        QCOMPARE(preferences::circuitSuggestionsFor(f.model()->harness()),
+                 (QStringList{u"12V+"_s, u"GND"_s, u"IGN"_s}));
+        editor = openCircuitCell();
+        QVERIFY(editor);
+        QVERIFY(editor->completer());
+        editor->setText(u"GND"_s);
+        QTest::keyClick(editor, Qt::Key_Return);
+        QTest::qWait(1);
+        QCOMPARE(f.model()->find<Connector>(h.connectors[0].id)->pins[1].circuitText, u"GND"_s);
+        for (auto *e : f.view.viewport()->findChildren<QLineEdit *>())
+            e->hide();
+        preferences::setCircuitSuggestions(false);
+        QSettings().remove(u"preferences/circuitSuggestionDefaults"_s);
     }
 
     void deleteConnectorRemovesWiresAndUndoRestoresOrder()
@@ -1402,6 +1548,24 @@ private slots:
         f.view.centerOn(QPointF(350, 120));
         f.view.scale(2, 2);
         f.view.grab().save(imageDir() + u"/schematic-free-ends.png"_s);
+
+        // Ground, chassis ground and power symbols, an outline around J1, and a selected
+        // wire with its end handles.
+        Harness symbols = ends;
+        symbols.freeEnds[0].symbol = SchematicSymbol::Power;
+        symbols.freeEnds[0].label = u"12V+"_s;
+        symbols.freeEnds[1].symbol = SchematicSymbol::Ground;
+        symbols.freeEnds[2].symbol = SchematicSymbol::ChassisGround;
+        symbols.notes.push_back(Note{newId(), NoteCanvas::Schematic, u"Steering wheel"_s, QPointF(-40, -60), {},
+                                     QSizeF(400, 200), {}});
+        f.reset(symbols);
+        Selection selectedWire;
+        selectedWire.wires.insert(symbols.wires[3].id);
+        f.selection.setSelection(selectedWire);
+        f.view.resize(1400, 900);
+        f.view.zoomToFit();
+        f.view.grab().save(imageDir() + u"/schematic-symbols-outline.png"_s);
+        f.view.resetTransform();
 
         // A factory harness (dashed) cut and spliced into an add-on.
         Harness addOn = placedSample();

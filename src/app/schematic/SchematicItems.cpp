@@ -28,6 +28,55 @@ class Tr
 
 namespace {
 
+// Height of a schematic symbol hanging below a splice or free end (see paintSymbol).
+constexpr qreal kSymbolHeight = 24;
+
+// Hit area of the symbol hanging from `top`, so clicking it grabs the item.
+QRectF symbolRect(qreal top)
+{
+    return QRectF(-11, top, 22, kSymbolHeight);
+}
+
+// A ground, chassis ground or power symbol hanging below the item from `top`: a short stem,
+// then the symbol. Ground: three bars getting shorter. Chassis ground: a bar with three
+// slanted ticks. Power: a circled plus, like a battery's positive post.
+void paintSymbol(QPainter *painter, SchematicSymbol symbol, qreal top, const QColor &color)
+{
+    if (symbol == SchematicSymbol::None)
+        return;
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setBrush(Qt::NoBrush);
+    painter->setPen(QPen(color, 2, Qt::SolidLine, Qt::FlatCap));
+    const qreal stemEnd = top + 9;
+    painter->drawLine(QPointF(0, top), QPointF(0, stemEnd));
+    switch (symbol) {
+    case SchematicSymbol::Ground:
+        for (int i = 0; i < 3; ++i) {
+            const qreal half = 10 - 3.5 * i;
+            const qreal y = stemEnd + 4 * i;
+            painter->drawLine(QPointF(-half, y), QPointF(half, y));
+        }
+        break;
+    case SchematicSymbol::ChassisGround:
+        painter->drawLine(QPointF(-10, stemEnd), QPointF(10, stemEnd));
+        for (qreal x : {-8.0, 0.0, 8.0})
+            painter->drawLine(QPointF(x, stemEnd), QPointF(x - 5, stemEnd + 7));
+        break;
+    case SchematicSymbol::Power: {
+        const QPointF center(0, stemEnd + 6.5);
+        painter->setPen(QPen(color, 1.8));
+        painter->drawEllipse(center, 6.5, 6.5);
+        painter->drawLine(center - QPointF(3.5, 0), center + QPointF(3.5, 0));
+        painter->drawLine(center - QPointF(0, 3.5), center + QPointF(0, 3.5));
+        break;
+    }
+    case SchematicSymbol::None:
+        break;
+    }
+    painter->restore();
+}
+
 QPalette paletteOf(const QGraphicsItem *item)
 {
     return item->scene() ? item->scene()->palette() : QApplication::palette();
@@ -448,7 +497,7 @@ void SpliceItem::setHighlighted(bool on)
 
 QRectF SpliceItem::boundingRect() const
 {
-    return QRectF(-60, -30, 120, 30 + kRadius + 4);
+    return QRectF(-60, -30, 120, 30 + kRadius + 4).united(symbolRect(kRadius + 1));
 }
 
 QRectF SpliceItem::stubRect(bool right)
@@ -486,6 +535,8 @@ QPainterPath SpliceItem::shape() const
     path.addRect(QRectF(-40, -26, 80, 16));
     path.addRect(stubRect(false));
     path.addRect(stubRect(true));
+    if (m_splice.symbol != SchematicSymbol::None)
+        path.addRect(symbolRect(kRadius + 1));
     return path;
 }
 
@@ -507,6 +558,7 @@ void SpliceItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWid
     painter->setPen(QPen(pal.color(QPalette::Base), 1.5));
     painter->setBrush(text);
     painter->drawEllipse(QPointF(0, 0), kRadius, kRadius);
+    paintSymbol(painter, m_splice.symbol, kRadius, text);
     QFont font = painter->font();
     font.setPixelSize(11);
     font.setBold(true);
@@ -564,7 +616,7 @@ WireLead FreeEndItem::leadAt(const QPointF &itemPos) const
 
 QRectF FreeEndItem::boundingRect() const
 {
-    return QRectF(-60, -30, 120, 30 + kHalfWidth + 4);
+    return QRectF(-60, -30, 120, 30 + kHalfWidth + 4).united(symbolRect(kHalfWidth));
 }
 
 QPainterPath FreeEndItem::shape() const
@@ -574,6 +626,8 @@ QPainterPath FreeEndItem::shape() const
     path.addRect(QRectF(-40, -28, 80, 16)); // label
     path.addRect(stubRect(false));
     path.addRect(stubRect(true));
+    if (m_end.symbol != SchematicSymbol::None)
+        path.addRect(symbolRect(kHalfWidth));
     return path;
 }
 
@@ -636,6 +690,8 @@ void FreeEndItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWi
             painter->drawLine(QPointF(x - 3, 7), QPointF(x + 3, -7));
         break;
     }
+    // The eyelet ring reaches 9.25 below the center; the stem starts just under the symbol.
+    paintSymbol(painter, m_end.symbol, kHalfWidth - 2, text);
 
     QFont font = painter->font();
     font.setPixelSize(11);
@@ -835,6 +891,15 @@ void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
         painter->drawPath(m_path);
     }
     painter->restore();
+    if (isSelected()) {
+        // Grab handles on the ends: dragging one moves that end to another pin or lead.
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(QPen(pal.color(QPalette::Highlight), 1.5));
+        painter->setBrush(pal.color(QPalette::Base));
+        painter->drawEllipse(m_a.point, kEndHandleRadius, kEndHandleRadius);
+        if (!isOffSheet())
+            painter->drawEllipse(m_b.point, kEndHandleRadius, kEndHandleRadius);
+    }
     if (isOffSheet()) {
         // A flag pointing away from the wire: the wire continues on another sheet.
         const QRectF r = m_tagRect;

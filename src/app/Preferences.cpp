@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "Preferences.h"
 
+#include <QCoreApplication>
+#include <QSet>
 #include <QSettings>
 
 namespace tbh::app::preferences {
@@ -10,6 +12,13 @@ constexpr auto kDefaultUnitsKey = "preferences/defaultUnits";
 constexpr auto kAutosaveKey = "preferences/autosaveMinutes";
 constexpr auto kPanInputKey = "preferences/panInput";
 constexpr auto kWheelPansKey = "preferences/wheelPans";
+constexpr auto kCircuitSuggestionsKey = "preferences/circuitSuggestions";
+constexpr auto kCircuitSuggestionDefaultsKey = "preferences/circuitSuggestionDefaults";
+
+class Tr
+{
+    Q_DECLARE_TR_FUNCTIONS(Preferences)
+};
 }
 
 Units defaultUnits()
@@ -59,6 +68,56 @@ bool wheelPans()
 void setWheelPans(bool pans)
 {
     QSettings().setValue(kWheelPansKey, pans);
+}
+
+bool circuitSuggestions()
+{
+    return QSettings().value(kCircuitSuggestionsKey, false).toBool();
+}
+
+void setCircuitSuggestions(bool on)
+{
+    QSettings().setValue(kCircuitSuggestionsKey, on);
+}
+
+QStringList circuitSuggestionDefaults()
+{
+    const QSettings settings;
+    if (settings.contains(kCircuitSuggestionDefaultsKey))
+        return settings.value(kCircuitSuggestionDefaultsKey).toStringList();
+    return {QStringLiteral("12V+"), QStringLiteral("5V+"), QStringLiteral("GND"), Tr::tr("Sensor GND"),
+            Tr::tr("Unused")};
+}
+
+void setCircuitSuggestionDefaults(const QStringList &texts)
+{
+    QSettings().setValue(kCircuitSuggestionDefaultsKey, texts);
+}
+
+QStringList circuitSuggestionsFor(const Harness &harness)
+{
+    if (!circuitSuggestions())
+        return {};
+    QStringList used;
+    for (const Connector &c : harness.connectors) {
+        for (const Pin &p : c.pins)
+            used << p.circuitText;
+    }
+    for (const Wire &w : harness.wires)
+        used << w.name;
+    used.sort(Qt::CaseInsensitive);
+    QStringList result;
+    QSet<QString> seen;
+    for (const QStringList &list : {circuitSuggestionDefaults(), used}) {
+        for (const QString &raw : list) {
+            const QString text = raw.trimmed();
+            if (text.isEmpty() || seen.contains(text.toCaseFolded()))
+                continue;
+            seen.insert(text.toCaseFolded());
+            result << text;
+        }
+    }
+    return result;
 }
 
 } // namespace tbh::app::preferences

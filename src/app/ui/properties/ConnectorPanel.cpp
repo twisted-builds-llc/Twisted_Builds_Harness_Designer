@@ -2,6 +2,7 @@
 #include "ui/properties/ConnectorPanel.h"
 
 #include "Document.h"
+#include "Preferences.h"
 #include "commands/EditOps.h"
 #include "commands/EntityCommands.h"
 #include "commands/UndoBatch.h"
@@ -134,6 +135,11 @@ QVariant PinTableModel::data(const QModelIndex &index, int role) const
     default:
         return {};
     }
+}
+
+const Harness &PinTableModel::harness() const
+{
+    return m_document->model()->harness();
 }
 
 QString PinTableModel::cellText(const QModelIndex &index) const
@@ -414,6 +420,15 @@ public:
     {
         QWidget *editor = QStyledItemDelegate::createEditor(parent, option, index);
         auto *line = qobject_cast<QLineEdit *>(editor);
+        if (line && index.column() == PinTableModel::Circuit) {
+            const QStringList suggestions = preferences::circuitSuggestionsFor(m_pins->harness());
+            if (!suggestions.isEmpty()) {
+                auto *completer = new QCompleter(suggestions, line);
+                completer->setCaseSensitivity(Qt::CaseInsensitive);
+                completer->setFilterMode(Qt::MatchContains);
+                line->setCompleter(completer);
+            }
+        }
         if (line && index.column() == PinTableModel::Wired) {
             auto *completer = new QCompleter(m_pins->wiredChoices(index.row()), line);
             completer->setCaseSensitivity(Qt::CaseInsensitive);

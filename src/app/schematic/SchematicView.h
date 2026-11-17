@@ -45,10 +45,14 @@ public:
     void addConnector();
     void addSplice();
     // Adds a free end (flying lead, eyelet...) at the view center, ready to be wired.
-    void addFreeEnd(FreeEndKind kind);
+    // `symbol` and `label` preset it, e.g. an eyelet drawn as a ground ("GND").
+    void addFreeEnd(FreeEndKind kind, SchematicSymbol symbol = SchematicSymbol::None, const QString &label = {});
     // Opens a text editor at the view center; typing text and pressing Enter adds a note.
     void addNote();
-    // Edits a note's text in place; clearing the text deletes the note.
+    // Adds an outline (a dashed box, e.g. around an assembly's connectors) around the
+    // selected items, or at the view center when nothing is selected, and edits its title.
+    void addOutline();
+    // Edits a note's text (an outline's title) in place; clearing a note's text deletes it.
     void editNote(const QString &noteId);
     void deleteSelection();
     void renameSelection();
@@ -184,6 +188,17 @@ private:
     // Moving.
     std::map<QString, QPointF> m_pressPositions;     // placement key -> position at press
     std::map<QString, QPointF> m_notePressPositions; // selected notes at press
+    // Items inside a selected outline but not selected themselves: they follow the outline
+    // (placement keys and note ids, each with its position at press).
+    std::map<QString, QPointF> m_followerPositions;
+    std::map<QString, QPointF> m_followerNotePositions;
+    QString m_followLeader;   // a selected outline: how far it moved is how far they move
+    QPointF m_leaderPressPos;
+    void moveFollowers();
+    // Resizing an outline by its handle.
+    QString m_resizeNote;
+    QPointF m_resizePressScene;
+    QSizeF m_resizeStartSize;
     // Dragging a wire's vertical run.
     QString m_routeWire;
     bool m_routeDragging = false;

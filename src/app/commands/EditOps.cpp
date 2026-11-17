@@ -117,7 +117,7 @@ std::unique_ptr<QUndoCommand> setNoteText(HarnessModel *model, const QString &no
     const QString trimmed = text.trimmed();
     if (!current || trimmed == current->text)
         return nullptr;
-    if (trimmed.isEmpty())
+    if (trimmed.isEmpty() && !current->frameSize) // an outline may have no title
         return std::make_unique<RemoveEntityCommand<Note>>(model, noteId, Tr::tr("Delete note"));
     Note updated = *current;
     updated.text = trimmed;
@@ -343,6 +343,7 @@ std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connect
     if (!current || *current == updated)
         return nullptr;
     QSet<QString> retexted;
+    std::vector<std::pair<QString, QString>> renames; // pin id, its old text
     for (const Pin &pin : updated.pins) {
         if (pin.circuitText.isEmpty())
             continue;
@@ -350,13 +351,28 @@ std::unique_ptr<QUndoCommand> updateConnector(HarnessModel *model, const Connect
                                       [&](const Pin &p) { return p.id == pin.id; });
         if (old == current->pins.end() || old->circuitText != pin.circuitText)
             retexted.insert(pin.id);
+        if (old != current->pins.end() && !old->circuitText.isEmpty() && old->circuitText != pin.circuitText)
+            renames.emplace_back(pin.id, old->circuitText);
     }
     Harness after = model->harness();
     auto it = std::find_if(after.connectors.begin(), after.connectors.end(),
                            [&](const Connector &c) { return c.id == updated.id; });
     *it = updated;
-    const CircuitTextFill fill =
+    // A renamed pin's old text follows to the pins and wires on its net that still carry it.
+    CircuitTextFill fill;
+    for (const auto &[pinId, oldText] : renames) {
+        const QString newText = std::find_if(updated.pins.begin(), updated.pins.end(),
+                                             [&](const Pin &p) { return p.id == pinId; })
+                                    ->circuitText;
+        const CircuitTextFill renamed =
+            renameCircuitText(after, wiresOnPins(after, updated.id, {pinId}), oldText, newText);
+        fill.connectorIds.unite(renamed.connectorIds);
+        fill.wireIds.unite(renamed.wireIds);
+    }
+    const CircuitTextFill filled =
         fillEmptyCircuitText(after, wiresOnPins(after, updated.id, retexted));
+    fill.connectorIds.unite(filled.connectorIds);
+    fill.wireIds.unite(filled.wireIds);
     auto macro = std::make_unique<QUndoCommand>(text);
     new UpdateEntityCommand<Connector>(model, byId(after.connectors, updated.id), {}, macro.get());
     addFillUpdates(model, after, fill, macro.get(), updated.id);

@@ -1488,7 +1488,8 @@ private slots:
         const QPoint end = view.mapFromScene(view.schematicScene()->endAnchor(w1, true).point);
         ConnectorItem *lamp = view.schematicScene()->connectorItem(u"lamp"_s);
         const QPoint target = view.mapFromScene(lamp->mapToScene(lamp->circuitCellRect(0).center()));
-        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, end);
+        // The grab handle is generous: a press about 10 px off the end (7, 7) still grabs it.
+        QTest::mousePress(view.viewport(), Qt::LeftButton, {}, end + QPoint(7, 7));
         QTest::mouseMove(view.viewport(), end + QPoint(30, 30));
         QTest::mouseMove(view.viewport(), target);
         QTest::mouseRelease(view.viewport(), Qt::LeftButton, {}, target);
