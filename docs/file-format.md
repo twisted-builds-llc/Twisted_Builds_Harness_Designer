@@ -196,6 +196,9 @@ more wires end on it.
   was cut, e.g. a factory wire cut to splice in an add-on; never counted in the BOM).
 - `symbol` (schema 3, optional): as on splices. With `power` the `label` names the supply,
   e.g. `"12V+"`.
+- `pairedCutId` (schema 3, optional, `cut` ends only, written only when set): id of the other
+  cut end of the same cut (both ends share one layout point). Must name an existing free end.
+  Absent for cuts made before v0.1.1's pairing; such cut ends are joined by hand.
 
 ## `layout.json`
 
@@ -405,7 +408,7 @@ supports are refused, never silently downgraded.
   `isCavityPlug` and clears the seal. Wires gained `circuitId`; the migration numbers
   wires without one C001, C002, ... in file order. Other v0.1.1 schema additions also go in
   schema 3: `factory` on connectors and wires, the `cut` free end kind, wire
-  `leadA`/`leadB`, splice and free end `symbol` and schematic note `frame` (no migration;
+  `leadA`/`leadB`, splice and free end `symbol`, cut end `pairedCutId` and schematic note `frame` (no migration;
   absent means not factory, `auto` leads, no symbol and a plain note).
 
 ## Parts CSV import (Parts Library > Import Parts CSV...)

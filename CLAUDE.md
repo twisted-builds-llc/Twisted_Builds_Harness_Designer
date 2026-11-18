@@ -84,7 +84,9 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   5d): schematic outlines (notes with `frameSize`, Place > Add Outline, O; dragging the edge
   moves what is inside), ground/chassis/power `symbol` on splices and free ends (Add Ground,
   G), autosave status in the status bar, wire end handles, renamed circuit text follows its
-  net (`renameCircuitText`), optional circuit text suggestions (off by default). Tagged
+  net (`renameCircuitText`), optional circuit text suggestions (off by default). Cuts placed like splices (plan section
+  5e): the two cut ends know each other (`FreeEnd::pairedCutId`) and go to one layout point,
+  which drags/types into a loom like a splice (`isLoomPoint`). Tagged
   `v0.1.1` from that branch for a draft release the user is testing. **Not merged to `main`**:
   merge only when the user says so. Details and decisions: `docs/V0.1.1_PLAN.md`.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,

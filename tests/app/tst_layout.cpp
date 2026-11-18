@@ -1050,6 +1050,66 @@ private slots:
         QVERIFY(model->harness() == h);
     }
 
+    // A factory wire cut before it was routed (hands-on test: the cut showed as two separate
+    // ends off the loom, and the loom was not drawn as factory). ECU (n1) and SENSOR (n3) are
+    // factory, joined by one 500 mm loom; w1 is cut into wA ecu1 -> cutA and wB cutB -> sensor1.
+    void cutPlacedLikeASplice()
+    {
+        Document document;
+        SelectionModel selection(document.model());
+        LayoutView view(&document, &selection);
+        Harness h;
+        h.info.units = Units::Millimeters;
+        h.connectors = {connector(u"ecu"_s, 2), connector(u"sensor"_s, 2)};
+        h.connectors[0].factory = true;
+        h.connectors[1].factory = true;
+        h.freeEnds = {FreeEnd{u"cutA"_s, FreeEndKind::Cut, {}, {}, {}, u"cutB"_s, {}},
+                      FreeEnd{u"cutB"_s, FreeEndKind::Cut, {}, {}, {}, u"cutA"_s, {}}};
+        h.wires = {wire(u"wA"_s, PinRef{u"ecu"_s, u"ecu1"_s}, FreeEndRef{u"cutA"_s}),
+                   wire(u"wB"_s, FreeEndRef{u"cutB"_s}, PinRef{u"sensor"_s, u"sensor1"_s})};
+        h.wires[0].factory = true;
+        h.wires[1].factory = true;
+        h.layoutNodes = {LayoutNode{u"n1"_s, LayoutNodeType::Connector, u"ecu"_s, QPointF(0, 0), {}},
+                         LayoutNode{u"n3"_s, LayoutNodeType::Connector, u"sensor"_s, QPointF(600, 0), {}}};
+        h.layoutSegments = {
+            LayoutSegment{u"s1"_s, u"n1"_s, u"n3"_s, 500, {}, {}, SleevingCoverage::Full, std::nullopt, {}}};
+        HarnessModel *model = document.model();
+        model->reset(h);
+        verifyLoadable(model->harness());
+
+        // Placing one cut end places both, at one point.
+        view.placeRefs({LayoutRef{u"cutA"_s, LayoutNodeType::FlyingLead, {}}});
+        QCOMPARE(model->harness().layoutNodes.size(), size_t(3));
+        const LayoutNode cut = model->harness().layoutNodes.back();
+        QCOMPARE(cut.refId, u"cutA"_s);
+        QCOMPARE(cut.sharedRefIds, std::vector<QString>{u"cutB"_s});
+
+        // Drawn as a stub off the ECU, then its stub length typed: 100 mm into the loom.
+        model->insert(LayoutSegment{u"stub"_s, u"n1"_s, cut.id, 0, {}, {}, SleevingCoverage::Full, std::nullopt, {}});
+        QCOMPARE(spliceOfStub(model->harness(), u"stub"_s), cut.id);
+        QVERIFY(view.placeSpliceAlongLoom(u"stub"_s, 100));
+        QVERIFY(!model->find<LayoutSegment>(u"stub"_s));
+        // s1 becomes n1 - cut (100 mm); the rest, 500 - 100 = 400 mm, runs cut - n3.
+        QCOMPARE(model->find<LayoutSegment>(u"s1"_s)->lengthMm, 100.0);
+        QCOMPARE(model->harness().layoutSegments.back().lengthMm, 400.0);
+        verifyLoadable(model->harness());
+        const calc::LayoutGraph graph(model->harness());
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"wA"_s)).baseMm, 100.0);
+        QCOMPARE(calc::wireLength(model->harness(), graph, *model->find<Wire>(u"wB"_s)).baseMm, 400.0);
+        // Both halves carry only factory wires: the whole loom is factory again.
+        const calc::FactoryParts factory =
+            calc::factoryOnlyParts(model->harness(), calc::wiresBySegment(model->harness(), graph));
+        QCOMPARE(factory.segmentIds.size(), qsizetype(2));
+        QVERIFY(factory.nodeIds.contains(cut.id));
+
+        // Deleting one cut end unpairs the other, and the file stays loadable.
+        document.undoStack()->push(removeItems(model, {}, {}, {u"cutA"_s}, {}).release());
+        QVERIFY(model->find<FreeEnd>(u"cutB"_s)->pairedCutId.isEmpty());
+        verifyLoadable(model->harness());
+        document.undoStack()->undo();
+        QCOMPARE(model->find<FreeEnd>(u"cutB"_s)->pairedCutId, u"cutA"_s);
+    }
+
     void stubOffForkFollowsSpliceWires()
     {
         Document document;

@@ -171,6 +171,9 @@ struct FreeEnd {
     QString label;              // empty = none
     QString terminalPartNumber; // empty = none
     SchematicSymbol symbol = SchematicSymbol::None; // Power: the label names the supply, e.g. "12V+"
+    // Cut ends only: the other cut end of the same cut, which shares its point in the layout.
+    // Empty = not known (cuts made before this was recorded).
+    QString pairedCutId;
     QJsonObject extra;
 
     bool operator==(const FreeEnd &) const = default;

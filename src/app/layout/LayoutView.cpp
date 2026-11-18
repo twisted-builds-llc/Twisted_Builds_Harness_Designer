@@ -133,14 +133,42 @@ void LayoutView::placeRefs(const std::vector<LayoutRef> &refs)
 {
     if (refs.empty())
         return;
+    HarnessModel *model = m_document->model();
     QUndoStack *stack = m_document->undoStack();
     stack->beginMacro(tr("Place in layout"));
     Selection s;
+    QSet<QString> placedWithPair;
     for (const LayoutRef &ref : refs) {
+        if (placedWithPair.contains(ref.refId))
+            continue;
+        // Both cut ends of a cut share one point: with the other one if it is placed,
+        // else both on a new point.
+        const FreeEnd *free = findFreeEnd(model->harness(), ref.refId);
+        const FreeEnd *pair = free && free->kind == FreeEndKind::Cut ? findFreeEnd(model->harness(), free->pairedCutId)
+                                                                     : nullptr;
+        if (pair && pair->kind != FreeEndKind::Cut)
+            pair = nullptr;
+        if (pair) {
+            const auto &nodes = model->harness().layoutNodes;
+            const auto holder = std::find_if(nodes.begin(), nodes.end(), [&](const LayoutNode &n) {
+                return n.refId == pair->id
+                       || std::find(n.sharedRefIds.begin(), n.sharedRefIds.end(), pair->id) != n.sharedRefIds.end();
+            });
+            if (holder != nodes.end()) {
+                LayoutNode joined = *holder;
+                joined.sharedRefIds.push_back(ref.refId);
+                s.layoutNodes.insert(joined.id);
+                stack->push(new UpdateEntityCommand<LayoutNode>(model, joined, tr("Place in layout")));
+                continue;
+            }
+        }
         LayoutNode node{newId(), ref.nodeType, ref.refId, nextPlacePosition(), {}};
+        if (pair) {
+            node.sharedRefIds = {pair->id};
+            placedWithPair.insert(pair->id);
+        }
         s.layoutNodes.insert(node.id);
-        stack->push(new AddEntityCommand<LayoutNode>(m_document->model(), std::move(node), {},
-                                                     tr("Place in layout")));
+        stack->push(new AddEntityCommand<LayoutNode>(model, std::move(node), {}, tr("Place in layout")));
     }
     stack->endMacro();
     m_selection->setSelection(s);
@@ -368,9 +396,9 @@ bool LayoutView::placeSpliceOnPoint(const QString &spliceNodeId, const QString &
     const Harness &h = model->harness();
     const LayoutNode *spliceNode = model->find<LayoutNode>(spliceNodeId);
     const LayoutNode *point = model->find<LayoutNode>(pointId);
-    if (!spliceNode || !point || spliceNodeId == pointId || spliceNode->type != LayoutNodeType::Splice)
+    if (!spliceNode || !point || spliceNodeId == pointId || !isLoomPoint(h, *spliceNode))
         return false;
-    const bool ontoSplice = point->type == LayoutNodeType::Splice && !point->refId.isEmpty();
+    const bool ontoSplice = isLoomPoint(h, *point);
     if (!ontoSplice && point->type != LayoutNodeType::Branch)
         return false;
     const auto legs = std::count_if(h.layoutSegments.begin(), h.layoutSegments.end(), [&](const LayoutSegment &s) {
@@ -743,7 +771,7 @@ bool LayoutView::placeSpliceInSegment(const QString &spliceNodeId, const QString
     const LayoutNode *node = model->find<LayoutNode>(spliceNodeId);
     const LayoutSegment *target = model->find<LayoutSegment>(segmentId);
     LayoutSegmentItem *segmentItem = m_scene->segmentItem(segmentId);
-    if (!node || !target || !segmentItem || node->type != LayoutNodeType::Splice
+    if (!node || !target || !segmentItem || !isLoomPoint(h, *node)
         || target->nodeA == spliceNodeId || target->nodeB == spliceNodeId)
         return false;
     const QString stubId = stubOfSplice(h, spliceNodeId);
@@ -789,7 +817,7 @@ void LayoutView::editPositionAlongRun(const QString &nodeId)
 {
     HarnessModel *model = m_document->model();
     const LayoutNode *node = model->find<LayoutNode>(nodeId);
-    if (!node || node->type != LayoutNodeType::Splice)
+    if (!node || !isLoomPoint(model->harness(), *node))
         return;
     std::vector<const LayoutSegment *> run;
     for (const LayoutSegment &s : model->harness().layoutSegments) {
@@ -811,7 +839,7 @@ void LayoutView::editPositionAlongRun(const QString &nodeId)
     if (!fromItem || !farItem || !spliceItem)
         return;
     const QString farLabel = farItem->label().isEmpty() ? tr("the branch point") : farItem->label();
-    emit statusMessage(tr("Distance from %1 to splice %2 (the bundle keeps its total length).")
+    emit statusMessage(tr("Distance from %1 to %2 (the bundle keeps its total length).")
                            .arg(farLabel, spliceItem->label()));
     const Units units = model->harness().info.units;
     const QString segmentId = from.id;
@@ -828,7 +856,7 @@ void LayoutView::editPositionAlongRun(const QString &nodeId)
                  if (auto command = setDistanceAlongRun(m_document->model(), nodeId, segmentId, *mm))
                      m_document->undoStack()->push(command.release());
                  else
-                     emit statusMessage(tr("The splice must sit inside the bundle: enter a distance shorter than its total length."));
+                     emit statusMessage(tr("It must sit inside the bundle: enter a distance shorter than its total length."));
              });
 }
 
@@ -863,7 +891,7 @@ void LayoutView::mouseDoubleClickEvent(QMouseEvent *event)
             }
             if (item->type() == LayoutNodeItemType) {
                 const auto *node = static_cast<LayoutNodeItem *>(item);
-                if (node->node().type == LayoutNodeType::Splice && node->legCount() == 2) {
+                if (isLoomPoint(m_document->model()->harness(), node->node()) && node->legCount() == 2) {
                     editPositionAlongRun(node->id());
                     return;
                 }
@@ -917,7 +945,7 @@ void LayoutView::contextMenuEvent(QContextMenuEvent *event)
         } else if (item->type() == LayoutNodeItemType) {
             const auto *node = static_cast<LayoutNodeItem *>(item);
             const QString id = node->id();
-            const bool alongRun = node->node().type == LayoutNodeType::Splice && node->legCount() == 2;
+            const bool alongRun = isLoomPoint(m_document->model()->harness(), node->node()) && node->legCount() == 2;
             if (alongRun)
                 menu.addAction(tr("Position Along Bundle..."), this, [this, id] { editPositionAlongRun(id); });
             if (node->legCount() > 0)

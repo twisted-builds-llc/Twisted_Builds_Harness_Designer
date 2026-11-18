@@ -100,6 +100,30 @@ LayoutNodeType layoutNodeTypeFor(FreeEndKind kind)
                                                                             : LayoutNodeType::FlyingLead;
 }
 
+bool isLoomPoint(const Harness &harness, const LayoutNode &node)
+{
+    if (node.refId.isEmpty())
+        return false;
+    if (node.type == LayoutNodeType::Splice)
+        return true;
+    const FreeEnd *free = findFreeEnd(harness, node.refId);
+    return free && free->kind == FreeEndKind::Cut;
+}
+
+std::vector<QString> wiresAtLayoutNode(const Harness &harness, const LayoutNode &node)
+{
+    QSet<QString> refs{node.refId};
+    for (const QString &id : node.sharedRefIds)
+        refs.insert(id);
+    refs.remove(QString());
+    std::vector<QString> ids;
+    for (const Wire &w : harness.wires) {
+        if (refs.contains(wireEndItemId(w.endA)) || refs.contains(wireEndItemId(w.endB)))
+            ids.push_back(w.id);
+    }
+    return ids;
+}
+
 namespace {
 
 Pin *findPin(Harness &harness, const WireEnd &end)

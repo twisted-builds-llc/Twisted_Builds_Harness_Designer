@@ -200,13 +200,25 @@ FactoryParts factoryOnlyParts(const Harness &harness, const QHash<QString, std::
         if (w.factory)
             factoryWires.insert(w.id);
     }
+    QSet<QString> factoryConnectorNodes;
+    for (const LayoutNode &n : harness.layoutNodes) {
+        if (n.type != LayoutNodeType::Connector)
+            continue;
+        const auto c = std::find_if(harness.connectors.begin(), harness.connectors.end(),
+                                    [&](const Connector &c) { return c.id == n.refId; });
+        if (c != harness.connectors.end() && c->factory)
+            factoryConnectorNodes.insert(n.id);
+    }
     FactoryParts parts;
-    for (auto it = wiresBySegment.cbegin(); it != wiresBySegment.cend(); ++it) {
-        const std::vector<QString> &wires = it.value();
-        if (!wires.empty() && std::all_of(wires.begin(), wires.end(), [&](const QString &id) {
-                return factoryWires.contains(id);
-            }))
-            parts.segmentIds.insert(it.key());
+    for (const LayoutSegment &s : harness.layoutSegments) {
+        const std::vector<QString> wires = wiresBySegment.value(s.id);
+        // No wires routed yet: factory when it runs between two factory connectors.
+        const bool factory = wires.empty()
+                                 ? factoryConnectorNodes.contains(s.nodeA) && factoryConnectorNodes.contains(s.nodeB)
+                                 : std::all_of(wires.begin(), wires.end(),
+                                               [&](const QString &id) { return factoryWires.contains(id); });
+        if (factory)
+            parts.segmentIds.insert(s.id);
     }
     QHash<QString, bool> allFactory; // node -> all its segments are factory-only so far
     for (const LayoutSegment &s : harness.layoutSegments) {
@@ -218,11 +230,8 @@ FactoryParts factoryOnlyParts(const Harness &harness, const QHash<QString, std::
         if (allFactory.contains(n.id)) {
             if (allFactory.value(n.id))
                 parts.nodeIds.insert(n.id);
-        } else if (n.type == LayoutNodeType::Connector) {
-            const auto c = std::find_if(harness.connectors.begin(), harness.connectors.end(),
-                                        [&](const Connector &c) { return c.id == n.refId; });
-            if (c != harness.connectors.end() && c->factory)
-                parts.nodeIds.insert(n.id);
+        } else if (factoryConnectorNodes.contains(n.id)) {
+            parts.nodeIds.insert(n.id);
         }
     }
     return parts;

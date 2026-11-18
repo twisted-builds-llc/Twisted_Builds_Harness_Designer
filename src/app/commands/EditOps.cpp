@@ -70,6 +70,18 @@ void clearLayoutRefs(HarnessModel *model, const QSet<QString> &refs, QUndoComman
     }
 }
 
+// Cut ends paired with free ends that are going away lose the pairing.
+void unpairCuts(HarnessModel *model, const QSet<QString> &removedFreeEndIds, QUndoCommand *parent)
+{
+    for (const FreeEnd &f : model->harness().freeEnds) {
+        if (f.pairedCutId.isEmpty() || !removedFreeEndIds.contains(f.pairedCutId) || removedFreeEndIds.contains(f.id))
+            continue;
+        FreeEnd updated = f;
+        updated.pairedCutId.clear();
+        new UpdateEntityCommand<FreeEnd>(model, updated, {}, parent);
+    }
+}
+
 } // namespace
 
 std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString> &connectorIds,
@@ -136,6 +148,7 @@ std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QStrin
     // Within each list, remove from the back so the recorded indices restore the order.
     const std::vector<QString> wires = wiresRemovedWith(h, connectorIds, spliceIds, freeEndIds, wireIds);
     clearLayoutRefs(model, connectorIds + spliceIds + freeEndIds, macro.get());
+    unpairCuts(model, freeEndIds, macro.get());
     for (auto it = wires.rbegin(); it != wires.rend(); ++it)
         new RemoveEntityCommand<Wire>(model, *it, {}, macro.get());
     for (auto it = h.freeEnds.rbegin(); it != h.freeEnds.rend(); ++it) {
@@ -507,7 +520,7 @@ QString stubSpliceNode(const Harness &h, const LayoutSegment &stub)
     for (const QString &id : {stub.nodeA, stub.nodeB}) {
         const auto node = std::find_if(h.layoutNodes.begin(), h.layoutNodes.end(),
                                        [&](const LayoutNode &n) { return n.id == id; });
-        if (node != h.layoutNodes.end() && node->type == LayoutNodeType::Splice && segmentsOn(h, id).size() == 1)
+        if (node != h.layoutNodes.end() && isLoomPoint(h, *node) && segmentsOn(h, id).size() == 1)
             return id;
     }
     return {};
@@ -546,12 +559,8 @@ std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QS
     const auto spliceNode = std::find_if(harness.layoutNodes.begin(), harness.layoutNodes.end(),
                                          [&](const LayoutNode &n) { return n.id == splice; });
     QSet<QString> spliceWires;
-    std::vector<QString> spliceIds{spliceNode->refId};
-    spliceIds.insert(spliceIds.end(), spliceNode->sharedRefIds.begin(), spliceNode->sharedRefIds.end());
-    for (const QString &id : spliceIds) {
-        for (const QString &wireId : wiresOnSplice(harness, id))
-            spliceWires.insert(wireId);
-    }
+    for (const QString &wireId : wiresAtLayoutNode(harness, *spliceNode))
+        spliceWires.insert(wireId);
     std::optional<QHash<QString, std::vector<QString>>> usage; // built only at a fork
     auto spliceWiresIn = [&](const LayoutSegment *segment) {
         if (!usage)
@@ -610,8 +619,7 @@ std::optional<LoomPosition> loomPositionForStub(const Harness &harness, const QS
         // Exactly on a point inside the loom: side by side with the splices there, or in
         // place of a bend or fork.
         if (std::abs(distanceMm - walked) < 1e-6) {
-            if ((farNode->type == LayoutNodeType::Splice && !farNode->refId.isEmpty())
-                || farNode->type == LayoutNodeType::Branch)
+            if (isLoomPoint(harness, *farNode) || farNode->type == LayoutNodeType::Branch)
                 return LoomPosition{{}, true, 0, far};
             return std::nullopt;
         }
@@ -726,6 +734,7 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
         const FreeEnd *item = model->find<FreeEnd>(free->freeEndId);
         if (item && item->kind == FreeEndKind::Cut && wiresOnFreeEnd(after, item->id).empty()) {
             clearLayoutRefs(model, {item->id}, macro.get());
+            unpairCuts(model, {item->id}, macro.get());
             new RemoveEntityCommand<FreeEnd>(model, item->id, {}, macro.get());
         }
     }
@@ -743,8 +752,11 @@ std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId
     auto macro = std::make_unique<QUndoCommand>(Tr::tr("Cut wire"));
 
     FreeEnd endA, endB;
+    endA.id = newId();
+    endB.id = newId();
+    endA.pairedCutId = endB.id;
+    endB.pairedCutId = endA.id;
     for (auto [end, position] : {std::pair{&endA, cutA}, std::pair{&endB, cutB}}) {
-        end->id = newId();
         end->kind = FreeEndKind::Cut;
         SchematicPlacement placement;
         placement.position = position;
@@ -812,6 +824,7 @@ std::unique_ptr<QUndoCommand> replaceFreeEndWithSplice(HarnessModel *model, cons
         if (node != n)
             new UpdateEntityCommand<LayoutNode>(model, node, {}, macro.get());
     }
+    unpairCuts(model, {freeEndId}, macro.get());
     new RemoveEntityCommand<FreeEnd>(model, freeEndId, {}, macro.get());
     return macro;
 }

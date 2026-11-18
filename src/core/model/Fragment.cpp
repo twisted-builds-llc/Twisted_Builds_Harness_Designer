@@ -100,6 +100,9 @@ void assignNewIds(Harness &fragment)
         freeEndMap.insert(f.id, newFreeEndId);
         f.id = newFreeEndId;
     }
+    // A cut end keeps its pairing only when the other cut end came along.
+    for (FreeEnd &f : fragment.freeEnds)
+        f.pairedCutId = freeEndMap.value(f.pairedCutId);
     auto remapEnd = [&](WireEnd &end) {
         if (auto *pin = std::get_if<PinRef>(&end)) {
             pin->pinId = pinMap.value(pin->connectorId + QLatin1Char('/') + pin->pinId);

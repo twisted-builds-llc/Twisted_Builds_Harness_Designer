@@ -185,6 +185,20 @@ private slots:
         QCOMPARE(parts.segmentIds, QSet<QString>{u"seg2"_s});
         // n3 has only seg2; n2 and n1 also have seg1; n6 is a factory connector on its own.
         QCOMPARE(parts.nodeIds, (QSet<QString>{u"n3"_s, u"n6"_s}));
+
+        // An empty segment (no routed wires) counts only between two factory connectors:
+        // n3 (sensor) - n6 (lamp) once the sensor is factory; n1 (ecu, not factory) - n6 never.
+        // Both are long (5000 mm) so no wire takes them as a shortcut.
+        h.layoutSegments.push_back(LayoutSegment{u"seg5"_s, u"n3"_s, u"n6"_s, 5000, {}, {}, SleevingCoverage::Full,
+                                                 std::nullopt, {}});
+        h.layoutSegments.push_back(LayoutSegment{u"seg6"_s, u"n1"_s, u"n6"_s, 5000, {}, {}, SleevingCoverage::Full,
+                                                 std::nullopt, {}});
+        h.connectors[1].factory = true; // sensor
+        const LayoutGraph g2(h);
+        const FactoryParts empty = factoryOnlyParts(h, wiresBySegment(h, g2));
+        QCOMPARE(empty.segmentIds, (QSet<QString>{u"seg2"_s, u"seg5"_s}));
+        // n6 now also has seg6 (not factory), so it is no longer faded; n3 has seg2 and seg5.
+        QCOMPARE(empty.nodeIds, QSet<QString>{u"n3"_s});
     }
 
     void nearestFactoryConnector()

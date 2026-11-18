@@ -712,13 +712,25 @@ private slots:
         // Both cut ends of a cut sit at one point: a free end node holding the other too.
         Harness h = sampleHarness();
         h.freeEnds.push_back(FreeEnd{u"fe-cut2"_s, FreeEndKind::Cut, {}, {}, {}});
+        h.freeEnds[1].pairedCutId = u"fe-cut2"_s; // the two ends of one cut know each other
+        h.freeEnds[2].pairedCutId = u"fe-cut"_s;
         LayoutNode cut{u"n9"_s, LayoutNodeType::FlyingLead, u"fe-cut"_s, QPointF(10, 10), {}};
         cut.sharedRefIds = {u"fe-cut2"_s};
         h.layoutNodes.push_back(cut);
         QString error;
-        const auto loaded = io::deserializeHarness(io::serializeHarness(h), &error);
+        const io::ZipEntries entries = io::serializeHarness(h);
+        const QJsonArray freeEnds = QJsonDocument::fromJson(entries.at(u"freeEnds.json"_s)).array();
+        QVERIFY(!freeEnds[0].toObject().contains(u"pairedCutId"_s)); // written only when set
+        QCOMPARE(freeEnds[1].toObject()[u"pairedCutId"].toString(), u"fe-cut2"_s);
+        const auto loaded = io::deserializeHarness(entries, &error);
         QVERIFY2(loaded, qPrintable(error));
         QVERIFY(loaded->layoutNodes == h.layoutNodes);
+        QVERIFY(loaded->freeEnds == h.freeEnds);
+
+        Harness dangling = h; // paired with a free end that is not there
+        dangling.freeEnds[2].pairedCutId = u"nope"_s;
+        QVERIFY(!io::deserializeHarness(io::serializeHarness(dangling), &error));
+        QVERIFY2(error.contains(u"nope"_s), qPrintable(error));
 
         Harness unassigned = h; // the node must hold an item of its own
         unassigned.layoutNodes.back().refId.clear();

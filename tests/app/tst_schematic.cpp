@@ -760,6 +760,8 @@ private slots:
         const QString cutB = std::get<FreeEndRef>(second.endA).freeEndId;
         QCOMPARE(f.model()->find<FreeEnd>(cutA)->kind, FreeEndKind::Cut);
         QCOMPARE(f.model()->find<FreeEnd>(cutB)->kind, FreeEndKind::Cut);
+        QCOMPARE(f.model()->find<FreeEnd>(cutA)->pairedCutId, cutB); // the two ends know each other
+        QCOMPARE(f.model()->find<FreeEnd>(cutB)->pairedCutId, cutA);
         // End A's cut end is on end A's (ECU's) side of the cut.
         QVERIFY(f.model()->placement(cutA)->position.x() < 300);
         QVERIFY(f.model()->placement(cutB)->position.x() > 300);

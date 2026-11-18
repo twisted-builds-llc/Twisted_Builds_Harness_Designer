@@ -127,7 +127,8 @@ std::optional<RoutePoint> pointAlongRoute(const LayoutGraph &graph, const Wire &
                                           double distanceMm);
 
 // Parts of the layout that belong only to the existing (factory) harness: segments whose
-// routed wires are all factory wires (at least one), and points whose segments are all such
+// routed wires are all factory wires (at least one), segments with no routed wires that run
+// between two factory connectors, and points whose segments are all such
 // segments (at least one), or a factory connector's point with no segments.
 struct FactoryParts
 {

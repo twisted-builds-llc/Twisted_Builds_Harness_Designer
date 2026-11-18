@@ -369,6 +369,7 @@ FreeEnd readFreeEnd(ObjectReader r)
     f.label = r.string("label");
     f.terminalPartNumber = r.string("terminalPartNumber");
     f.symbol = r.enumValue("symbol", kSchematicSymbols, SchematicSymbol::None);
+    f.pairedCutId = r.string("pairedCutId");
     f.extra = r.extra();
     return f;
 }
@@ -517,6 +518,10 @@ void checkIntegrity(const Harness &h)
     }
     const QSet<QString> splices = uniqueIds(h.splices, Tr::tr("splice"));
     const QSet<QString> freeEnds = uniqueIds(h.freeEnds, Tr::tr("free end"));
+    for (const FreeEnd &f : h.freeEnds) {
+        if (!f.pairedCutId.isEmpty() && (f.pairedCutId == f.id || !freeEnds.contains(f.pairedCutId)))
+            fail(Tr::tr("Cut end \"%1\" is paired with missing free end \"%2\".").arg(f.id, f.pairedCutId));
+    }
     const QSet<QString> nodes = uniqueIds(h.layoutNodes, Tr::tr("layout node"));
     const QSet<QString> segments = uniqueIds(h.layoutSegments, Tr::tr("layout segment"));
     uniqueIds(h.notes, Tr::tr("note"));
@@ -716,6 +721,8 @@ QJsonObject writeFreeEnd(const FreeEnd &f)
     o[u"label"] = f.label;
     o[u"terminalPartNumber"] = f.terminalPartNumber;
     writeSymbol(o, f.symbol);
+    if (!f.pairedCutId.isEmpty())
+        o[u"pairedCutId"] = f.pairedCutId;
     return o;
 }
 

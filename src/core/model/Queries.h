@@ -27,6 +27,12 @@ QString freeEndKindName(FreeEndKind kind);
 QString describeFreeEnd(const FreeEnd &end);
 // Layout node type that stands for a free end of this kind (ring terminals draw as eyelets).
 LayoutNodeType layoutNodeTypeFor(FreeEndKind kind);
+// A point that sits inside a loom rather than ending one: a splice, or a cut (Cut free end).
+// Such points can be placed along a bundle and have a stub moved into it.
+bool isLoomPoint(const Harness &harness, const LayoutNode &node);
+// Ids of wires with an end on any splice or free end the layout node holds (refId and
+// sharedRefIds), in model order.
+std::vector<QString> wiresAtLayoutNode(const Harness &harness, const LayoutNode &node);
 
 // Circuit text copied across wires, only into empty fields. Each listed wire is taken
 // with its net: every wire reachable through splices (connector pins end the net).

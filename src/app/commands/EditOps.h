@@ -98,6 +98,8 @@ std::unique_ptr<QUndoCommand> splitSegmentAt(HarnessModel *model, const QString 
                                              std::optional<QPointF> bendB,
                                              QString *newSegmentId = nullptr);
 
+// Splice stubs: "splice" below means any loom point (isLoomPoint(): a splice or a cut),
+// placed into a loom the same way.
 // Where along the loom a splice drawn as a stub lands. `stubId` runs from a splice node
 // that has no other segment to a node X. The splice falls `distanceMm` from X, walking the
 // loom out of X: where several segments leave a point (X itself, or a fork further on), the
