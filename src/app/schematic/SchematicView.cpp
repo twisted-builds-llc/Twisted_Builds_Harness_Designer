@@ -169,6 +169,15 @@ void SchematicView::setHover(const DropTarget &target)
 void SchematicView::mousePressEvent(QMouseEvent *event)
 {
     closeEditor();
+    if (event->button() == Qt::RightButton) {
+        // The scene clears the selection on a press no item accepts (wires do not take
+        // right presses), so a right-click on a selected item keeps the whole selection
+        // for the context menu.
+        if (QGraphicsItem *item = itemAt(event->pos()); item && item->isSelected()) {
+            event->accept();
+            return;
+        }
+    }
     if (event->button() != Qt::LeftButton) {
         CanvasView::mousePressEvent(event);
         return;

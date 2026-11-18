@@ -813,6 +813,14 @@ private slots:
         Selection pair;
         pair.wires = {u"w4"_s, u"w1"_s};
         f.selection.setSelection(pair);
+        {
+            // A right-click on one selected wire keeps both selected for the context menu.
+            const WireItem *w1 = f.scene()->wireItem(u"w1"_s);
+            const QPoint onW1 = f.toView({w1->runX(), w1->sceneBoundingRect().center().y()});
+            QTest::mousePress(f.view.viewport(), Qt::RightButton, {}, onW1);
+            QTest::mouseRelease(f.view.viewport(), Qt::RightButton, {}, onW1);
+            QCOMPARE(f.selection.selection().wires, pair.wires);
+        }
         QVERIFY(f.view.makeCableFromSelection());
         QCOMPARE(f.model()->harness().cables.size(), size_t(1));
         const Cable cable = f.model()->harness().cables[0];
