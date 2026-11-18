@@ -168,6 +168,8 @@ void PinTableModel::applyText(Pin &pin, int column, const QString &text)
         const QString t = text.trimmed().toLower();
         pin.isCavityPlug = !(t.isEmpty() || t == u"0" || t == u"no" || t == u"false"
                              || t == tr("No").toLower());
+        if (!pin.isCavityPlug)
+            pin.plugPartNumber.clear(); // an open cavity has no plug
         break;
     }
     case PlugPart:

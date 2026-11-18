@@ -406,6 +406,7 @@ LayoutSegment readLayoutSegment(ObjectReader r)
     s.label = r.string("label");
     s.sleevingId = r.string("sleevingId");
     s.sleevingCoverage = r.enumValue("sleevingCoverage", kSleevingCoverages, SleevingCoverage::Full);
+    s.addOnSleeving = r.boolean("addOnSleeving", false);
     if (const QJsonObject bend = r.object("bend"); !bend.isEmpty()) {
         ObjectReader b(bend, r.context() + QStringLiteral(".bend"));
         s.bend = QPointF(b.number("x", 0.0, true), b.number("y", 0.0, true));
@@ -767,6 +768,8 @@ QJsonObject writeLayoutSegment(const LayoutSegment &s)
     o[u"label"] = s.label;
     o[u"sleevingId"] = s.sleevingId;
     o[u"sleevingCoverage"] = enumToString(kSleevingCoverages, s.sleevingCoverage);
+    if (s.addOnSleeving)
+        o[u"addOnSleeving"] = true;
     if (s.bend)
         o[u"bend"] = QJsonObject{{u"x"_s, s.bend->x()}, {u"y"_s, s.bend->y()}};
     return o;

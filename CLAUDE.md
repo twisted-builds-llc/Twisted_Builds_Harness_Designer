@@ -88,7 +88,10 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   5e): the two cut ends know each other (`FreeEnd::pairedCutId`) and go to one layout point,
   which drags/types into a loom like a splice (`isLoomPoint`). Tagged
   `v0.1.1` from that branch for a draft release the user is testing. **Not merged to `main`**:
-  merge only when the user says so. Details and decisions: `docs/V0.1.1_PLAN.md`.
+  merge only when the user says so. Bug review fixes (plan 5f: factory sleeving left out of the
+  BOM unless `addOnSleeving`, unplug clears the plug P/N, labels/ties follow a moved splice) and
+  `main`'s example harness are on the branch; v0.1.1 re-tagged from it for a new draft.
+  Details and decisions: `docs/V0.1.1_PLAN.md`.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
   translations for languages other than English.
 - User preferences: inches by default (mm/cm optional, set in Edit > Preferences); work on a

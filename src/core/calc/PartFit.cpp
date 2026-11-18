@@ -172,7 +172,8 @@ void addPartProblems(const Harness &harness, const Library &library, std::vector
                                                std::pair{PinPartKind::Seal, &pin.sealPartNumber},
                                                std::pair{PinPartKind::Plug, &pin.plugPartNumber}}) {
                 const QString partNumber = number->trimmed();
-                if (partNumber.isEmpty())
+                // A plug part number left on an open cavity (older files) is not fitted.
+                if (partNumber.isEmpty() || (kind == PinPartKind::Plug && !pin.isCavityPlug))
                     continue;
                 if (housing && !housing->parts(kind).contains(partNumber))
                     report(c.id, Tr::tr("%1: %2 %3 is not listed for housing %4.")

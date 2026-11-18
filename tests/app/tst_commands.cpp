@@ -121,10 +121,16 @@ private slots:
         QVERIFY(model->setData(model->index(3, PinTableModel::PlugPart), u"PL-7"_s, Qt::EditRole));
         QVERIFY(pins()[3].isCavityPlug);
         QCOMPARE(pins()[3].plugPartNumber, u"PL-7"_s);
+        // Unchecking Plug opens the cavity again and clears its plug part number.
+        QVERIFY(model->setData(model->index(3, PinTableModel::Plug), int(Qt::Unchecked), Qt::CheckStateRole));
+        QVERIFY(!pins()[3].isCavityPlug);
+        QVERIFY(pins()[3].plugPartNumber.isEmpty());
 
         // Each bulk edit is one undo step: type, paste, block paste, delete, plug toggle,
-        // plug P/N = 6 (copying is not an edit).
-        QCOMPARE(doc.undoStack()->count() - undoBase, 6);
+        // plug P/N, unplug = 7 (copying is not an edit).
+        QCOMPARE(doc.undoStack()->count() - undoBase, 7);
+        doc.undoStack()->undo(); // unplug
+        QCOMPARE(pins()[3].plugPartNumber, u"PL-7"_s);
         doc.undoStack()->undo(); // plug P/N
         doc.undoStack()->undo(); // plug toggle
         doc.undoStack()->undo(); // delete

@@ -657,6 +657,35 @@ std::unique_ptr<QUndoCommand> setDistanceAlongRun(HarnessModel *model, const QSt
     if (from == *run[0] && other == *run[1])
         return nullptr;
     auto macro = std::make_unique<QUndoCommand>(Tr::tr("Set position along bundle"));
+    // Labels and ties keep their place along the whole run (measured from the far end of
+    // `from`), so moving the point moves them onto the other segment where it passes them.
+    if (total > 0) {
+        const bool fromStartsAtFar = from.nodeB == nodeId; // offsets on `from` count from the far end
+        const bool otherStartsAtNode = other.nodeA == nodeId;
+        const double oldFrom = std::max(0.0, run[0]->lengthMm);
+        const double oldOther = std::max(0.0, run[1]->lengthMm);
+        for (const LayoutAccessory &a : model->harness().accessories) {
+            double along; // from the far end of `from`
+            if (a.segmentId == from.id)
+                along = fromStartsAtFar ? a.offsetMm : oldFrom - a.offsetMm;
+            else if (a.segmentId == other.id)
+                along = oldFrom + (otherStartsAtNode ? a.offsetMm : oldOther - a.offsetMm);
+            else
+                continue;
+            along = std::clamp(along, 0.0, total);
+            LayoutAccessory moved = a;
+            if (along <= from.lengthMm) {
+                moved.segmentId = from.id;
+                moved.offsetMm = fromStartsAtFar ? along : from.lengthMm - along;
+            } else {
+                const double past = along - from.lengthMm;
+                moved.segmentId = other.id;
+                moved.offsetMm = otherStartsAtNode ? past : other.lengthMm - past;
+            }
+            if (moved != a)
+                new UpdateEntityCommand<LayoutAccessory>(model, std::move(moved), {}, macro.get());
+        }
+    }
     new UpdateEntityCommand<LayoutSegment>(model, std::move(from), {}, macro.get());
     if (other != *run[1])
         new UpdateEntityCommand<LayoutSegment>(model, std::move(other), {}, macro.get());

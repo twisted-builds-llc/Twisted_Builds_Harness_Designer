@@ -186,7 +186,7 @@ private slots:
         c.label = u"X1"_s;
         c.partNumber = u"DT06-2S"_s;
         c.pins = {Pin{u"p1"_s, u"1"_s, {}, u"T16"_s, u"S1"_s, false, {}, {}, {}},
-                  Pin{u"p2"_s, u"2"_s, {}, u"T99"_s, {}, false, {}, {}, {}},
+                  Pin{u"p2"_s, u"2"_s, {}, u"T99"_s, {}, false, u"P99"_s, {}, {}},
                   Pin{u"p3"_s, u"3"_s, {}, u"T16"_s, {}, false, {}, {}, {}},
                   Pin{u"p4"_s, u"4"_s, {}, {}, {}, true, u"P1"_s, {}, {}}};
         h.connectors = {c};
@@ -221,7 +221,8 @@ private slots:
         // 5. X1.3: two 14 AWG wires: 2 * 2.08091 = 4.16182, shown 4.16 mm2 > 2.12253: too large.
         //    (No insulation check with two wires in one cavity.)
         // 6. Ring GND: 14 AWG 2.08091 mm2 < 12 AWG 3.30877 * 0.98 = 3.24259: too small.
-        // X1.4's plug P1 is listed: fine.
+        // X1.4's plug P1 is listed: fine. X1.2's leftover plug P99 is not checked: the
+        // cavity is open (not marked plugged).
         QCOMPARE(messages.size(), 6);
         QCOMPARE(messages[0], u"X1 : 1: terminal T16 takes 16 AWG to 14 AWG; its wire WA is 12 AWG."_s);
         QCOMPARE(messages[1], u"X1 : 1: seal S1 is not listed for housing DT06-2S."_s);

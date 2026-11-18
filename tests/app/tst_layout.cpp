@@ -852,6 +852,23 @@ private slots:
         stack.push(setDistanceAlongRun(&model, u"n6"_s, u"s2"_s, 150).release());
         QCOMPARE(model.find<LayoutSegment>(u"s2"_s)->lengthMm, 150.0);
         QCOMPARE(model.find<LayoutSegment>(newId)->lengthMm, 300.0);
+        // Labels keep their place along the run (from n2): a1 50 and a2 90 stay on s2; a3 at
+        // 90 + 110 = 200 is now 200 - 150 = 50 mm along the new segment from n6.
+        QCOMPARE(model.find<LayoutAccessory>(u"a1"_s)->offsetMm, 50.0);
+        QCOMPARE(model.find<LayoutAccessory>(u"a2"_s)->segmentId, u"s2"_s);
+        QCOMPARE(model.find<LayoutAccessory>(u"a2"_s)->offsetMm, 90.0);
+        QCOMPARE(model.find<LayoutAccessory>(u"a3"_s)->segmentId, newId);
+        QCOMPARE(model.find<LayoutAccessory>(u"a3"_s)->offsetMm, 50.0);
+        // Splice back to 60 mm from n2: a2 at 90 passes onto the new segment, 90 - 60 = 30;
+        // a3 at 200 is 200 - 60 = 140 along it; a1 at 50 stays on s2.
+        stack.push(setDistanceAlongRun(&model, u"n6"_s, u"s2"_s, 60).release());
+        QCOMPARE(model.find<LayoutAccessory>(u"a1"_s)->segmentId, u"s2"_s);
+        QCOMPARE(model.find<LayoutAccessory>(u"a1"_s)->offsetMm, 50.0);
+        QCOMPARE(model.find<LayoutAccessory>(u"a2"_s)->segmentId, newId);
+        QCOMPARE(model.find<LayoutAccessory>(u"a2"_s)->offsetMm, 30.0);
+        QCOMPARE(model.find<LayoutAccessory>(u"a3"_s)->offsetMm, 140.0);
+        verifyLoadable(model.harness());
+        stack.undo();
         stack.undo();
         stack.undo();
         QVERIFY(model.harness() == h);

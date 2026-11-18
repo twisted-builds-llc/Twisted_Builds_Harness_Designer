@@ -137,6 +137,38 @@ private slots:
         QVERIFY(!findPart(bom, PartCategory::Splice, u"SPL-1"_s));
     }
 
+    void factorySleevingOnlyWhenAddedByTheBuild()
+    {
+        // Factory wires w1, w2, w3 as in factoryItemsAreNotCounted. w4 (built) runs seg1 and
+        // seg2, so those count. seg3 carries only w2 and w3, seg4 only w3: factory-only, so
+        // their sleeving (seg3 "hs" 120, seg4 "missing" 80) is the factory harness's own.
+        Harness h = bomSample();
+        h.connectors[1].factory = true;
+        for (Wire &w : h.wires)
+            w.factory = w.id == u"w1"_s || w.id == u"w2"_s || w.id == u"w3"_s;
+        LayoutAccessory tie;
+        tie.id = u"t1"_s;
+        tie.kind = AccessoryKind::Tie;
+        tie.segmentId = u"seg3"_s;
+        tie.partNumber = u"TIE-1"_s;
+        h.accessories.push_back(tie);
+        Bom bom = buildBom(h, bomLibrary());
+        QCOMPARE(bom.sleeving.size(), size_t(1));
+        QCOMPARE(bom.sleeving[0].sleevingId, u"pet-6"_s);
+        QCOMPARE(bom.sleeving[0].lengthMm, 750.0); // seg1 300 + seg2 450
+        // A tie the user placed on the factory loom always counts.
+        QCOMPARE(findPart(bom, PartCategory::Tie, u"TIE-1"_s)->quantity, 1);
+
+        // Sleeving added over the factory loom by this build: seg3's 120 mm shrink counts,
+        // 120 * 1.05 = 126 with waste.
+        h.layoutSegments[2].addOnSleeving = true;
+        bom = buildBom(h, bomLibrary());
+        QCOMPARE(bom.sleeving.size(), size_t(2));
+        QCOMPARE(bom.sleeving[1].sleevingId, u"hs"_s);
+        QCOMPARE(bom.sleeving[1].lengthMm, 120.0);
+        QCOMPARE(bom.sleeving[1].lengthWithWasteMm, 126.0);
+    }
+
     void labelsAndTies()
     {
         Harness h = bomSample();

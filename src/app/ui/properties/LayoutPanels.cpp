@@ -9,6 +9,7 @@
 #include "ui/Format.h"
 #include "ui/properties/PanelWidgets.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -42,6 +43,7 @@ SegmentPanel::SegmentPanel(Document *document, QWidget *parent)
     , m_fit(new QLabel(this))
     , m_recommendation(new QLabel(this))
     , m_useRecommended(new QPushButton(tr("Use"), this))
+    , m_addOnSleeving(new QCheckBox(tr("&Added in this build (count in BOM)"), this))
 {
     m_length->setPlaceholderText(tr("enter the branch length"));
     m_length->setToolTip(tr("Measured branch length. The drawing is not to scale; this value is used "
@@ -77,6 +79,10 @@ SegmentPanel::SegmentPanel(Document *document, QWidget *parent)
     useRow->addWidget(m_useRecommended);
     sleevingForm->addRow(useRow);
     m_useRecommended->setText(tr("Use Recommended Size"));
+    m_addOnSleeving->setToolTip(tr("This segment carries only factory wires, so its sleeving is taken to be the "
+                                   "factory harness's own and is left out of the BOM. Check this when the "
+                                   "build adds it, e.g. over a cut and splice into the factory harness."));
+    sleevingForm->addRow(m_addOnSleeving);
 
     auto *layout = new QVBoxLayout(this);
     layout->addLayout(form);
@@ -96,6 +102,16 @@ SegmentPanel::SegmentPanel(Document *document, QWidget *parent)
             assignSleeving(id);
     });
     connect(m_useRecommended, &QPushButton::clicked, this, [this] { assignSleeving(m_recommendedId); });
+    connect(m_addOnSleeving, &QCheckBox::toggled, this, [this](bool checked) {
+        HarnessModel *model = m_document->model();
+        const LayoutSegment *current = model->find<LayoutSegment>(m_id);
+        if (!current || current->addOnSleeving == checked)
+            return;
+        LayoutSegment updated = *current;
+        updated.addOnSleeving = checked;
+        m_document->undoStack()->push(new UpdateEntityCommand<LayoutSegment>(
+            model, updated, checked ? tr("Count sleeving in BOM") : tr("Leave sleeving out of BOM")));
+    });
     connect(m_length, &QLineEdit::editingFinished, this, &SegmentPanel::commit);
     connect(m_label, &QLineEdit::editingFinished, this, &SegmentPanel::commit);
     HarnessModel *model = document->model();
@@ -140,7 +156,13 @@ void SegmentPanel::refresh()
     m_length->setText(s->lengthMm > 0 ? formatLength(s->lengthMm, h.info.units, false) : QString());
     m_units->setText(unitsSymbol(h.info.units));
     m_label->setText(s->label);
-    const auto usage = calc::wiresBySegment(h, calc::LayoutGraph(h)).value(m_id);
+    const auto allUsage = calc::wiresBySegment(h, calc::LayoutGraph(h));
+    const auto usage = allUsage.value(m_id);
+    {
+        const QSignalBlocker b3(m_addOnSleeving);
+        m_addOnSleeving->setChecked(s->addOnSleeving);
+        m_addOnSleeving->setVisible(calc::factoryOnlyParts(h, allUsage).segmentIds.contains(m_id));
+    }
     m_wireCount->setText(tr("%n wire(s) pass through this segment:", nullptr, int(usage.size())));
     m_wires->clear();
     for (const QString &wireId : usage) {

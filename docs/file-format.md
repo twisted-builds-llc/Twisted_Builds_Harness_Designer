@@ -238,6 +238,10 @@ more wires end on it.
 - `position` is for drawing only. `lengthMm` is the entered branch length and is
   authoritative.
 - `sleevingCoverage`: only `full` in schema 1.
+- `addOnSleeving` (optional, default `false`, written only when `true`): on a segment that
+  carries only factory wires, the sleeving is added by this build (e.g. over a cut and splice
+  into the factory harness) and counts in the BOM. Without it such a segment's sleeving is
+  taken to be the factory harness's own and left out. Older versions keep the key unread.
 - `bend` (optional, drawing only): the segment is drawn as a quadratic Bezier curve whose
   control point is `A + x * (B - A) + y * n`, where A and B are the positions of `nodeA`
   and `nodeB` and `n = (-(B - A).y, (B - A).x)` (B - A turned 90 degrees). Being relative

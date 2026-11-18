@@ -145,8 +145,14 @@ Bom buildBom(const Harness &harness, const Library &library)
         ++line.pieces;
         line.lengthMm += lengthMm;
     };
-    for (const LayoutSegment &s : harness.layoutSegments)
-        addSleeving(s.sleevingId, s.lengthMm);
+    // Sleeving on the factory harness (segments with only factory wires) is already there,
+    // unless the user marked it as added by this build. Labels and ties are always placed by
+    // the user, so they always count.
+    const calc::FactoryParts factory = calc::factoryOnlyParts(harness, calc::wiresBySegment(harness, graph));
+    for (const LayoutSegment &s : harness.layoutSegments) {
+        if (!factory.segmentIds.contains(s.id) || s.addOnSleeving)
+            addSleeving(s.sleevingId, s.lengthMm);
+    }
     for (const LayoutAccessory &a : harness.accessories) {
         if (a.kind == AccessoryKind::Label)
             addSleeving(a.coverSleevingId, a.coverLengthMm);

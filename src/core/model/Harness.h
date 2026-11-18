@@ -206,6 +206,10 @@ struct LayoutSegment {
     // n = (B - A) turned 90 degrees, (-dy, dx). nullopt = straight.
     std::optional<QPointF> bend;
     QJsonObject extra;
+    // Segments carrying only factory wires: the sleeving is added by this build (e.g. over
+    // a cut and splice into the factory harness), so the BOM counts it. Without this, such a
+    // segment's sleeving is taken to be the factory harness's own and is left out.
+    bool addOnSleeving = false;
 
     bool operator==(const LayoutSegment &) const = default;
 };

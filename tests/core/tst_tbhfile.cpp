@@ -99,6 +99,7 @@ Harness sampleHarness()
         LayoutSegment{u"seg2"_s, u"n2"_s, u"n3"_s, 0.1, {}, u"sleeve-x"_s, SleevingCoverage::Full, std::nullopt, {}},
         LayoutSegment{u"seg3"_s, u"n2"_s, u"n4"_s, 75.0, {}, {}, SleevingCoverage::Full, QPointF(0.5, -0.25), {}},
     };
+    h.layoutSegments[1].addOnSleeving = true;
     LayoutAccessory label;
     label.id = u"acc1"_s;
     label.segmentId = u"seg1"_s;

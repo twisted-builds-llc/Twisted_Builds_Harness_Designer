@@ -5,6 +5,7 @@
 
 #include <optional>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
@@ -43,6 +44,7 @@ private:
     QLabel *m_fit;
     QLabel *m_recommendation;
     QPushButton *m_useRecommended;
+    QCheckBox *m_addOnSleeving; // shown on factory-only segments
     // Family the user picked (may differ from the assigned sleeving until a size is chosen).
     // nullopt: not picked, use the assigned sleeving's family or the first one; "": none.
     std::optional<QString> m_familyChoice;
