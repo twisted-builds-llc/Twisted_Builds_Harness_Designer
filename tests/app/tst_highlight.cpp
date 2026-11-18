@@ -383,6 +383,44 @@ private slots:
         selection->setSelection(seg);
         QTest::qWait(20);
         window.grab().save(out + u"/m4-segment.png"_s);
+
+        // Twisted cables: a pair and a shielded five-wire cable, on both views.
+        {
+            Harness tw;
+            tw.connectors = {testing::connector(u"j1"_s, 8), testing::connector(u"j2"_s, 8)};
+            const QString colors[] = {u"RED"_s, u"BLK"_s, u"GRN"_s, u"WHT"_s, u"BLU"_s, u"YEL"_s, u"ORN"_s, u"BRN"_s};
+            for (int i = 1; i <= 8; ++i) {
+                Wire w = testing::wire(u"t%1"_s.arg(i), PinRef{u"j1"_s, u"j1%1"_s.arg(i)}, PinRef{u"j2"_s, u"j2%1"_s.arg(i)});
+                w.baseColor = colors[i - 1];
+                tw.wires.push_back(w);
+            }
+            tw.wires[1].stripeColor = u"WHT"_s;
+            tw.cables = {testing::cable(u"c1"_s, u"TP1"_s, {u"t1"_s, u"t2"_s}),
+                         testing::cable(u"c2"_s, u"CAN"_s, {u"t3"_s, u"t4"_s, u"t5"_s, u"t6"_s, u"t7"_s})};
+            tw.cables[1].shieldWireId = u"t8"_s;
+            tw.schematic.placements[u"j1"_s] = SchematicPlacement{QPointF(0, 0), false, 0, {}};
+            tw.schematic.placements[u"j2"_s] = SchematicPlacement{QPointF(500, 0), false, 0, {}};
+            tw.layoutNodes = {testing::node(u"n1"_s, LayoutNodeType::Connector, u"j1"_s),
+                              testing::node(u"n2"_s, LayoutNodeType::Connector, u"j2"_s)};
+            tw.layoutNodes[1].position = QPointF(400, 0);
+            tw.layoutSegments = {testing::segment(u"s1"_s, u"n1"_s, u"n2"_s, 1000)};
+            const QString twFile = out + u"/twist.tbh"_s;
+            QVERIFY(io::writeTbhFile(twFile, tw, nullptr));
+            QVERIFY(window.openFile(twFile));
+            window.findChild<QTabWidget *>()->setCurrentIndex(0);
+            QTest::qWait(20);
+            schematic->resetTransform();
+            schematic->scale(1.5, 1.5);
+            schematic->centerOn(560, 130);
+            window.grab().save(out + u"/twist-schematic.png"_s);
+            window.findChild<QTabWidget *>()->setCurrentIndex(1);
+            QTest::qWait(20);
+            auto *layout = window.findChild<LayoutView *>();
+            layout->resetTransform();
+            layout->scale(4, 4);
+            layout->centerOn(200, 0);
+            window.grab().save(out + u"/twist-layout.png"_s);
+        }
         QFile::remove(libraryStore::userLibraryPath());
     }
 

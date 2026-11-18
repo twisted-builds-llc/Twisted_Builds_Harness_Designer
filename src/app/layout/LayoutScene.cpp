@@ -295,6 +295,13 @@ void LayoutScene::refreshCaptions()
     QHash<QString, const Wire *> wiresById;
     for (const Wire &w : h.wires)
         wiresById.insert(w.id, &w);
+    QHash<QString, int> twistGroup; // conductor wire id -> its twisted cable's index
+    for (size_t c = 0; c < h.cables.size(); ++c) {
+        if (h.cables[c].twisted) {
+            for (const QString &id : h.cables[c].wireIds)
+                twistGroup.insert(id, int(c));
+        }
+    }
     for (LayoutSegmentItem *item : std::as_const(m_segments)) {
         const LayoutSegment &s = item->segment();
         const auto wires = usage.value(s.id); // in model order: stripes line up across segments
@@ -331,10 +338,21 @@ void LayoutScene::refreshCaptions()
         item->setToolTip(tip.join(QStringLiteral(" \u00b7 ")));
         std::vector<LayoutSegmentItem::WireStripe> stripes;
         stripes.reserve(wires.size());
-        for (const QString &id : wires) {
-            const Wire *w = wiresById.value(id);
-            stripes.push_back({w ? wireColor(w->baseColor) : QColor(), w ? wireColor(w->stripeColor) : QColor(),
-                               w && w->factory});
+        // A twisted cable's conductors side by side, where its first one comes, so they can
+        // twist around each other; the same order on every segment.
+        std::vector<bool> placed(wires.size(), false);
+        for (size_t i = 0; i < wires.size(); ++i) {
+            if (placed[i])
+                continue;
+            const int group = twistGroup.value(wires[i], -1);
+            for (size_t j = i; j < wires.size(); ++j) {
+                if (placed[j] || (j != i && (group < 0 || twistGroup.value(wires[j], -1) != group)))
+                    continue;
+                placed[j] = true;
+                const Wire *w = wiresById.value(wires[j]);
+                stripes.push_back({w ? wireColor(w->baseColor) : QColor(), w ? wireColor(w->stripeColor) : QColor(),
+                                   w && w->factory, group});
+            }
         }
         item->setWires(std::move(stripes));
         item->update();

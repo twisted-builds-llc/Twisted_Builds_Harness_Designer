@@ -33,10 +33,15 @@ QPointF snapToCanvasGrid(const QPointF &point)
                    std::round(point.y() / kCanvasGrid) * kCanvasGrid);
 }
 
-void drawCanvasBackground(QPainter *painter, const QRectF &rect, const QPalette &palette)
+QColor canvasBackgroundColor(const QPalette &palette)
 {
     const QColor base = palette.color(QPalette::Base);
-    painter->fillRect(rect, base.darker(base.lightness() > 128 ? 103 : 115));
+    return base.darker(base.lightness() > 128 ? 103 : 115);
+}
+
+void drawCanvasBackground(QPainter *painter, const QRectF &rect, const QPalette &palette)
+{
+    painter->fillRect(rect, canvasBackgroundColor(palette));
     const qreal scale = painter->worldTransform().m11();
     constexpr qreal minor = 20;
     constexpr qreal major = 100;

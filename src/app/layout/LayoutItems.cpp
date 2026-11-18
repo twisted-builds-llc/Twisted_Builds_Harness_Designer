@@ -3,6 +3,7 @@
 
 #include "layout/LayoutScene.h"
 #include "ui/CanvasView.h"
+#include "ui/Twist.h"
 
 #include <QApplication>
 #include <QPainter>
@@ -105,6 +106,37 @@ QPainterPath block(qreal from, qreal to, qreal width, const QPointF &direction)
 constexpr qreal kStraightTolerance = 4;
 constexpr int kCurveSamples = 32;
 constexpr qreal kHandleRadius = 5;
+
+struct AlongPoint
+{
+    QPointF point;
+    QPointF normal;
+    qreal distance; // from the first point, along the line
+};
+
+// `samples` (points with unit normals) filled in every `step` or less, with the distance
+// along the line.
+std::vector<AlongPoint> densePoints(const std::vector<std::pair<QPointF, QPointF>> &samples, qreal step)
+{
+    std::vector<AlongPoint> result;
+    qreal distance = 0;
+    for (size_t i = 0; i + 1 < samples.size(); ++i) {
+        const auto &[p0, n0] = samples[i];
+        const auto &[p1, n1] = samples[i + 1];
+        const qreal length = QLineF(p0, p1).length();
+        const int steps = std::max(1, int(std::ceil(length / step)));
+        for (int k = 0; k < steps; ++k) {
+            const qreal u = qreal(k) / steps;
+            QPointF n = n0 + (n1 - n0) * u;
+            const qreal nl = std::hypot(n.x(), n.y());
+            result.push_back({p0 + (p1 - p0) * u, nl > 1e-9 ? n / nl : n0, distance + length * u});
+        }
+        distance += length;
+    }
+    if (!samples.empty())
+        result.push_back({samples.back().first, samples.back().second, distance});
+    return result;
+}
 
 } // namespace
 
@@ -743,23 +775,64 @@ void LayoutSegmentItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
         // One stripe per wire, side by side across the bundle, following the curve.
         const auto points = samples();
         const qreal pitch = width / qreal(m_wires.size());
-        for (size_t i = 0; i < m_wires.size(); ++i) {
-            const qreal offset = -width / 2 + pitch * (qreal(i) + 0.5);
-            QPolygonF line;
-            line.reserve(qsizetype(points.size()));
-            for (const auto &[point, normal] : points)
-                line.append(point + normal * offset);
-            // Slight overlap so antialiasing leaves no gaps between stripes.
-            // Factory wires (already there) are grey, so the add-on stands out.
-            const QColor factory = mix(base, text, 0.45);
-            painter->setPen(QPen(m_wires[i].factory ? factory : visibleWireColor(m_wires[i].base, pal), pitch + 0.4,
-                                 Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
-            painter->drawPolyline(line);
-            if (m_wires[i].stripe.isValid() && !m_wires[i].factory) {
-                painter->setPen(QPen(visibleWireColor(m_wires[i].stripe, pal), pitch * 0.4, Qt::SolidLine,
-                                     Qt::FlatCap, Qt::RoundJoin));
+        // Factory wires (already there) are grey, so the add-on stands out.
+        const QColor factory = mix(base, text, 0.45);
+        auto colorOf = [&](const WireStripe &w) { return w.factory ? factory : visibleWireColor(w.base, pal); };
+        auto stripeOf = [&](const WireStripe &w) {
+            return w.stripe.isValid() && !w.factory ? visibleWireColor(w.stripe, pal) : QColor();
+        };
+        for (size_t i = 0; i < m_wires.size();) {
+            size_t count = 1;
+            while (m_wires[i].twist >= 0 && i + count < m_wires.size() && m_wires[i + count].twist == m_wires[i].twist)
+                ++count;
+            const qreal first = -width / 2 + pitch * (qreal(i) + 0.5);
+            if (count < 2) {
+                QPolygonF line;
+                line.reserve(qsizetype(points.size()));
+                for (const auto &[point, normal] : points)
+                    line.append(point + normal * first);
+                // Slight overlap so antialiasing leaves no gaps between stripes.
+                painter->setPen(QPen(colorOf(m_wires[i]), pitch + 0.4, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
                 painter->drawPolyline(line);
+                if (const QColor stripe = stripeOf(m_wires[i]); stripe.isValid()) {
+                    painter->setPen(QPen(stripe, pitch * 0.4, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+                    painter->drawPolyline(line);
+                }
+            } else {
+                // A twisted cable: its stripes wind around each other in their share of the
+                // bundle, one full twist every few bundle widths.
+                const qreal middle = first + pitch * qreal(count - 1) / 2;
+                const qreal radius = pitch * qreal(count - 1) / 2;
+                const qreal lay = std::max(14.0, 3 * pitch * qreal(count));
+                const auto along = densePoints(points, 1.5);
+                QPolygonF band;
+                for (const auto &[point, normal, distance] : along)
+                    band.append(point + normal * middle);
+                painter->setPen(QPen(mix(base, text, 0.6), pitch * qreal(count) + 0.4, Qt::SolidLine, Qt::FlatCap,
+                                     Qt::RoundJoin));
+                painter->drawPolyline(band);
+                std::vector<TwistStrand> strands(count);
+                for (size_t k = 0; k < count; ++k) {
+                    for (const auto &[point, normal, distance] : along) {
+                        const TwistPoint p = twistAt(int(k), int(count), distance / lay);
+                        strands[k].points.push_back(point + normal * (middle + radius * p.offset));
+                        strands[k].front.push_back(p.front);
+                    }
+                }
+                drawTwist(strands, [&](size_t k, const QPolygonF &run) {
+                    const WireStripe &w = m_wires[i + k];
+                    // A dark edge shows where one strand passes over another.
+                    painter->setPen(QPen(mix(base, text, 0.7), pitch + 1, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+                    painter->drawPolyline(run);
+                    painter->setPen(QPen(colorOf(w), pitch, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+                    painter->drawPolyline(run);
+                    if (const QColor stripe = stripeOf(w); stripe.isValid()) {
+                        painter->setPen(QPen(stripe, pitch * 0.4, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+                        painter->drawPolyline(run);
+                    }
+                });
             }
+            i += count;
         }
     }
     if (isSelected()) {

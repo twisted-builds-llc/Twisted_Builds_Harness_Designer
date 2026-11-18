@@ -15,6 +15,7 @@
 #include "schematic/SchematicView.h"
 #include "ui/ConnectorEdits.h"
 #include "ui/MainWindow.h"
+#include "ui/Twist.h"
 #include "ui/theme/Theme.h"
 
 #include <QElapsedTimer>
@@ -794,6 +795,29 @@ private slots:
     // Selected wires become a twisted cable, drawn as a mark across their leads where they
     // leave a connector side by side; a shield wire gets loose ends to attach; deleting the
     // cable only ungroups.
+    // Strands of a twist: angle 2*pi*(turns + i/n), offset -cos, in front where sin > 0.
+    void twistStrands()
+    {
+        auto near = [](qreal a, qreal b) { return std::abs(a - b) < 1e-9; };
+        // Pair at the start: strand 0 at 0 (cos 1, top), strand 1 at pi (cos -1, bottom).
+        QVERIFY(near(twistAt(0, 2, 0).offset, -1));
+        QVERIFY(near(twistAt(1, 2, 0).offset, 1));
+        // A quarter turn on: strand 0 at pi/2 (middle, in front), strand 1 at 3pi/2 (middle,
+        // behind): they cross with one over the other.
+        QVERIFY(near(twistAt(0, 2, 0.25).offset, 0));
+        QVERIFY(twistAt(0, 2, 0.25).front);
+        QVERIFY(near(twistAt(1, 2, 0.25).offset, 0));
+        QVERIFY(!twistAt(1, 2, 0.25).front);
+        // Half a turn: the pair has swapped sides.
+        QVERIFY(near(twistAt(0, 2, 0.5).offset, 1));
+        // Five strands: strand 1 at 2pi/5 (72 degrees), offset -cos 72 = -0.309017, in front.
+        QVERIFY(std::abs(twistAt(1, 5, 0).offset + 0.309017) < 1e-6);
+        QVERIFY(twistAt(1, 5, 0).front);
+        // Strand 3 at 6pi/5 (216 degrees), offset -cos 216 = 0.809017, behind.
+        QVERIFY(std::abs(twistAt(3, 5, 0).offset - 0.809017) < 1e-6);
+        QVERIFY(!twistAt(3, 5, 0).front);
+    }
+
     void cablesOnTheSchematic()
     {
         Fixture f;
@@ -831,21 +855,28 @@ private slots:
         CableItem *item = f.scene()->cableItem(cable.id);
         QVERIFY(item && item->isSelected());
         // ECU 1 and 3 leave ECU's right side 40 apart, and SENSOR 1 and 2 its left side: a
-        // mark at each end, kMarkOffset along the leads.
+        // twisted section at each end, kTwistStart along the leads.
         QCOMPARE(item->marks().size(), size_t(2));
         QVERIFY(item->tags().empty());
         const WireItem *w1 = f.scene()->wireItem(u"w1"_s);
         const CableItem::Mark &atEcu = item->marks()[0];
-        QCOMPARE(atEcu.x, w1->anchorA().point.x() + CableItem::kMarkOffset);
-        QCOMPARE(atEcu.ys.size(), size_t(2));
-        QCOMPARE(atEcu.ys[1] - atEcu.ys[0], 2 * ConnectorItem::kRowHeight);
+        QCOMPARE(atEcu.left, w1->anchorA().point.x() + CableItem::kTwistStart);
+        QVERIFY(atEcu.right - atEcu.left >= CableItem::kMinTwistLength);
+        QVERIFY(atEcu.right - atEcu.left <= CableItem::kTwistLength);
+        QCOMPARE(atEcu.lanes.size(), size_t(2));
+        QCOMPARE(atEcu.lanes[1].y - atEcu.lanes[0].y, 2 * ConnectorItem::kRowHeight);
+        QCOMPARE(atEcu.lanes[0].baseColor, w1->wire().baseColor); // w1 is on ECU pin 1, the top lane
+        // The conductors are not drawn under the twisted sections; other wires are.
+        QCOMPARE(w1->cutouts().size(), size_t(2));
+        QCOMPARE(f.scene()->wireItem(u"w4"_s)->cutouts(), w1->cutouts());
+        QVERIFY(f.scene()->wireItem(u"w5"_s)->cutouts().empty());
         loadable();
 
         // Moving SENSOR keeps the marks on the leads.
         SchematicPlacement moved = *f.model()->placement(u"sensor"_s);
         moved.position += QPointF(100, 40);
         stack->push(new SetPlacementsCommand(f.model(), {{u"sensor"_s, moved}}, {}));
-        QCOMPARE(item->marks()[1].x, w1->anchorB().point.x() - CableItem::kMarkOffset);
+        QCOMPARE(item->marks()[1].right, w1->anchorB().point.x() - CableItem::kTwistStart);
 
         // A shield wire between two bare ends, drawn dotted.
         QVERIFY(f.view.addShieldWire(cable.id));
@@ -880,6 +911,7 @@ private slots:
         f.view.deleteSelection();
         QVERIFY(!f.model()->find<Cable>(apartId));
         QVERIFY(!f.scene()->cableItem(apartId));
+        QVERIFY(f.scene()->wireItem(u"w5"_s)->cutouts().empty());
         QCOMPARE(f.model()->harness().wires.size(), before.wires.size() + 1); // + the shield
         loadable();
 

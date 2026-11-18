@@ -210,6 +210,12 @@ void SchematicScene::addCable(const Cable &cable)
 
 void SchematicScene::removeCable(const QString &id)
 {
+    if (CableItem *item = m_cables.value(id)) {
+        for (const QString &wireId : item->cable().wireIds) {
+            if (WireItem *wire = m_wires.value(wireId))
+                wire->setCutouts({});
+        }
+    }
     delete m_cables.take(id);
     for (auto it = m_cablesByWire.begin(); it != m_cablesByWire.end();) {
         if (it.value() == id)
@@ -228,6 +234,12 @@ void SchematicScene::updateCable(const QString &cableId)
     for (const QString &id : item->cable().wireIds)
         conductors.push_back(m_wires.value(id));
     item->follow(conductors);
+    // The cable draws its twisted conductors itself there.
+    const std::vector<QRectF> cutouts = item->conductorCutouts();
+    for (const QString &id : item->cable().wireIds) {
+        if (WireItem *wire = m_wires.value(id))
+            wire->setCutouts(cutouts);
+    }
 }
 
 void SchematicScene::updateCablesOfWire(const QString &wireId)
@@ -494,6 +506,10 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
     case EntityKind::Cable:
         if (CableItem *item = m_cables.value(id)) {
             const Cable &cable = *m_model->find<Cable>(id);
+            for (const QString &wireId : item->cable().wireIds) {
+                if (WireItem *wire = m_wires.value(wireId))
+                    wire->setCutouts({}); // updateCable() sets them again on the conductors
+            }
             item->setCable(cable);
             // Conductors may have changed: index them again.
             for (auto it = m_cablesByWire.begin(); it != m_cablesByWire.end();)

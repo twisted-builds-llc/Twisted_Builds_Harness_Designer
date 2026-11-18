@@ -40,6 +40,7 @@ add_library(tbh_app_lib STATIC
     ui/properties/WirePanel.h ui/properties/WirePanel.cpp
     ui/PreferencesDialog.h ui/PreferencesDialog.cpp
     ui/theme/Theme.h ui/theme/Theme.cpp
+    ui/Twist.h ui/Twist.cpp
     ui/UnitsCombo.h ui/UnitsCombo.cpp
     ui/WireColors.h ui/WireColors.cpp
 )

@@ -140,6 +140,9 @@ public:
         QColor base;
         QColor stripe; // invalid = no stripe
         bool factory = false; // an existing (factory) wire: drawn grey
+        // Wires with the same twist group (>= 0), next to each other, are a twisted cable's
+        // conductors: drawn twisting around each other along the segment.
+        int twist = -1;
         bool operator==(const WireStripe &) const = default;
     };
     // Wires routed through, in a stable order; heavier bundles draw thicker.

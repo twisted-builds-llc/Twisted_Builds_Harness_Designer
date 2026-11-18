@@ -16,6 +16,8 @@ class InlineEdit;
 inline constexpr qreal kCanvasGrid = 10;
 // Nearest grid point.
 QPointF snapToCanvasGrid(const QPointF &point);
+// Fill color under the grid lines.
+QColor canvasBackgroundColor(const QPalette &palette);
 // Background and grid lines shared by the editors' scenes.
 void drawCanvasBackground(QPainter *painter, const QRectF &rect, const QPalette &palette);
 
