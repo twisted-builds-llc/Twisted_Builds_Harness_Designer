@@ -36,6 +36,7 @@ public:
     WireItem *wireItem(const QString &id) const { return m_wires.value(id); }
     FreeEndItem *freeEndItem(const QString &id) const { return m_freeEnds.value(id); }
     NoteItem *noteItem(const QString &id) const { return m_notes.value(id); }
+    CableItem *cableItem(const QString &id) const { return m_cables.value(id); }
     PlacedItem *placedItem(const QString &key) const;
 
     // The sheet shown. Items on other sheets are hidden; a wire with one end here and the
@@ -97,10 +98,18 @@ private:
     void addFreeEnd(const FreeEnd &end);
     void addWire(const Wire &wire);
     void addNote(const Note &note); // schematic notes only
+    void addCable(const Cable &cable);
+    void removeCable(const QString &id);
+    // Lays a cable's marks out over its conductors as drawn now.
+    void updateCable(const QString &cableId);
+    void updateCablesOfWire(const QString &wireId);
+    // Marks every cable's shield wire (drawn dotted).
+    void applyShieldWires();
     void applyPlacement(PlacedItem *item);
     void indexWire(const Wire &wire);
     void unindexWire(const QString &wireId);
     void updateWiresOf(const QString &key);
+    void routeWire(const QString &wireId); // updateWire() without its cables
     static QStringList endKeys(const Wire &wire);
 
     HarnessModel *m_model;
@@ -118,6 +127,8 @@ private:
     QHash<QString, WireItem *> m_wires;
     QHash<QString, FreeEndItem *> m_freeEnds;
     QHash<QString, NoteItem *> m_notes;
+    QHash<QString, CableItem *> m_cables;
+    QMultiHash<QString, QString> m_cablesByWire; // conductor id -> cable id
     QSet<QString> m_autoPlaced; // items without a placement, laid out by nextFreePosition()
     QMultiHash<QString, QString> m_wiresByItem;   // connector/splice/free end id -> wire id
 };

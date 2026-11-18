@@ -3,11 +3,18 @@
 
 #include <QUuid>
 
+#include <algorithm>
+
 namespace tbh {
 
 QString newId()
 {
     return QUuid::createUuid().toString(QUuid::WithoutBraces);
+}
+
+bool Cable::contains(const QString &wireId) const
+{
+    return wireId == shieldWireId || std::find(wireIds.begin(), wireIds.end(), wireId) != wireIds.end();
 }
 
 QString unitsSymbol(Units units)

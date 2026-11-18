@@ -47,6 +47,17 @@ Harness sample()
     return h;
 }
 
+
+// A twisted, built cable of `wires` (no shield).
+Cable cable(const QString &id, const QString &label, std::vector<QString> wires)
+{
+    Cable c;
+    c.id = id;
+    c.label = label;
+    c.wireIds = std::move(wires);
+    return c;
+}
+
 } // namespace
 
 class TestModelOps : public QObject
@@ -217,6 +228,50 @@ private slots:
         QVERIFY(f.freeEnds[0].id != u"f1"_s);
         QVERIFY(f.schematic.placements.count(f.freeEnds[0].id));
         QCOMPARE(f.schematic.placements.size(), size_t(3));
+    }
+
+    // pruneCables drops missing conductors, clears a missing shield and removes a cable left
+    // with fewer than two conductors.
+    void pruneCablesKeepsCablesValid()
+    {
+        Harness h = sample();
+        h.cables = {cable(u"cb1"_s, u"TP"_s, {u"w1"_s, u"w2"_s, u"w3"_s}),
+                    cable(u"cb2"_s, u"PAIR"_s, {u"w1"_s, u"w2"_s})};
+        h.cables[0].shieldWireId = u"gone"_s;
+        std::erase_if(h.wires, [](const Wire &w) { return w.id == u"w2"_s; });
+        pruneCables(h);
+        QCOMPARE(h.cables.size(), size_t(1)); // cb2 kept only w1
+        QCOMPARE(h.cables[0].id, u"cb1"_s);
+        QCOMPARE(h.cables[0].wireIds, (std::vector<QString>{u"w1"_s, u"w3"_s}));
+        QVERIFY(!h.cables[0].shielded());
+        QCOMPARE(cablesOfWire(h, u"w3"_s).size(), size_t(1));
+        QVERIFY(cablesOfWire(h, u"w2"_s).empty());
+    }
+
+    // A copied cable keeps the conductors and shield that came along, with the new wire ids.
+    void fragmentCopiesCablesOfCopiedWires()
+    {
+        Harness h = sample();
+        // Pair w2 + w3 shielded by w1; a second cable w1 + w2.
+        Cable pair = cable(u"cb1"_s, u"TP"_s, {u"w2"_s, u"w3"_s});
+        pair.shieldWireId = u"w1"_s;
+        h.cables = {pair, cable(u"cb2"_s, u"X"_s, {u"w1"_s, u"w2"_s})};
+        // J1 + S1 copies w2 and w3 only (w1 goes to J2): cb1 loses its shield, cb2 is left
+        // with one conductor and is not copied.
+        Harness f = extractFragment(h, {u"j1"_s}, {u"s1"_s});
+        QCOMPARE(f.cables.size(), size_t(1));
+        QCOMPARE(f.cables[0].wireIds, (std::vector<QString>{u"w2"_s, u"w3"_s}));
+        QVERIFY(!f.cables[0].shielded());
+        assignNewIds(f);
+        QVERIFY(f.cables[0].id != u"cb1"_s);
+        QCOMPARE(f.cables[0].wireIds, (std::vector<QString>{f.wires[0].id, f.wires[1].id}));
+        QVERIFY(!f.cables[0].shielded());
+
+        // Copying everything keeps the shield, remapped.
+        Harness all = extractFragment(h, {u"j1"_s, u"j2"_s}, {u"s1"_s});
+        assignNewIds(all);
+        QCOMPARE(all.cables.size(), size_t(2));
+        QCOMPARE(all.cables[0].shieldWireId, all.wires[0].id);
     }
 
     void fillEmptyCircuitTextCopiesIntoEmptyPin()

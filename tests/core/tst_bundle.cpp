@@ -101,6 +101,36 @@ private slots:
         QCOMPARE(bundleDiameter(h, lib, {}).diameterMm, 0.0);
     }
 
+    // A bought cable with all its conductors on the segment counts as its jacket; a built
+    // cable's shield wire is not counted.
+    void cablesInTheBundle()
+    {
+        Harness h = sampleWithTypes();
+        const Library lib = library();
+        const auto usage = wiresBySegment(h, LayoutGraph(h));
+        Cable cb = cable(u"cb"_s, u"CAN"_s, {u"w1"_s, u"w2"_s});
+        cb.source = CableSource::Bought;
+        cb.jacketOdMm = 4.5;
+        h.cables = {cb};
+        // seg1: jacket 4.5 + w4 1.5: (20.25 + 2.25) / 0.70 = 32.142857; sqrt = 5.669467 mm.
+        BundleDiameter b = bundleDiameter(h, lib, usage.value(u"seg1"_s));
+        QCOMPARE(b.wireCount, 3);
+        QVERIFY(std::abs(b.diameterMm - 5.669467) < 1e-6);
+        // seg3 carries w2 only (w1 is not there): w2 counts as a wire, 2.0 / sqrt(0.7).
+        b = bundleDiameter(h, lib, usage.value(u"seg3"_s));
+        QVERIFY(std::abs(b.diameterMm - 2.0 / std::sqrt(0.7)) < 1e-9);
+        // Without a jacket diameter its wires count one by one (3.826599, as above).
+        h.cables[0].jacketOdMm.reset();
+        b = bundleDiameter(h, lib, usage.value(u"seg1"_s));
+        QVERIFY(std::abs(b.diameterMm - 3.826599) < 1e-6);
+        // Built pair w1 + w2 shielded by w4: 4 + 4 = 8; / 0.70 = 11.428571; sqrt = 3.380617 mm.
+        h.cables[0].source = CableSource::Built;
+        h.cables[0].shieldWireId = u"w4"_s;
+        b = bundleDiameter(h, lib, usage.value(u"seg1"_s));
+        QCOMPARE(b.wireCount, 2);
+        QVERIFY(std::abs(b.diameterMm - 3.380617) < 1e-6);
+    }
+
     void gaugeChangeChangesDiameter()
     {
         // w4 from 20 AWG (1.5) to 18 AWG (2.0): sum 12; / 0.7 = 17.142857; sqrt = 4.140393 mm.
@@ -168,6 +198,30 @@ private slots:
         QCOMPARE(s.layoutSegments, (QSet<QString>{u"seg1"_s, u"seg2"_s}));
         QCOMPARE(s.layoutNodes, (QSet<QString>{u"n1"_s, u"n2"_s, u"n3"_s}));
         QVERIFY(s.splices.isEmpty());
+    }
+
+    // A wire in a cable lights up the rest of the cable; a selected cable lights its wires.
+    void highlightFromCable()
+    {
+        Harness h = sample();
+        Cable cb = cable(u"tp"_s, u"TP"_s, {u"w1"_s, u"w2"_s});
+        cb.shieldWireId = u"w3"_s;
+        h.cables = {cb};
+        HighlightSeed seed;
+        seed.wires = {u"w1"_s};
+        HighlightSet s = relatedItems(h, LayoutGraph(h), seed);
+        QCOMPARE(s.wires, (QSet<QString>{u"w1"_s, u"w2"_s, u"w3"_s}));
+        QCOMPARE(s.cables, QSet<QString>{u"tp"_s});
+        seed = {};
+        seed.cables = {u"tp"_s};
+        s = relatedItems(h, LayoutGraph(h), seed);
+        QCOMPARE(s.wires, (QSet<QString>{u"w1"_s, u"w2"_s, u"w3"_s}));
+        // A wire outside the cable does not bring it along.
+        seed = {};
+        seed.wires = {u"w4"_s};
+        s = relatedItems(h, LayoutGraph(h), seed);
+        QCOMPARE(s.wires, QSet<QString>{u"w4"_s});
+        QVERIFY(s.cables.isEmpty());
     }
 
     void highlightFromPin()

@@ -67,6 +67,8 @@ void SchematicScene::rebuild()
     m_wires.clear();
     m_freeEnds.clear();
     m_notes.clear();
+    m_cables.clear();
+    m_cablesByWire.clear();
     m_wiresByItem.clear();
     m_autoPlaced.clear();
 
@@ -83,9 +85,14 @@ void SchematicScene::rebuild()
         addWire(w);
     for (const Note &n : h.notes)
         addNote(n);
+    for (const Cable &c : h.cables)
+        addCable(c);
     m_building = false;
     for (const Wire &w : h.wires)
         updateWire(w.id);
+    for (const Cable &c : h.cables)
+        updateCable(c.id);
+    applyShieldWires();
     syncSelectionFromModel();
     if (m_sheet != previousSheet)
         emit currentSheetChanged(m_sheet);
@@ -188,6 +195,59 @@ void SchematicScene::addWire(const Wire &wire)
     indexWire(wire);
     if (!m_building)
         updateWire(wire.id);
+}
+
+void SchematicScene::addCable(const Cable &cable)
+{
+    auto *item = new CableItem(cable);
+    addItem(item);
+    m_cables.insert(cable.id, item);
+    for (const QString &id : cable.wireIds)
+        m_cablesByWire.insert(id, cable.id);
+    if (!m_building)
+        updateCable(cable.id);
+}
+
+void SchematicScene::removeCable(const QString &id)
+{
+    delete m_cables.take(id);
+    for (auto it = m_cablesByWire.begin(); it != m_cablesByWire.end();) {
+        if (it.value() == id)
+            it = m_cablesByWire.erase(it);
+        else
+            ++it;
+    }
+}
+
+void SchematicScene::updateCable(const QString &cableId)
+{
+    CableItem *item = m_cables.value(cableId);
+    if (!item)
+        return;
+    std::vector<const WireItem *> conductors;
+    for (const QString &id : item->cable().wireIds)
+        conductors.push_back(m_wires.value(id));
+    item->follow(conductors);
+}
+
+void SchematicScene::updateCablesOfWire(const QString &wireId)
+{
+    if (m_building)
+        return;
+    const QList<QString> cables = m_cablesByWire.values(wireId);
+    for (const QString &id : cables)
+        updateCable(id);
+}
+
+void SchematicScene::applyShieldWires()
+{
+    QSet<QString> shields;
+    for (const Cable &c : m_model->harness().cables) {
+        if (c.shielded())
+            shields.insert(c.shieldWireId);
+    }
+    for (auto it = m_wires.cbegin(); it != m_wires.cend(); ++it)
+        it.value()->setShield(shields.contains(it.key()));
 }
 
 void SchematicScene::applyPlacement(PlacedItem *item)
@@ -312,6 +372,12 @@ Anchor SchematicScene::endAnchor(const Wire &wire, bool endB) const
 
 void SchematicScene::updateWire(const QString &wireId)
 {
+    routeWire(wireId);
+    updateCablesOfWire(wireId);
+}
+
+void SchematicScene::routeWire(const QString &wireId)
+{
     WireItem *item = m_wires.value(wireId);
     const Wire *wire = m_model->find<Wire>(wireId);
     if (!item || !wire)
@@ -375,6 +441,11 @@ void SchematicScene::onAdded(EntityKind kind, const QString &id)
         break;
     case EntityKind::Wire:
         addWire(*m_model->find<Wire>(id));
+        applyShieldWires(); // undoing a delete may bring back a shield
+        break;
+    case EntityKind::Cable:
+        addCable(*m_model->find<Cable>(id));
+        applyShieldWires();
         break;
     }
 }
@@ -420,6 +491,19 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
             updateWire(id);
         }
         break;
+    case EntityKind::Cable:
+        if (CableItem *item = m_cables.value(id)) {
+            const Cable &cable = *m_model->find<Cable>(id);
+            item->setCable(cable);
+            // Conductors may have changed: index them again.
+            for (auto it = m_cablesByWire.begin(); it != m_cablesByWire.end();)
+                it = it.value() == id ? m_cablesByWire.erase(it) : std::next(it);
+            for (const QString &wireId : cable.wireIds)
+                m_cablesByWire.insert(wireId, id);
+            updateCable(id);
+            applyShieldWires();
+        }
+        break;
     }
 }
 
@@ -446,6 +530,10 @@ void SchematicScene::onRemoved(EntityKind kind, const QString &id)
     case EntityKind::Wire:
         delete m_wires.take(id);
         unindexWire(id);
+        break;
+    case EntityKind::Cable:
+        removeCable(id);
+        applyShieldWires();
         break;
     }
 }
@@ -484,6 +572,9 @@ void SchematicScene::syncSelectionToModel()
         case NoteItemType:
             selection.notes.insert(static_cast<NoteItem *>(item)->id());
             break;
+        case CableItemType:
+            selection.cables.insert(static_cast<CableItem *>(item)->id());
+            break;
         default:
             break;
         }
@@ -510,6 +601,8 @@ void SchematicScene::syncSelectionFromModel()
         it.value()->setSelected(s.freeEnds.contains(it.key()));
     for (auto it = m_notes.cbegin(); it != m_notes.cend(); ++it)
         it.value()->setSelected(s.notes.contains(it.key()));
+    for (auto it = m_cables.cbegin(); it != m_cables.cend(); ++it)
+        it.value()->setSelected(s.cables.contains(it.key()));
     m_syncingSelection = false;
 }
 
@@ -584,6 +677,8 @@ void SchematicScene::applyHighlight()
         it.value()->setOpacity(set ? opacity(set->wires, it.key()) : 1.0);
     for (auto it = m_freeEnds.cbegin(); it != m_freeEnds.cend(); ++it)
         it.value()->setOpacity(set ? opacity(set->freeEnds, it.key()) : 1.0);
+    for (auto it = m_cables.cbegin(); it != m_cables.cend(); ++it)
+        it.value()->setOpacity(set ? opacity(set->cables, it.key()) : 1.0);
 }
 
 void SchematicScene::setSearchText(const QString &text)

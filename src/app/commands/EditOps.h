@@ -23,17 +23,21 @@ std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString
                                       const QSet<QString> &wireIds);
 
 // Also removes the notes in `noteIds`. Layout nodes of removed items stay, unassigned.
+// Removed wires leave their cables (pruneCables); a cable left with fewer than two
+// conductors is removed.
 std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QString> &connectorIds,
                                           const QSet<QString> &spliceIds,
                                           const QSet<QString> &freeEndIds,
                                           const QSet<QString> &wireIds,
-                                          const QSet<QString> &noteIds = {});
+                                          const QSet<QString> &noteIds = {},
+                                          const QSet<QString> &cableIds = {});
 
 // Wires attached to pins of the connector that are absent from `newPins`.
 std::vector<QString> wiresLostByPinChange(const Harness &harness, const Connector &connector,
                                           const std::vector<Pin> &newPins);
 
-// Replaces the connector's pins, deleting wires on pins that disappear.
+// Replaces the connector's pins, deleting wires on pins that disappear (and dropping them
+// from their cables, as removeItems()).
 std::unique_ptr<QUndoCommand> setConnectorPins(HarnessModel *model, const QString &connectorId,
                                                std::vector<Pin> newPins, const QString &text);
 
@@ -148,7 +152,8 @@ std::unique_ptr<QUndoCommand> setWireEnd(HarnessModel *model, const QString &wir
 // on `sheetId`. Routes and length overrides are dropped (each piece is shorter). Returns null
 // if there is no such wire. `newWireId`, if given, receives the id of the second piece, and
 // `cutEndIds` the ids of the cut ends at `cutA` and `cutB`. The cut ends are not placed in
-// the layout (see SchematicView::cutWireAt()).
+// the layout (see SchematicView::cutWireAt()). A cut cable conductor keeps both pieces in its
+// cables; a cut shield keeps the first piece as the shield.
 std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId, QPointF cutA,
                                       QPointF cutB, const QString &sheetId, QString *newWireId = nullptr,
                                       std::pair<QString, QString> *cutEndIds = nullptr);
@@ -161,6 +166,26 @@ std::unique_ptr<QUndoCommand> replaceFreeEndWithSplice(HarnessModel *model, cons
 // Replaces a free end with `updated`. A kind change also changes the type of its layout
 // node (eyelet or flying lead). Returns null if nothing changes.
 std::unique_ptr<QUndoCommand> updateFreeEnd(HarnessModel *model, const FreeEnd &updated, const QString &text);
+
+// ---- Cables ----
+// Deleting a cable (removeItems' `cableIds`) only ungroups: its wires stay.
+
+// Groups wires into a new cable (twisted, built) labeled `label`, conductors in model order.
+// Wires that are a cable's shield are left out. Null if fewer than two conductors remain;
+// the new id goes to `newCableId`.
+std::unique_ptr<QUndoCommand> makeCable(HarnessModel *model, const std::vector<QString> &wireIds,
+                                        const QString &label, QString *newCableId = nullptr);
+// "TP" + one more than the highest "TP<n>" cable label, e.g. TP1 for none.
+QString nextCableLabel(const Harness &harness);
+// Gives a cable without a shield a shield wire running between two new bare ends at `atA`
+// and `atB` on schematic sheet `sheetId`, named after the cable, with the next circuit id and
+// the first conductor's gauge. Each end is then attached like any wire end (to a pin,
+// splice, eyelet...). Null if there is no such cable or it has a shield.
+std::unique_ptr<QUndoCommand> addShieldWire(HarnessModel *model, const QString &cableId, QPointF atA,
+                                            QPointF atB, const QString &sheetId,
+                                            QString *shieldWireId = nullptr);
+// Deletes the cable's shield wire, and its bare ends no other wire uses. Null without one.
+std::unique_ptr<QUndoCommand> removeShieldWire(HarnessModel *model, const QString &cableId);
 
 // Pins with `count` entries: existing pins are kept, new pins get nextPinLabel() labels.
 std::vector<Pin> resizedPins(const std::vector<Pin> &pins, int count);

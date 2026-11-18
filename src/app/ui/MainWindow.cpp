@@ -23,6 +23,7 @@
 #include "ui/PreferencesDialog.h"
 #include "print/PdfExport.h"
 #include "ui/properties/ConnectorPanel.h"
+#include "ui/properties/CablePanel.h"
 #include "ui/properties/PropertiesPanel.h"
 
 #include <QActionGroup>
@@ -299,6 +300,7 @@ void MainWindow::createDocks()
     auto *properties = new PropertiesPanel(m_document, m_selection, this);
     connect(properties->connectorPanel(), &ConnectorPanel::displayChangeRequested, m_schematic,
             &SchematicView::setConnectorDisplay);
+    connect(properties->cablePanel(), &CablePanel::addShieldRequested, m_schematic, &SchematicView::addShieldWire);
     auto *scroll = new QScrollArea(this);
     scroll->setWidget(properties);
     scroll->setWidgetResizable(true);
@@ -331,6 +333,10 @@ void MainWindow::createDocks()
                 } else if (kind == calc::Problem::Kind::UnroutedWire
                     || kind == calc::Problem::Kind::DuplicateCircuitId) {
                     selection.wires.insert(id);
+                    showEditor(m_schematic);
+                } else if (kind == calc::Problem::Kind::CableSplit
+                           || kind == calc::Problem::Kind::CableWithoutDiameter) {
+                    selection.cables.insert(id);
                     showEditor(m_schematic);
                 } else {
                     selection.layoutSegments.insert(id);

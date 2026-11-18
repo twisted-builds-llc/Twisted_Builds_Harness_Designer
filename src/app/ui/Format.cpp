@@ -64,6 +64,10 @@ WireLengthText describeWireLength(const Harness &harness, const Wire &wire, cons
                     .arg(f(length.baseMm))
                     .arg(length.segmentIds.size())
                     .arg(f(length.endAllowanceAMm), f(length.endAllowanceBMm));
+        if (length.twistTakeUpMm > 0)
+            steps += Tr::tr(" + twist %1 (%2 %)")
+                         .arg(f(length.twistTakeUpMm))
+                         .arg(QLocale().toString(harness.settings.twistTakeUpPercent));
         if (length.serviceLoopMm > 0)
             steps += Tr::tr(" + service loop %1 (%2 %)")
                          .arg(f(length.serviceLoopMm))

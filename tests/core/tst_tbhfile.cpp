@@ -85,6 +85,17 @@ Harness sampleHarness()
     toRing.baseColor = u"BLK"_s;
     toRing.leadA = WireLead::Right;
     h.wires = {pinToPin, toSplice, toRing};
+    Cable cable;
+    cable.id = u"cb1"_s;
+    cable.label = u"CAN"_s;
+    cable.wireIds = {u"w1"_s, u"w2"_s};
+    cable.layLengthMm = 25.4;
+    cable.shieldWireId = u"w3"_s;
+    cable.source = CableSource::Bought;
+    cable.partNumber = u"CBL-2C"_s;
+    cable.jacketOdMm = 4.2;
+    cable.notes = u"drain to ECU only"_s;
+    h.cables = {cable};
     h.freeEnds = {FreeEnd{u"fe-ring"_s, FreeEndKind::RingTerminal, u"GND"_s, u"RING-M6"_s, SchematicSymbol::Ground},
                   FreeEnd{u"fe-cut"_s, FreeEndKind::Cut, {}, {}, {}}};
 
@@ -192,6 +203,7 @@ private slots:
         QCOMPARE(loaded->createdAt, original.createdAt);
         QVERIFY(loaded->connectors == original.connectors);
         QVERIFY(loaded->wires == original.wires);
+        QVERIFY(loaded->cables == original.cables);
         QVERIFY(loaded->splices == original.splices);
         QVERIFY(loaded->layoutNodes == original.layoutNodes);
         QVERIFY(loaded->layoutSegments == original.layoutSegments);
@@ -386,6 +398,81 @@ private slots:
                     layout[u"accessories"] = accessories;
                     e[u"layout.json"_s] = toBytes(layout);
                 }).contains(u"acc1"));
+    }
+
+    // Cables must name at least two existing wires, each once; a shield wire belongs to one
+    // cable and is never a conductor.
+    void cablesAreCheckedOnLoad()
+    {
+        auto withCables = [this](auto edit) {
+            return readErrorAfter([&](io::ZipEntries &e) {
+                QJsonArray cables = QJsonDocument::fromJson(e.at(u"cables.json"_s)).array();
+                edit(cables);
+                e[u"cables.json"_s] = toBytes(cables);
+            });
+        };
+        auto withFirst = [&](auto edit) {
+            return withCables([&](QJsonArray &cables) {
+                QJsonObject c = cables[0].toObject();
+                edit(c);
+                cables[0] = c;
+            });
+        };
+        QVERIFY(withFirst([](QJsonObject &c) { c[u"wireIds"] = QJsonArray{u"w1"_s, u"nope"_s}; }).contains(u"nope"));
+        QVERIFY(withFirst([](QJsonObject &c) { c[u"wireIds"] = QJsonArray{u"w1"_s}; }).contains(u"cb1"));
+        QVERIFY(withFirst([](QJsonObject &c) { c[u"wireIds"] = QJsonArray{u"w1"_s, u"w1"_s}; }).contains(u"w1"));
+        QVERIFY(withFirst([](QJsonObject &c) { c[u"shieldWireId"] = u"nope"_s; }).contains(u"nope"));
+        QVERIFY(withFirst([](QJsonObject &c) { c[u"jacketOdMm"] = 0; }).contains(u"cb1"));
+        // The shield as a conductor of another cable.
+        QVERIFY(withCables([](QJsonArray &cables) {
+                    QJsonObject other = cables[0].toObject();
+                    other[u"id"] = u"cb2"_s;
+                    other[u"wireIds"] = QJsonArray{u"w1"_s, u"w3"_s};
+                    other[u"shieldWireId"] = QString();
+                    cables.append(other);
+                }).contains(u"w3"));
+        // The same shield on two cables.
+        QVERIFY(withCables([](QJsonArray &cables) {
+                    QJsonObject other = cables[0].toObject();
+                    other[u"id"] = u"cb2"_s;
+                    cables.append(other);
+                }).contains(u"w3"));
+        // A wire in two cables as a conductor is fine (two pairs under one shield).
+        QVERIFY(withCables([](QJsonArray &cables) {
+                    QJsonObject other = cables[0].toObject();
+                    other[u"id"] = u"cb2"_s;
+                    other[u"shieldWireId"] = QString();
+                    cables.append(other);
+                }).isEmpty());
+    }
+
+    // Schema 3 had no cables.json and wrote "conductorKind": "single" on wires. Such a file
+    // opens with no cables, and the retired key is not carried along as an unknown field.
+    void schemaV3OpensWithoutCables()
+    {
+        const QString file = path(u"v3.tbh"_s);
+        QVERIFY(io::writeTbhFile(file, sampleHarness(), nullptr));
+        io::ZipEntries e = readRaw(file);
+        QJsonObject manifest = QJsonDocument::fromJson(e.at(u"manifest.json"_s)).object();
+        manifest[u"schemaVersion"] = 3;
+        e[u"manifest.json"_s] = toBytes(manifest);
+        e.erase(u"cables.json"_s);
+        QJsonArray wires = QJsonDocument::fromJson(e.at(u"wires.json"_s)).array();
+        for (qsizetype i = 0; i < wires.size(); ++i) {
+            QJsonObject wire = wires[i].toObject();
+            wire[u"conductorKind"] = u"single"_s;
+            wires[i] = wire;
+        }
+        e[u"wires.json"_s] = toBytes(wires);
+        writeRaw(file, e);
+
+        QString error;
+        const auto loaded = io::readTbhFile(file, &error);
+        QVERIFY2(loaded, qPrintable(error));
+        QVERIFY(loaded->cables.empty());
+        QVERIFY(!loaded->wires[0].extra.contains(u"conductorKind"));
+        const io::ZipEntries saved = io::serializeHarness(*loaded);
+        QVERIFY(!saved.at(u"wires.json"_s).contains("conductorKind"));
     }
 
     // Schema 2 had no plug part number: a cavity plug's part number was typed in the seal
@@ -617,6 +704,7 @@ private slots:
     {
         Harness h = sampleHarness();
         h.wires.clear();
+        h.cables.clear();
         h.connectors[0].pins.clear();
         const QString file = path(u"pins.tbh"_s);
         QVERIFY(io::writeTbhFile(file, h, nullptr));

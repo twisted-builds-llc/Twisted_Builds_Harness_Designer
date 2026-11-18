@@ -53,6 +53,25 @@ private slots:
         QCOMPARE(pageObjects(pdf), 4);
     }
 
+    // Cables add a table under the cut list (same sheet for a small harness).
+    void cablesPrintUnderTheCutList()
+    {
+        QTemporaryDir dir;
+        HarnessModel model;
+        Harness h = bomSample();
+        Cable pair = cable(u"tp"_s, u"CAN"_s, {u"w1"_s, u"w4"_s});
+        pair.shieldWireId = u"w2"_s;
+        pair.layLengthMm = 25.4;
+        h.cables = {pair};
+        model.reset(h);
+        const QString path = dir.filePath(u"cables.pdf"_s);
+        QCOMPARE(exportBuildPackage(model, path, PdfExportOptions{}, nullptr), 4);
+        if (const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR"); !out.isEmpty()) {
+            QFile::remove(out + u"/cables.pdf"_s);
+            QFile::copy(path, out + u"/cables.pdf"_s);
+        }
+    }
+
     void factoryHarnessPrintsLayoutTwice()
     {
         QTemporaryDir dir;

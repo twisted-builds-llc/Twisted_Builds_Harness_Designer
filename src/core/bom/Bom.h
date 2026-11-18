@@ -36,6 +36,23 @@ struct CutLine
     QString wireTypeName;
     std::optional<double> cutMm; // nullopt: not routed and no override
     bool overridden = false;
+    QStringList cables; // labels of the cables it is in
+    bool shield = false; // it is a cable's shield
+};
+
+// A bought cable, or the braid / foil of a built shielded cable, by part number. Each cable
+// is one piece as long as the run its conductors share (calc::cableRunLengthMm), rounded up
+// like wires.
+struct CableLine
+{
+    enum class Kind { Cable, ShieldBraid };
+    Kind kind = Kind::Cable;
+    QString partNumber; // empty = "(no part number)"
+    QStringList references; // cable labels
+    int pieces = 0;
+    int piecesWithoutLength = 0; // a conductor is not routed: not in lengthMm
+    double lengthMm = 0;
+    double lengthWithWasteMm = 0; // lengthMm * (1 + wasteFactorWirePercent / 100)
 };
 
 struct SleevingLine
@@ -66,16 +83,23 @@ struct Bom
 {
     std::vector<WireLine> wires;
     std::vector<CutLine> cutList;
+    std::vector<CableLine> cables;
     std::vector<SleevingLine> sleeving;
     std::vector<PartLine> parts;
     std::vector<BomExtra> extras;
 
-    // Lines whose part number is missing (parts) or whose length is unknown (wires).
+    // Lines whose part number is missing (parts, cables) or whose length is unknown (wires,
+    // cables).
     int flaggedCount() const;
 };
 
 // Counting rules:
 // - Wire: every wire is one cut piece; its cut length is calc::wireLength() (override wins).
+// - Cables: the conductors and shield of a bought cable stay in the cut list (each breakout
+//   is cut to length) but not in the wire lines; the cable is one CableLine piece. A built
+//   cable's conductors are wires as usual (twisted ones are longer by the twist take-up);
+//   its shield wire is in the cut list but counted as a ShieldBraid piece, not as wire.
+//   Cables whose conductors are all factory wires are not counted.
 // - Sleeving: each segment with sleeving adds its full length (v1 coverage is full).
 // - Connectors: one per connector, grouped by part number.
 // - Terminals: one per pin that has at least one (non-factory) wire (pin terminal P/N), plus one per

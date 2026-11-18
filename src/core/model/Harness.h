@@ -40,8 +40,8 @@ enum class GaugeSystem { Awg, Mm2 };
 enum class FreeEndKind { FlyingLead, Eyelet, RingTerminal, Bare, Cut };
 // End types used to look up strip/terminal allowances.
 enum class EndType { Pin, Splice, FlyingLead, Eyelet, RingTerminal, Bare };
-// Only Single in v1; twisted pair / shielded / multi-conductor come later (section 5.6).
-enum class ConductorKind { Single };
+// Built: loose wires twisted / shielded by the builder. Bought: a ready-made cable.
+enum class CableSource { Built, Bought };
 // Which lead of a splice or free end a wire end uses on the schematic (in the item's own
 // left/right). Auto: a splice wire meets the dot, a free end wire the lead facing it.
 enum class WireLead { Auto, Left, Right };
@@ -61,6 +61,9 @@ struct Settings {
     double wasteFactorSleevingPercent = 5.0;
     double lengthRoundingIncrementMm = 1.0;
     double sleevingDiameterMarginPercent = 10.0;
+    // Extra length a conductor of a built twisted cable needs for its twist, as a percentage
+    // of its run. Approximate default; depends on the twist rate and wire size.
+    double twistTakeUpPercent = 5.0;
     QJsonObject extra;
 
     bool operator==(const Settings &) const = default;
@@ -141,7 +144,6 @@ struct Wire {
     QString stripeColor; // empty = no stripe
     Gauge gauge;
     QString wireTypeId; // library reference, empty = unassigned
-    ConductorKind conductorKind = ConductorKind::Single;
     std::optional<double> lengthOverrideMm;
     std::vector<QString> routeSegmentIds; // manual route override, empty = automatic
     QString circuitId; // unique circuit number for build prints, e.g. "C001" (nextCircuitId)
@@ -151,6 +153,32 @@ struct Wire {
     QJsonObject extra;
 
     bool operator==(const Wire &) const = default;
+};
+
+// Wires that run together as one cable: twisted (pair, triple, quad...), shielded, both, or
+// a bought multi-conductor cable. Each conductor is an ordinary wire with its own two ends.
+// A wire may be a conductor of several cables, e.g. two twisted pairs under one overall shield.
+struct Cable {
+    QString id;
+    QString label; // e.g. "TP1", "CAN"
+    std::vector<QString> wireIds; // conductors: 2 or more, each once
+    bool twisted = true;
+    std::optional<double> layLengthMm; // length of one full twist; printed only
+    // The shield (braid or foil) as a wire of its own, so each of its ends can go to a pin,
+    // splice, eyelet or a bare end (trimmed back). Empty = not shielded. Never a conductor
+    // of this or any cable, nor the shield of another.
+    QString shieldWireId;
+    CableSource source = CableSource::Built;
+    QString partNumber;               // bought: the cable
+    std::optional<double> jacketOdMm; // bought: the jacket's outer diameter
+    QString shieldPartNumber;         // built: the braid or foil
+    QString notes;
+    QJsonObject extra;
+
+    bool shielded() const { return !shieldWireId.isEmpty(); }
+    // A conductor or the shield.
+    bool contains(const QString &wireId) const;
+    bool operator==(const Cable &) const = default;
 };
 
 struct Splice {
@@ -439,6 +467,7 @@ struct Harness {
     QDateTime createdAt; // UTC; invalid = set on first save
     std::vector<Connector> connectors;
     std::vector<Wire> wires;
+    std::vector<Cable> cables; // cables.json
     std::vector<Splice> splices;
     std::vector<FreeEnd> freeEnds;
     std::vector<LayoutNode> layoutNodes;

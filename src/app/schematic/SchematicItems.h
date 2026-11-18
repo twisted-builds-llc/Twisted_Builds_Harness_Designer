@@ -19,6 +19,7 @@ enum ItemType {
     SpliceItemType,
     FreeEndItemType,
     WireItemType,
+    CableItemType,
 };
 
 // Anchor where a wire meets an item: scene point plus the direction the wire leaves in
@@ -225,6 +226,12 @@ public:
     bool isOffSheet() const { return !m_tag.isEmpty(); }
     // Scene rect of the off-sheet tag (null when not off-sheet).
     QRectF tagRect() const { return m_tagRect; }
+    // Where the wire meets its end items as drawn (end B is empty when off-sheet).
+    const Anchor &anchorA() const { return m_a; }
+    const Anchor &anchorB() const { return m_b; }
+    // A cable's shield: drawn dotted.
+    void setShield(bool shield);
+    bool isShield() const { return m_shield; }
 
     // Orthogonal route between anchors with rounded bends; also used for the rubber-band
     // wire while drawing.
@@ -249,7 +256,56 @@ private:
     QPainterPath m_shape;
     QString m_tag;
     QRectF m_tagRect;
+    bool m_shield = false;
     void updateShape();
+};
+
+// The marks of a twisted and/or shielded cable, drawn over its conductors' wires: where the
+// conductors leave one connector (or other item) side by side, a mark across their leads:
+// crossings between neighbors for a twist, a dashed oval around them for a shield, and the
+// cable's label. Where they do not run side by side, a small tag with the label on each
+// conductor instead. Clicking a mark or tag selects the cable.
+class CableItem : public QGraphicsItem
+{
+public:
+    // Distance of the mark from the anchors along the leads.
+    static constexpr qreal kMarkOffset = 30;
+
+    explicit CableItem(const Cable &cable);
+
+    int type() const override { return CableItemType; }
+    const Cable &cable() const { return m_cable; }
+    QString id() const { return m_cable.id; }
+    void setCable(const Cable &cable);
+
+    // A mark across conductors at scene x `x`, one entry per conductor lead in `ys`
+    // (sorted top to bottom).
+    struct Mark
+    {
+        qreal x = 0;
+        std::vector<qreal> ys;
+    };
+    // Lays the marks out over the conductors' wire items as drawn. Hidden and off-sheet
+    // wires are left out; with none left the item has nothing to draw.
+    void follow(const std::vector<const WireItem *> &conductors);
+    const std::vector<Mark> &marks() const { return m_marks; }
+    const std::vector<QPointF> &tags() const { return m_tags; }
+
+    QRectF boundingRect() const override;
+    QPainterPath shape() const override;
+    void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
+
+private:
+    QString text() const;
+    QRectF tagRect(const QPointF &at) const;
+    QRectF markRect(const Mark &mark) const;
+    void updateShape();
+
+    Cable m_cable;
+    std::vector<Mark> m_marks;
+    std::vector<QPointF> m_tags; // scene points on conductors' leads
+    QPainterPath m_shape;
+    QRectF m_bounds;
 };
 
 } // namespace tbh::app

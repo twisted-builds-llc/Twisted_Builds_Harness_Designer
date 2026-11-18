@@ -279,7 +279,10 @@ WireLength wireLength(const Harness &harness, const LayoutGraph &graph, const Wi
             result.baseMm += graph.segmentLengthMm(id);
         result.endAllowanceAMm = allowance(wire.endA);
         result.endAllowanceBMm = allowance(wire.endB);
-        const double beforeLoop = result.baseMm + result.endAllowanceAMm + result.endAllowanceBMm;
+        if (isTwistedByBuilder(harness, wire.id))
+            result.twistTakeUpMm = result.baseMm * s.twistTakeUpPercent / 100.0;
+        const double beforeLoop =
+            result.baseMm + result.endAllowanceAMm + result.endAllowanceBMm + result.twistTakeUpMm;
         result.serviceLoopMm = beforeLoop * s.serviceLoopPercent / 100.0;
         result.totalMm = beforeLoop + result.serviceLoopMm;
         result.cutMm = roundUpToIncrement(result.totalMm, s.lengthRoundingIncrementMm);
@@ -289,6 +292,50 @@ WireLength wireLength(const Harness &harness, const LayoutGraph &graph, const Wi
         result.cutMm = *wire.lengthOverrideMm;
     }
     return result;
+}
+
+bool isTwistedByBuilder(const Harness &harness, const QString &wireId)
+{
+    return std::any_of(harness.cables.begin(), harness.cables.end(), [&](const Cable &c) {
+        return c.twisted && c.source == CableSource::Built
+               && std::find(c.wireIds.begin(), c.wireIds.end(), wireId) != c.wireIds.end();
+    });
+}
+
+namespace {
+
+// Routes of a cable's conductors, or empty if one is missing or not routed.
+std::vector<Route> conductorRoutes(const LayoutGraph &graph, const Harness &harness, const Cable &cable)
+{
+    std::vector<Route> routes;
+    for (const QString &id : cable.wireIds) {
+        const auto it = std::find_if(harness.wires.begin(), harness.wires.end(), [&](const Wire &w) { return w.id == id; });
+        if (it == harness.wires.end())
+            return {};
+        Route route = graph.route(*it);
+        if (route.status != RouteStatus::Ok)
+            return {};
+        routes.push_back(std::move(route));
+    }
+    return routes;
+}
+
+} // namespace
+
+std::optional<double> cableRunLengthMm(const LayoutGraph &graph, const Harness &harness, const Cable &cable)
+{
+    const std::vector<Route> routes = conductorRoutes(graph, harness, cable);
+    if (routes.empty())
+        return std::nullopt;
+    double length = 0;
+    for (const QString &segment : routes.front().segmentIds) {
+        const bool shared = std::all_of(routes.begin() + 1, routes.end(), [&](const Route &r) {
+            return std::find(r.segmentIds.begin(), r.segmentIds.end(), segment) != r.segmentIds.end();
+        });
+        if (shared)
+            length += graph.segmentLengthMm(segment);
+    }
+    return length;
 }
 
 QHash<QString, std::vector<QString>> wiresBySegment(const Harness &harness, const LayoutGraph &graph)
@@ -386,6 +433,29 @@ std::vector<Problem> findProblems(const Harness &harness, const Library &library
             const QString name = s.label.isEmpty() ? Tr::tr("(unlabeled)") : s.label;
             problems.push_back({Problem::Kind::SegmentWithoutLength, s.id,
                                 Tr::tr("Layout segment %1 has no length.").arg(name)});
+        }
+    }
+    for (const Cable &c : harness.cables) {
+        const QString name = c.label.isEmpty() ? Tr::tr("(unlabeled)") : c.label;
+        const std::vector<Route> routes = conductorRoutes(graph, harness, c);
+        auto sameSegments = [](std::vector<QString> a, std::vector<QString> b) {
+            std::sort(a.begin(), a.end());
+            std::sort(b.begin(), b.end());
+            return a == b;
+        };
+        if (c.twisted && !routes.empty()
+            && !std::all_of(routes.begin() + 1, routes.end(),
+                            [&](const Route &r) { return sameSegments(r.segmentIds, routes.front().segmentIds); })) {
+            problems.push_back({Problem::Kind::CableSplit, c.id,
+                                Tr::tr("The wires of twisted cable %1 take different routes in the layout, "
+                                       "so the twist would split.")
+                                    .arg(name)});
+        }
+        if (c.source == CableSource::Bought && !c.jacketOdMm) {
+            problems.push_back({Problem::Kind::CableWithoutDiameter, c.id,
+                                Tr::tr("Bought cable %1 has no jacket diameter; bundle sizes count its "
+                                       "wires one by one.")
+                                    .arg(name)});
         }
     }
     const auto usage = wiresBySegment(harness, graph);

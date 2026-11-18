@@ -16,6 +16,7 @@ Saving is atomic: the file is written to a temporary file next to the target, th
 | `harness.json`    | Harness metadata and settings. Required.                    |
 | `connectors.json` | Array of connectors (with pins). Optional, default `[]`.    |
 | `wires.json`      | Array of wires. Optional, default `[]`.                     |
+| `cables.json`     | Array of cables grouping wires (twisted / shielded). Optional, default `[]`. Schema 4. |
 | `splices.json`    | Array of splices. Optional, default `[]`.                   |
 | `freeEnds.json`   | Array of free ends (flying leads, eyelets...). Optional, default `[]`. |
 | `layout.json`     | Layout: `{ "nodes": [...], "segments": [...], "notes": [...] }`. |
@@ -58,7 +59,7 @@ Loading fails with a message if:
   "appVersion": "0.1.0",
   "createdAt": "2026-01-02T03:04:05.678Z",
   "modifiedAt": "2026-01-02T04:00:00.000Z",
-  "schemaVersion": 3
+  "schemaVersion": 4
 }
 ```
 
@@ -79,6 +80,7 @@ Loading fails with a message if:
     "serviceLoopPercent": 0,
     "sleevingDiameterMarginPercent": 10,
     "stripAllowanceMm": { "pin": 6, "ringTerminal": 8.5 },
+    "twistTakeUpPercent": 5,
     "wasteFactorSleevingPercent": 5,
     "wasteFactorWirePercent": 5
   },
@@ -90,6 +92,8 @@ Loading fails with a message if:
   without a version bump: it is optional (absent = `""`), and older builds keep it on save
   because unknown `harness.json` keys are preserved.
 - `units`: `in` | `mm` | `cm` (display unit only; default `in` when absent).
+- `twistTakeUpPercent` (schema 4, default 5): extra length for the twist of a built twisted
+  cable's conductors, as a percentage of each conductor's run (an approximate default).
 - `stripAllowanceMm` keys: `pin`, `splice`, `flyingLead`, `eyelet`, `ringTerminal`, `bare`.
   A missing key means 0 mm.
 
@@ -142,7 +146,6 @@ Loading fails with a message if:
   {
     "baseColor": "RED",
     "circuitId": "C001",
-    "conductorKind": "single",
     "endA": { "type": "pin", "connectorId": "c-ecu", "pinId": "ecu-p1" },
     "endB": { "type": "free", "freeEndId": "fe1" },
     "gauge": { "system": "awg", "value": 20 },
@@ -165,13 +168,51 @@ Loading fails with a message if:
 - `circuitId` (schema 3): the circuit number printed on cut lists and pinouts. New wires
   get `C` + the next number (three digits or more); it is free text and may be edited.
   Duplicates load fine and are reported in the Problems panel.
-- `conductorKind`: only `single` in schema 1.
+- `conductorKind`: written as `single` by schemas 1-3; no longer written, ignored on read.
 - `factory` (schema 3, optional, default `false`, written only when `true`): the wire is part
   of an existing (factory) harness: drawn dashed, left out of the BOM, cut list and pinouts.
 - `leadA` / `leadB` (schema 3, optional, default `auto`, written only when not `auto`):
   `left` | `right`, the lead of the splice or free end at that end the wire leaves from on
   the schematic (the item's own left/right). `auto`: a splice wire meets the dot, a free end
   wire the lead facing the wire's other end. Ignored on pin ends.
+
+## `cables.json`
+
+Schema 4. Each cable groups existing wires that run together: twisted, shielded, both, or a
+bought multi-conductor cable. Every conductor stays an ordinary wire in `wires.json`, with
+its own ends.
+
+```json
+[
+  {
+    "id": "cb1",
+    "label": "CAN",
+    "wireIds": ["w1", "w2"],
+    "twisted": true,
+    "layLengthMm": 25.4,
+    "shieldWireId": "w3",
+    "source": "built",
+    "partNumber": "",
+    "jacketOdMm": 4.2,
+    "shieldPartNumber": "",
+    "notes": ""
+  }
+]
+```
+
+- `wireIds`: the conductors, at least two, each once. A wire may be a conductor of several
+  cables (for example two twisted pairs, each a cable, plus an overall shielded cable holding
+  all four wires).
+- `twisted`: default `true`. `layLengthMm` (optional): length of one full twist, printed only.
+- `shieldWireId`: the shield (braid or foil) as a wire of its own, so each of its ends can go
+  to a pin, splice, eyelet or bare end. `""` = not shielded. A shield wire belongs to one
+  cable only and is never a conductor of any cable.
+- `source`: `built` (loose wires twisted / shielded by the builder) | `bought` (a ready-made
+  cable). `partNumber` and `jacketOdMm` (optional, outer diameter) describe a bought cable;
+  `shieldPartNumber` the braid or foil of a built one.
+- Loading refuses a cable with fewer than two wires, a missing or repeated wire, or a shield
+  that breaks the rules above. Deleting a wire removes it from its cables; a cable left with
+  fewer than two conductors is deleted.
 
 ## `splices.json`
 
@@ -414,6 +455,9 @@ supports are refused, never silently downgraded.
   schema 3: `factory` on connectors and wires, the `cut` free end kind, wire
   `leadA`/`leadB`, splice and free end `symbol`, cut end `pairedCutId` and schematic note `frame` (no migration;
   absent means not factory, `auto` leads, no symbol and a plain note).
+- **4** (v0.1.1): `cables.json` (twisted / shielded cables). Nothing to migrate; the bump
+  keeps older versions, which would carry `cables.json` along unread, from editing its wires
+  away. Wires no longer write `conductorKind`.
 
 ## Parts CSV import (Parts Library > Import Parts CSV...)
 

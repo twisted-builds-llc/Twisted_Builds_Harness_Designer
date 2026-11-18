@@ -54,6 +54,12 @@ CircuitTextFill fillEmptyCircuitText(Harness &harness, const std::vector<QString
 CircuitTextFill renameCircuitText(Harness &harness, const std::vector<QString> &wireIds,
                                   const QString &oldText, const QString &newText);
 
+// Cables a wire is in, as a conductor or as the shield, in model order.
+std::vector<const Cable *> cablesOfWire(const Harness &harness, const QString &wireId);
+// Keeps cables valid after wires went away: missing conductors are dropped, a missing shield
+// is cleared, and cables left with fewer than two conductors are removed.
+void pruneCables(Harness &harness);
+
 // Human-readable end description, e.g. "ECU-A : A1", "S1", "Ring terminal".
 QString describeWireEnd(const Harness &harness, const WireEnd &end);
 // e.g. "5V REF (ECU-A : A1 - SENSOR : +)".

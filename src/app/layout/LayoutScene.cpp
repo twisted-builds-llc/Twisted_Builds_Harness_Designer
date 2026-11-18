@@ -314,6 +314,16 @@ void LayoutScene::refreshCaptions()
             tip << diameter;
             if (m_showDiameters)
                 details << diameter;
+            QStringList cables;
+            for (const Cable &c : h.cables) {
+                const bool here = std::any_of(c.wireIds.begin(), c.wireIds.end(), [&](const QString &id) {
+                    return std::find(wires.begin(), wires.end(), id) != wires.end();
+                });
+                if (here)
+                    cables << (c.label.isEmpty() ? tr("(unlabeled)") : c.label);
+            }
+            if (!cables.isEmpty())
+                tip << tr("Cables: %1").arg(cables.join(QStringLiteral(", ")));
         }
         if (!s.label.isEmpty())
             tip.prepend(s.label);

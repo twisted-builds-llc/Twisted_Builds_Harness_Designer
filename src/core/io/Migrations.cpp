@@ -130,9 +130,17 @@ bool migrateV2ToV3(ZipEntries &entries, QString *)
     return true;
 }
 
+// v4 adds cables.json (twisted / shielded cables grouping wires). Nothing to convert; the
+// bump keeps older versions, which would keep cables.json unread, from editing wires out
+// from under it.
+bool migrateV3ToV4(ZipEntries &, QString *)
+{
+    return true;
+}
+
 // kMigrations[i] upgrades schema version i+1 to i+2. Append one step (and bump
 // kSchemaVersion) for every backward-incompatible schema change.
-constexpr std::array<MigrationStep, kSchemaVersion - 1> kMigrations{migrateV1ToV2, migrateV2ToV3};
+constexpr std::array<MigrationStep, kSchemaVersion - 1> kMigrations{migrateV1ToV2, migrateV2ToV3, migrateV3ToV4};
 
 } // namespace
 

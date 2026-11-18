@@ -1141,7 +1141,7 @@ void SchematicView::deleteSelection()
         emit statusMessage(tr("Removed from this sheet only: still shown on other sheets."));
     }
     if (!s.connectors.isEmpty() || !s.splices.isEmpty() || !s.freeEnds.isEmpty() || !s.wires.isEmpty()
-        || !s.notes.isEmpty())
+        || !s.notes.isEmpty() || !s.cables.isEmpty())
         deleteItems(this, m_document, s);
     stack->endMacro();
 }
@@ -1447,6 +1447,18 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
         menu.addAction(tr("Cut Wire Here"), this, [this, wireId, scenePos] { askAndCutWire(wireId, scenePos); });
         menu.addSeparator();
     }
+    if (s.wires.size() >= 2) {
+        menu.addAction(tr("Make Twisted / Shielded Cable"), this, [this] { makeCableFromSelection(); });
+        menu.addSeparator();
+    }
+    if (item && item->type() == CableItemType) {
+        const Cable &cable = static_cast<CableItem *>(item)->cable();
+        const QString cableId = cable.id;
+        if (!cable.shielded())
+            menu.addAction(tr("Add Shield Wire"), this, [this, cableId] { addShieldWire(cableId); });
+        menu.addAction(tr("Ungroup Cable"), this, [this] { deleteSelection(); });
+        menu.addSeparator();
+    }
     if (item && item->type() == FreeEndItemType
         && static_cast<FreeEndItem *>(item)->freeEnd().kind == FreeEndKind::Cut) {
         const QString freeEndId = static_cast<FreeEndItem *>(item)->id();
@@ -1460,6 +1472,55 @@ void SchematicView::contextMenuEvent(QContextMenuEvent *event)
         addShowOnSheetActions(menu.addMenu(tr("Also Show on Sheet")));
     addExistingItemActions(menu.addMenu(tr("Add Existing Item to This Sheet")));
     menu.exec(event->globalPos());
+}
+
+bool SchematicView::makeCableFromSelection()
+{
+    HarnessModel *model = m_document->model();
+    const QSet<QString> &selected = m_selection->selection().wires;
+    QString cableId;
+    auto command = makeCable(model, std::vector<QString>(selected.begin(), selected.end()),
+                             nextCableLabel(model->harness()), &cableId);
+    if (!command) {
+        emit statusMessage(tr("Select two or more wires (not shields) to make a cable."));
+        return false;
+    }
+    m_document->undoStack()->push(command.release());
+    Selection s;
+    s.cables.insert(cableId);
+    m_selection->setSelection(s);
+    return true;
+}
+
+bool SchematicView::addShieldWire(const QString &cableId)
+{
+    HarnessModel *model = m_document->model();
+    const Cable *cable = model->find<Cable>(cableId);
+    if (!cable)
+        return false;
+    // Loose ends a little beyond the first conductor's ends, along its leads.
+    QPointF atA = mapToScene(viewport()->rect().center());
+    QPointF atB = atA + QPointF(200, 0);
+    if (const WireItem *wire = m_scene->wireItem(cable->wireIds.front()); wire && wire->isVisible() && !wire->isOffSheet()) {
+        auto beside = [](const Anchor &a) {
+            const int direction = a.direction == 0 ? 1 : a.direction;
+            return a.point + QPointF(direction * 60, -ConnectorItem::kRowHeight * 1.5);
+        };
+        atA = beside(wire->anchorA());
+        atB = beside(wire->anchorB());
+    }
+    const bool snap = m_scene->snapToGrid();
+    QString shieldId;
+    auto command = tbh::app::addShieldWire(model, cableId, snap ? SchematicScene::snapped(atA) : atA,
+                                           snap ? SchematicScene::snapped(atB) : atB, m_scene->currentSheet(), &shieldId);
+    if (!command)
+        return false;
+    m_document->undoStack()->push(command.release());
+    Selection s;
+    s.wires.insert(shieldId);
+    m_selection->setSelection(s);
+    emit statusMessage(tr("Drag each end of the shield wire onto a splice, eyelet or pin; a bare end is cut back."));
+    return true;
 }
 
 void SchematicView::askAndCutWire(const QString &wireId, const QPointF &scenePos)

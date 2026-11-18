@@ -22,6 +22,8 @@ int Bom::flaggedCount() const
         count += p.partNumber.isEmpty() ? 1 : 0;
     for (const SleevingLine &s : sleeving)
         count += s.known ? 0 : 1;
+    for (const CableLine &c : cables)
+        count += c.partNumber.isEmpty() || c.piecesWithoutLength > 0 ? 1 : 0;
     return count;
 }
 
@@ -74,6 +76,23 @@ Bom buildBom(const Harness &harness, const Library &library)
     const Settings &settings = harness.settings;
     const calc::LayoutGraph graph(harness);
 
+    // Wires that are not bought as wire: inside a bought cable, or a cable's shield.
+    QSet<QString> notWire;
+    QHash<QString, QStringList> cableLabels;
+    QSet<QString> shields;
+    for (const Cable &c : harness.cables) {
+        for (const QString &id : c.wireIds) {
+            cableLabels[id].append(c.label);
+            if (c.source == CableSource::Bought)
+                notWire.insert(id);
+        }
+        if (c.shielded()) {
+            cableLabels[c.shieldWireId].append(c.label);
+            shields.insert(c.shieldWireId);
+            notWire.insert(c.shieldWireId);
+        }
+    }
+
     // Wires and cut list.
     using WireKey = std::tuple<QString, QString, int, double, QString>;
     std::map<WireKey, size_t> wireIndex;
@@ -97,7 +116,11 @@ Bom buildBom(const Harness &harness, const Library &library)
         cut.overridden = length.overridden;
         if (length.isKnown())
             cut.cutMm = length.cutMm;
+        cut.cables = cableLabels.value(w.id);
+        cut.shield = shields.contains(w.id);
         bom.cutList.push_back(cut);
+        if (notWire.contains(w.id))
+            continue;
 
         const WireKey key{w.baseColor.toUpper(), w.stripeColor.toUpper(), int(w.gauge.system), w.gauge.value,
                           w.wireTypeId};
@@ -120,6 +143,58 @@ Bom buildBom(const Harness &harness, const Library &library)
             ++line.piecesWithoutLength;
     }
     for (WireLine &line : bom.wires)
+        line.lengthWithWasteMm = line.lengthMm * (1.0 + settings.wasteFactorWirePercent / 100.0);
+
+    // Bought cables and built shield braid.
+    using CableKey = std::pair<int, QString>;
+    std::map<CableKey, size_t> cableIndex;
+    QHash<QString, const Wire *> wireById;
+    for (const Wire &w : harness.wires)
+        wireById.insert(w.id, &w);
+    for (const Cable &c : harness.cables) {
+        const bool allFactory = std::all_of(c.wireIds.begin(), c.wireIds.end(), [&](const QString &id) {
+            const Wire *w = wireById.value(id);
+            return w && w->factory;
+        });
+        if (allFactory)
+            continue;
+        CableLine::Kind kind;
+        QString partNumber;
+        if (c.source == CableSource::Bought) {
+            kind = CableLine::Kind::Cable;
+            partNumber = c.partNumber.trimmed();
+        } else if (c.shielded()) {
+            kind = CableLine::Kind::ShieldBraid;
+            partNumber = c.shieldPartNumber.trimmed();
+        } else {
+            continue; // loose wires, counted as wire
+        }
+        const CableKey key{int(kind), partNumber};
+        auto it = cableIndex.find(key);
+        if (it == cableIndex.end()) {
+            it = cableIndex.emplace(key, bom.cables.size()).first;
+            CableLine line;
+            line.kind = kind;
+            line.partNumber = partNumber;
+            bom.cables.push_back(line);
+        }
+        CableLine &line = bom.cables[it->second];
+        ++line.pieces;
+        if (!c.label.isEmpty())
+            line.references.append(c.label);
+        if (const auto run = calc::cableRunLengthMm(graph, harness, c))
+            line.lengthMm += calc::roundUpToIncrement(*run, settings.lengthRoundingIncrementMm);
+        else
+            ++line.piecesWithoutLength;
+    }
+    std::stable_sort(bom.cables.begin(), bom.cables.end(), [](const CableLine &a, const CableLine &b) {
+        if (a.kind != b.kind)
+            return a.kind < b.kind;
+        if (a.partNumber.isEmpty() != b.partNumber.isEmpty())
+            return b.partNumber.isEmpty();
+        return a.partNumber < b.partNumber;
+    });
+    for (CableLine &line : bom.cables)
         line.lengthWithWasteMm = line.lengthMm * (1.0 + settings.wasteFactorWirePercent / 100.0);
 
     // Sleeving: covered segments and label covers.

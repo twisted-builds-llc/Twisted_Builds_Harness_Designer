@@ -86,7 +86,9 @@ bool deleteItems(QWidget *parent, Document *document, const Selection &selection
     if (!confirmWireRemoval(parent, model->harness(), implicit, Tr::tr("Deleting the selection")))
         return false;
     document->undoStack()->push(
-        removeItems(model, selection.connectors, selection.splices, selection.freeEnds, selection.wires, selection.notes).release());
+        removeItems(model, selection.connectors, selection.splices, selection.freeEnds, selection.wires, selection.notes,
+                    selection.cables)
+            .release());
     return true;
 }
 

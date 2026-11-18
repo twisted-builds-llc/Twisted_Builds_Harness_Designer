@@ -31,6 +31,16 @@ inline Wire wire(const QString &id, WireEnd a, WireEnd b)
     return w;
 }
 
+// A twisted, built cable of `wires` (no shield).
+inline Cable cable(const QString &id, const QString &label, std::vector<QString> wires)
+{
+    Cable c;
+    c.id = id;
+    c.label = label;
+    c.wireIds = std::move(wires);
+    return c;
+}
+
 inline LayoutNode node(const QString &id, LayoutNodeType type, const QString &ref)
 {
     return LayoutNode{id, type, ref, QPointF(), {}};

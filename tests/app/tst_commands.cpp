@@ -4,6 +4,7 @@
 #include "Preferences.h"
 #include "Translations.h"
 #include "commands/EditOps.h"
+#include "model/Fragment.h"
 #include "model/Queries.h"
 #include "commands/HarnessCommands.h"
 #include "ui/properties/ConnectorPanel.h"
@@ -29,6 +30,20 @@
 using namespace tbh;
 using namespace tbh::app;
 using namespace Qt::StringLiterals;
+
+namespace {
+
+// A twisted, built cable of `wires` (no shield).
+Cable cable(const QString &id, const QString &label, std::vector<QString> wires)
+{
+    Cable c;
+    c.id = id;
+    c.label = label;
+    c.wireIds = std::move(wires);
+    return c;
+}
+
+} // namespace
 
 class TestCommands : public QObject
 {
@@ -216,6 +231,74 @@ private slots:
         QCOMPARE(doc.model()->harness().connectors.size(), size_t(4));
         QCOMPARE(wires().size(), size_t(2));
         QCOMPARE(wires()[1].circuitId, u"C002"_s);
+    }
+
+    // Deleting, cutting and pasting wires keeps cables valid, and undo restores them.
+    void cablesFollowWireEdits()
+    {
+        Document doc;
+        Harness h;
+        Connector a, b;
+        a.id = u"a"_s;
+        a.label = u"A"_s;
+        b.id = u"b"_s;
+        b.label = u"B"_s;
+        for (Connector *c : {&a, &b}) {
+            for (int i = 1; i <= 4; ++i)
+                c->pins.push_back(Pin{c->id + u"%1"_s.arg(i), QString::number(i), {}, {}, {}, false, {}, {}, {}});
+        }
+        h.connectors = {a, b};
+        for (int i = 1; i <= 4; ++i) {
+            Wire w;
+            w.id = u"w%1"_s.arg(i);
+            w.endA = PinRef{u"a"_s, u"a%1"_s.arg(i)};
+            w.endB = PinRef{u"b"_s, u"b%1"_s.arg(i)};
+            h.wires.push_back(w);
+        }
+        // A twisted triple w1-w3 with shield w4.
+        Cable cb = cable(u"cb"_s, u"TP"_s, {u"w1"_s, u"w2"_s, u"w3"_s});
+        cb.shieldWireId = u"w4"_s;
+        h.cables = {cb};
+        doc.model()->reset(h);
+        QUndoStack *stack = doc.undoStack();
+        const auto cables = [&]() -> const std::vector<Cable> & { return doc.model()->harness().cables; };
+
+        // Deleting a conductor and the shield: the cable keeps the other two.
+        stack->push(removeItems(doc.model(), {}, {}, {}, {u"w2"_s, u"w4"_s}).release());
+        QCOMPARE(cables().size(), size_t(1));
+        QCOMPARE(cables()[0].wireIds, (std::vector<QString>{u"w1"_s, u"w3"_s}));
+        QVERIFY(!cables()[0].shielded());
+        // One more conductor gone: no cable is left.
+        stack->push(removeItems(doc.model(), {}, {}, {}, {u"w3"_s}).release());
+        QVERIFY(cables().empty());
+        stack->undo();
+        stack->undo();
+        QVERIFY(doc.model()->harness() == h);
+
+        // Cutting a conductor: both pieces stay in the cable, the second right after the first.
+        QString piece;
+        stack->push(cutWire(doc.model(), u"w2"_s, QPointF(0, 0), QPointF(10, 0), {}, &piece).release());
+        QCOMPARE(cables()[0].wireIds, (std::vector<QString>{u"w1"_s, u"w2"_s, piece, u"w3"_s}));
+        stack->undo();
+        // Cutting the shield: the first piece stays the shield, the second is not in the cb.
+        stack->push(cutWire(doc.model(), u"w4"_s, QPointF(0, 0), QPointF(10, 0), {}, &piece).release());
+        QCOMPARE(cables()[0], cb);
+        stack->undo();
+        QVERIFY(doc.model()->harness() == h);
+
+        // Pasting a copy of both connectors copies the cable onto the new wires.
+        const Harness fragment = extractFragment(doc.model()->harness(), {u"a"_s, u"b"_s}, {});
+        QSet<QString> pasted;
+        stack->push(pasteFragment(doc.model(), fragment, QPointF(100, 0), &pasted).release());
+        QCOMPARE(cables().size(), size_t(2));
+        const Cable &copy = cables()[1];
+        QCOMPARE(copy.wireIds.size(), size_t(3));
+        QVERIFY(copy.wireIds[0] != u"w1"_s);
+        QVERIFY(doc.model()->find<Wire>(copy.wireIds[0]));
+        QVERIFY(doc.model()->find<Wire>(copy.shieldWireId));
+        QVERIFY(copy.shieldWireId != u"w4"_s);
+        stack->undo();
+        QVERIFY(doc.model()->harness() == h);
     }
 
     // Picking a library housing fills the connector; terminal cells offer its parts first.

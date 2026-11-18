@@ -811,6 +811,14 @@ void WireItem::setOffSheet(const Anchor &a, const QString &tag)
     updateShape();
 }
 
+void WireItem::setShield(bool shield)
+{
+    if (m_shield == shield)
+        return;
+    m_shield = shield;
+    update();
+}
+
 void WireItem::updateShape()
 {
     QPainterPathStroker stroker;
@@ -875,8 +883,11 @@ void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
         painter->setOpacity(0.6);
     auto wirePen = [&](const QColor &color, qreal width) {
         QPen pen(color, width, Qt::SolidLine, Qt::FlatCap, Qt::MiterJoin);
+        // Same dashes at every width: factory wires dashed, shields dotted.
         if (m_wire.factory)
-            pen.setDashPattern({4 * kPenWidth / width, 2 * kPenWidth / width}); // same dashes at every width
+            pen.setDashPattern({4 * kPenWidth / width, 2 * kPenWidth / width});
+        else if (m_shield)
+            pen.setDashPattern({1 * kPenWidth / width, 1 * kPenWidth / width});
         return pen;
     };
     // Thin outline keeps white/black wires visible on either theme.
@@ -918,6 +929,175 @@ void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
         painter->setPen(pal.color(QPalette::Text));
         const QRectF text = right ? r.adjusted(6, 0, -kTagPoint, 0) : r.adjusted(kTagPoint, 0, -6, 0);
         painter->drawText(text, Qt::AlignVCenter | Qt::AlignHCenter, m_tag);
+    }
+}
+
+// ---- CableItem ----------------------------------------------------------------
+
+namespace {
+
+constexpr qreal kMarkHalfWidth = 6;   // crossing half width
+constexpr qreal kShieldHalfWidth = 11; // shield oval half width
+constexpr qreal kShieldMargin = 8;     // oval beyond the outer leads
+constexpr qreal kLabelHeight = 14;
+// Leads further apart than this per conductor do not count as side by side.
+constexpr qreal kMaxLeadSpacing = 2.5 * ConnectorItem::kRowHeight;
+
+QFont cableFont()
+{
+    QFont font;
+    font.setPixelSize(10);
+    font.setBold(true);
+    return font;
+}
+
+} // namespace
+
+CableItem::CableItem(const Cable &cable)
+    : m_cable(cable)
+{
+    setFlag(ItemIsSelectable);
+    setZValue(1); // over the wires
+}
+
+void CableItem::setCable(const Cable &cable)
+{
+    m_cable = cable;
+    prepareGeometryChange();
+    updateShape();
+}
+
+QString CableItem::text() const
+{
+    if (!m_cable.label.isEmpty())
+        return m_cable.label;
+    // No label: say what it is.
+    if (m_cable.twisted && m_cable.shielded())
+        return QCoreApplication::translate("tbh::app::CableItem", "TW/SH");
+    if (m_cable.twisted)
+        return QCoreApplication::translate("tbh::app::CableItem", "TW");
+    if (m_cable.shielded())
+        return QCoreApplication::translate("tbh::app::CableItem", "SH");
+    return QCoreApplication::translate("tbh::app::CableItem", "CBL");
+}
+
+void CableItem::follow(const std::vector<const WireItem *> &conductors)
+{
+    std::vector<const WireItem *> shown;
+    for (const WireItem *w : conductors) {
+        if (w && w->isVisible() && !w->isOffSheet())
+            shown.push_back(w);
+    }
+    m_marks.clear();
+    m_tags.clear();
+    // Marks where the leads leave one item side by side: try each end of the first conductor
+    // and take, for every other conductor, its end nearest to that one.
+    if (shown.size() >= 2) {
+        for (const Anchor &ref : {shown.front()->anchorA(), shown.front()->anchorB()}) {
+            if (ref.direction == 0)
+                continue;
+            Mark mark;
+            mark.x = ref.point.x() + ref.direction * kMarkOffset;
+            bool sideBySide = true;
+            for (const WireItem *w : shown) {
+                const Anchor &a = w->anchorA();
+                const Anchor &b = w->anchorB();
+                const Anchor &near = QLineF(a.point, ref.point).length() <= QLineF(b.point, ref.point).length() ? a : b;
+                // Same x and direction, and a lead long enough to carry the mark before it turns.
+                if (std::abs(near.point.x() - ref.point.x()) > 0.5 || near.direction != ref.direction
+                    || std::abs(w->runX() - near.point.x()) < kMarkOffset + kShieldHalfWidth) {
+                    sideBySide = false;
+                    break;
+                }
+                mark.ys.push_back(near.point.y());
+            }
+            std::sort(mark.ys.begin(), mark.ys.end());
+            if (sideBySide && mark.ys.back() - mark.ys.front() <= kMaxLeadSpacing * qreal(mark.ys.size() - 1))
+                m_marks.push_back(std::move(mark));
+        }
+    }
+    if (m_marks.empty()) {
+        for (const WireItem *w : shown) {
+            const Anchor &a = w->anchorA();
+            const int direction = a.direction == 0 ? 1 : a.direction;
+            m_tags.push_back(a.point + QPointF(direction * kMarkOffset, 0));
+        }
+    }
+    prepareGeometryChange();
+    updateShape();
+}
+
+QRectF CableItem::markRect(const Mark &mark) const
+{
+    const qreal top = mark.ys.front() - kShieldMargin - kLabelHeight;
+    const qreal bottom = mark.ys.back() + kShieldMargin;
+    const qreal half = std::max(kShieldHalfWidth, QFontMetricsF(cableFont()).horizontalAdvance(text()) / 2 + 2);
+    return QRectF(mark.x - half, top, 2 * half, bottom - top);
+}
+
+QRectF CableItem::tagRect(const QPointF &at) const
+{
+    const qreal width = QFontMetricsF(cableFont()).horizontalAdvance(text()) + 8;
+    return QRectF(at.x() - width / 2, at.y() - 7 - kLabelHeight, width, kLabelHeight);
+}
+
+void CableItem::updateShape()
+{
+    m_shape = QPainterPath();
+    for (const Mark &mark : m_marks)
+        m_shape.addRect(markRect(mark));
+    for (const QPointF &tag : m_tags)
+        m_shape.addRect(tagRect(tag));
+    m_bounds = m_shape.boundingRect().adjusted(-2, -2, 2, 2);
+}
+
+QRectF CableItem::boundingRect() const
+{
+    return m_bounds;
+}
+
+QPainterPath CableItem::shape() const
+{
+    return m_shape;
+}
+
+void CableItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
+{
+    const QPalette pal = paletteOf(this);
+    const QColor ink = isSelected() ? pal.color(QPalette::Highlight) : pal.color(QPalette::Text);
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setFont(cableFont());
+    for (const Mark &mark : m_marks) {
+        const qreal top = mark.ys.front();
+        const qreal bottom = mark.ys.back();
+        if (m_cable.twisted) {
+            // Neighboring conductors cross: the twist.
+            painter->setPen(QPen(ink, 1.6, Qt::SolidLine, Qt::RoundCap));
+            for (size_t i = 0; i + 1 < mark.ys.size(); ++i) {
+                const qreal y0 = mark.ys[i];
+                const qreal y1 = mark.ys[i + 1];
+                painter->drawLine(QPointF(mark.x - kMarkHalfWidth, y0), QPointF(mark.x + kMarkHalfWidth, y1));
+                painter->drawLine(QPointF(mark.x - kMarkHalfWidth, y1), QPointF(mark.x + kMarkHalfWidth, y0));
+            }
+        }
+        if (m_cable.shielded()) {
+            QPen pen(ink, 1.4, Qt::DashLine);
+            painter->setPen(pen);
+            painter->setBrush(Qt::NoBrush);
+            painter->drawEllipse(QRectF(mark.x - kShieldHalfWidth, top - kShieldMargin, 2 * kShieldHalfWidth,
+                                        bottom - top + 2 * kShieldMargin));
+        }
+        painter->setPen(ink);
+        painter->drawText(QRectF(mark.x - 60, top - kShieldMargin - kLabelHeight, 120, kLabelHeight),
+                          Qt::AlignHCenter | Qt::AlignBottom, text());
+    }
+    for (const QPointF &tag : m_tags) {
+        const QRectF r = tagRect(tag);
+        painter->setPen(QPen(ink, 1.2, m_cable.shielded() ? Qt::DashLine : Qt::SolidLine));
+        painter->setBrush(pal.color(QPalette::Base));
+        painter->drawRoundedRect(r, 3, 3);
+        painter->setPen(ink);
+        painter->drawText(r, Qt::AlignCenter, text());
     }
 }
 

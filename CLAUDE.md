@@ -91,7 +91,10 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   merge only when the user says so. Bug review fixes (plan 5f: factory sleeving left out of the
   BOM unless `addOnSleeving`, unplug clears the plug P/N, labels/ties follow a moved splice) and
   `main`'s example harness are on the branch; v0.1.1 re-tagged from it for a new draft.
-  Details and decisions: `docs/V0.1.1_PLAN.md`.
+  Details and decisions: `docs/V0.1.1_PLAN.md`. Twisted / shielded cables (plan 5g) built
+  on the branch after the draft, not committed yet: `Cable` entity in `cables.json`
+  (**schema 4**), any number of conductor wires plus an optional shield wire, built or
+  bought, twist take-up setting, Cables BOM tab, schematic marks (`CableItem`), `CablePanel`.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
   translations for languages other than English.
 - User preferences: inches by default (mm/cm optional, set in Edit > Preferences); work on a

@@ -31,6 +31,7 @@ add_library(tbh_app_lib STATIC
     ui/PinPatternDialog.h ui/PinPatternDialog.cpp
     ui/ProblemsPanel.h ui/ProblemsPanel.cpp
     ui/RecoveryDialog.h ui/RecoveryDialog.cpp
+    ui/properties/CablePanel.h ui/properties/CablePanel.cpp
     ui/properties/ConnectorPanel.h ui/properties/ConnectorPanel.cpp
     ui/properties/HarnessPanel.h ui/properties/HarnessPanel.cpp
     ui/properties/LayoutPanels.h ui/properties/LayoutPanels.cpp

@@ -92,6 +92,8 @@ QString sectionTitle(CsvSection section)
         return Tr::tr("Wire");
     case CsvSection::CutList:
         return Tr::tr("Cut list");
+    case CsvSection::Cables:
+        return Tr::tr("Cables");
     case CsvSection::Sleeving:
         return Tr::tr("Sleeving");
     case CsvSection::Parts:
@@ -104,6 +106,18 @@ QString sectionTitle(CsvSection section)
 
 } // namespace
 
+QString cableKindName(CableLine::Kind kind)
+{
+    return kind == CableLine::Kind::Cable ? Tr::tr("Cable") : Tr::tr("Shield braid");
+}
+
+QString cutLineCableText(const CutLine &line)
+{
+    if (line.shield && !line.cables.isEmpty())
+        return Tr::tr("%1 shield").arg(line.cables.front());
+    return line.cables.join(QStringLiteral(", "));
+}
+
 QString sectionFileName(CsvSection section)
 {
     switch (section) {
@@ -111,6 +125,8 @@ QString sectionFileName(CsvSection section)
         return QStringLiteral("wires");
     case CsvSection::CutList:
         return QStringLiteral("cut-list");
+    case CsvSection::Cables:
+        return QStringLiteral("cables");
     case CsvSection::Sleeving:
         return QStringLiteral("sleeving");
     case CsvSection::Parts:
@@ -136,11 +152,19 @@ QString sectionToCsv(const Bom &bom, CsvSection section, Units units)
         break;
     case CsvSection::CutList:
         csv += row({Tr::tr("Circuit ID"), Tr::tr("Wire"), Tr::tr("End A"), Tr::tr("End B"), Tr::tr("Color"), Tr::tr("Stripe"), Tr::tr("Gauge"), Tr::tr("Wire type"),
-                    Tr::tr("Cut length (%1)").arg(u), Tr::tr("Note")});
+                    Tr::tr("Cable"), Tr::tr("Cut length (%1)").arg(u), Tr::tr("Note")});
         for (const CutLine &c : bom.cutList)
             csv += row({c.circuitId, c.name, c.endA, c.endB, c.baseColor, c.stripeColor, gauge(c.gauge), c.wireTypeName,
-                        c.cutMm ? length(*c.cutMm, units) : QString(),
+                        cutLineCableText(c), c.cutMm ? length(*c.cutMm, units) : QString(),
                         !c.cutMm ? Tr::tr("not routed") : (c.overridden ? Tr::tr("manual length") : QString())});
+        break;
+    case CsvSection::Cables:
+        csv += row({Tr::tr("Kind"), Tr::tr("Part number"), Tr::tr("Pieces"), Tr::tr("Length (%1)").arg(u),
+                    Tr::tr("Length with waste (%1)").arg(u), Tr::tr("Pieces without length"), Tr::tr("Used at")});
+        for (const CableLine &c : bom.cables)
+            csv += row({cableKindName(c.kind), partNumberOrNone(c.partNumber), QString::number(c.pieces),
+                        length(c.lengthMm, units), length(c.lengthWithWasteMm, units),
+                        QString::number(c.piecesWithoutLength), c.references.join(QStringLiteral("; "))});
         break;
     case CsvSection::Sleeving:
         csv += row({Tr::tr("Type"), Tr::tr("Size"), Tr::tr("Pieces"), Tr::tr("Length (%1)").arg(u),
@@ -167,8 +191,7 @@ QString sectionToCsv(const Bom &bom, CsvSection section, Units units)
 QString bomToCsv(const Bom &bom, Units units)
 {
     QString csv;
-    for (CsvSection section : {CsvSection::Wires, CsvSection::CutList, CsvSection::Sleeving, CsvSection::Parts,
-                               CsvSection::Extras}) {
+    for (CsvSection section : kCsvSections) {
         if (!csv.isEmpty())
             csv += QStringLiteral("\r\n");
         csv += row({sectionTitle(section)});

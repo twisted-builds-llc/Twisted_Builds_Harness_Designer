@@ -40,6 +40,7 @@ private:
     CommitTextEdit *m_description;
 
     QDoubleSpinBox *m_serviceLoop;
+    QDoubleSpinBox *m_twistTakeUp;
     QLineEdit *m_rounding;
     QDoubleSpinBox *m_wasteWire;
     QDoubleSpinBox *m_wasteSleeving;

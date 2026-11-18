@@ -88,19 +88,24 @@ BomView::BomView(Document *document, QWidget *parent)
                          tr("With waste"), tr("Note")},
                         this))
     , m_cutList(makeTable({tr("Circuit ID"), tr("Wire"), tr("End A"), tr("End B"), tr("Color"), tr("Gauge"), tr("Wire type"),
-                           tr("Cut length"), tr("Note")},
+                           tr("Cable"), tr("Cut length"), tr("Note")},
                           this))
+    , m_cables(makeTable({tr("Kind"), tr("Part number"), tr("Pieces"), tr("Length"), tr("With waste"), tr("Used at"),
+                          tr("Note")},
+                         this))
     , m_sleeving(makeTable({tr("Type"), tr("Size"), tr("Pieces"), tr("Length"), tr("With waste")}, this))
     , m_parts(makeTable({tr("Category"), tr("Part number"), tr("Description"), tr("Qty"), tr("Used at")}, this))
     , m_extras(makeTable({tr("Part number"), tr("Description"), tr("Qty"), tr("Unit"), tr("Notes")}, this))
 {
     m_wires->setAccessibleName(tr("Wire totals"));
     m_cutList->setAccessibleName(tr("Cut list"));
+    m_cables->setAccessibleName(tr("Cable totals"));
     m_sleeving->setAccessibleName(tr("Sleeving totals"));
     m_parts->setAccessibleName(tr("Parts"));
     m_extras->setAccessibleName(tr("Other items"));
     m_wires->setObjectName(QStringLiteral("wireTable"));
     m_cutList->setObjectName(QStringLiteral("cutListTable"));
+    m_cables->setObjectName(QStringLiteral("cableTable"));
     m_sleeving->setObjectName(QStringLiteral("sleevingTable"));
     m_parts->setObjectName(QStringLiteral("partsTable"));
     m_extras->setObjectName(QStringLiteral("extrasTable"));
@@ -135,6 +140,7 @@ BomView::BomView(Document *document, QWidget *parent)
     auto *tabs = new QTabWidget(this);
     tabs->addTab(m_wires, tr("Wire"));
     tabs->addTab(m_cutList, tr("Cut List"));
+    tabs->addTab(m_cables, tr("Cables"));
     tabs->addTab(m_sleeving, tr("Sleeving"));
     tabs->addTab(m_parts, tr("Parts"));
     tabs->addTab(extrasPage, tr("Other Items"));
@@ -223,16 +229,37 @@ void BomView::refresh()
         m_cutList->setItem(r, 4, cell(colorText(c.baseColor, c.stripeColor)));
         m_cutList->setItem(r, 5, cell(gaugeText(c.gauge)));
         m_cutList->setItem(r, 6, cell(c.wireTypeName));
+        m_cutList->setItem(r, 7, cell(bom::cutLineCableText(c)));
         auto *length = cell(c.cutMm ? formatLength(*c.cutMm, units) : QString(), true);
         if (c.cutMm)
             length->setData(Qt::UserRole, *c.cutMm);
-        m_cutList->setItem(r, 7, length);
+        m_cutList->setItem(r, 8, length);
         const QString note = !c.cutMm ? tr("Not routed") : (c.overridden ? tr("Manual length") : QString());
-        m_cutList->setItem(r, 8, cell(note));
+        m_cutList->setItem(r, 9, cell(note));
         if (!c.cutMm)
             flag(circuit, tr("Not routed: place both ends in the layout and connect them."));
     }
     m_cutList->setSortingEnabled(true);
+
+    m_cables->setRowCount(int(m_bom.cables.size()));
+    for (int r = 0; r < int(m_bom.cables.size()); ++r) {
+        const bom::CableLine &c = m_bom.cables[size_t(r)];
+        auto *pn = cell(c.partNumber.isEmpty() ? tr("(no part number)") : c.partNumber);
+        if (c.partNumber.isEmpty())
+            flag(pn, tr("Enter the part number in the cable's properties."));
+        m_cables->setItem(r, 0, cell(bom::cableKindName(c.kind)));
+        m_cables->setItem(r, 1, pn);
+        m_cables->setItem(r, 2, cell(QString::number(c.pieces), true));
+        m_cables->setItem(r, 3, cell(formatLength(c.lengthMm, units), true));
+        m_cables->setItem(r, 4, cell(formatLength(c.lengthWithWasteMm, units), true));
+        m_cables->setItem(r, 5, cell(c.references.join(QStringLiteral(", "))));
+        auto *note = cell(c.piecesWithoutLength ? tr("%n piece(s) not routed: length not included", nullptr,
+                                                     c.piecesWithoutLength)
+                                                : QString());
+        if (c.piecesWithoutLength)
+            flag(pn, note->text());
+        m_cables->setItem(r, 6, note);
+    }
 
     m_sleeving->setRowCount(int(m_bom.sleeving.size()));
     for (int r = 0; r < int(m_bom.sleeving.size()); ++r) {
@@ -273,7 +300,7 @@ void BomView::refresh()
     }
     m_filling = false;
 
-    for (QTableWidget *table : {m_wires, m_cutList, m_sleeving, m_parts})
+    for (QTableWidget *table : {m_wires, m_cutList, m_cables, m_sleeving, m_parts})
         table->resizeColumnsToContents();
 
     const int flagged = m_bom.flaggedCount();
@@ -340,8 +367,7 @@ bool BomView::writeCsv(const QString &path, bool perSection, const QString &base
     };
     if (!perSection)
         return write(path, bom::bomToCsv(m_bom, units));
-    for (bom::CsvSection section : {bom::CsvSection::Wires, bom::CsvSection::CutList, bom::CsvSection::Sleeving,
-                                    bom::CsvSection::Parts, bom::CsvSection::Extras}) {
+    for (bom::CsvSection section : bom::kCsvSections) {
         const QString file = QDir(path).filePath(
             QStringLiteral("%1-%2.csv").arg(baseName, bom::sectionFileName(section)));
         if (!write(file, bom::sectionToCsv(m_bom, section, units)))

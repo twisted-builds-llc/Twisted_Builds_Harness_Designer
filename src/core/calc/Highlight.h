@@ -20,6 +20,7 @@ struct HighlightSeed
     QSet<QString> wires;
     QSet<QString> layoutNodes;
     QSet<QString> layoutSegments;
+    QSet<QString> cables;
 };
 
 struct HighlightSet
@@ -31,13 +32,15 @@ struct HighlightSet
     QSet<QString> freeEnds;
     QSet<QString> layoutNodes;
     QSet<QString> layoutSegments;
+    QSet<QString> cables; // cables with a related wire
 };
 
 QString pinKey(const QString &connectorId, const QString &pinId);
 
 // Related wires: those on seeded connectors/pins/splices/free ends, seeded wires, wires routed
 // through seeded segments, and wires on what seeded layout nodes stand for (for a branch
-// point: wires through its segments). Then everything those wires touch: their end items
+// point: wires through its segments). A seeded cable seeds its wires, and a seeded wire in a
+// cable seeds the cable's other wires (a pair lights up together). Then everything those wires touch: their end items
 // and pins, and the layout segments and nodes of their routes. Seeds are always included.
 HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, const HighlightSeed &seed);
 

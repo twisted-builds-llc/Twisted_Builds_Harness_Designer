@@ -69,7 +69,7 @@ constexpr EnumName<SchematicSymbol> kSchematicSymbols[] = {{SchematicSymbol::Non
                                                            {SchematicSymbol::Ground, "ground"},
                                                            {SchematicSymbol::ChassisGround, "chassisGround"},
                                                            {SchematicSymbol::Power, "power"}};
-constexpr EnumName<ConductorKind> kConductorKinds[] = {{ConductorKind::Single, "single"}};
+constexpr EnumName<CableSource> kCableSources[] = {{CableSource::Built, "built"}, {CableSource::Bought, "bought"}};
 constexpr EnumName<WireLead> kWireLeads[] = {
     {WireLead::Auto, "auto"}, {WireLead::Left, "left"}, {WireLead::Right, "right"}};
 constexpr EnumName<LayoutNodeType> kLayoutNodeTypes[] = {{LayoutNodeType::Connector, "connector"},
@@ -335,7 +335,7 @@ Wire readWire(ObjectReader r)
     w.gauge.value = gauge.number("value", 0.0);
     w.gauge.system = gauge.enumValue("system", kGaugeSystems, GaugeSystem::Awg);
     w.wireTypeId = r.string("wireTypeId");
-    w.conductorKind = r.enumValue("conductorKind", kConductorKinds, ConductorKind::Single);
+    r.string("conductorKind"); // schema 1-3 wrote "single"; no longer used
     w.lengthOverrideMm = r.optionalNumber("lengthOverrideMm");
     w.factory = r.boolean("factory", false);
     w.leadA = r.enumValue("leadA", kWireLeads, WireLead::Auto);
@@ -348,6 +348,30 @@ Wire readWire(ObjectReader r)
     }
     w.extra = r.extra();
     return w;
+}
+
+Cable readCable(ObjectReader r)
+{
+    Cable c;
+    c.id = r.id();
+    c.label = r.string("label");
+    const QString base = r.context();
+    const QJsonArray wires = r.array("wireIds");
+    for (qsizetype i = 0; i < wires.size(); ++i) {
+        if (!wires[i].isString())
+            fail(Tr::tr("%1 must be a string.").arg(indexed(base + QStringLiteral(".wireIds"), i)));
+        c.wireIds.push_back(wires[i].toString());
+    }
+    c.twisted = r.boolean("twisted", true);
+    c.layLengthMm = r.optionalNumber("layLengthMm");
+    c.shieldWireId = r.string("shieldWireId");
+    c.source = r.enumValue("source", kCableSources, CableSource::Built);
+    c.partNumber = r.string("partNumber");
+    c.jacketOdMm = r.optionalNumber("jacketOdMm");
+    c.shieldPartNumber = r.string("shieldPartNumber");
+    c.notes = r.string("notes");
+    c.extra = r.extra();
+    return c;
 }
 
 Splice readSplice(ObjectReader r)
@@ -472,6 +496,7 @@ Settings readSettings(ObjectReader r)
     s.lengthRoundingIncrementMm = r.number("lengthRoundingIncrementMm", s.lengthRoundingIncrementMm);
     s.sleevingDiameterMarginPercent =
         r.number("sleevingDiameterMarginPercent", s.sleevingDiameterMarginPercent);
+    s.twistTakeUpPercent = r.number("twistTakeUpPercent", s.twistTakeUpPercent);
     s.extra = r.extra();
     return s;
 }
@@ -526,7 +551,6 @@ void checkIntegrity(const Harness &h)
     const QSet<QString> nodes = uniqueIds(h.layoutNodes, Tr::tr("layout node"));
     const QSet<QString> segments = uniqueIds(h.layoutSegments, Tr::tr("layout segment"));
     uniqueIds(h.notes, Tr::tr("note"));
-    uniqueIds(h.wires, Tr::tr("wire"));
     uniqueIds(h.bomExtras, Tr::tr("BOM row"));
     uniqueIds(h.accessories, Tr::tr("layout accessory"));
 
@@ -595,6 +619,36 @@ void checkIntegrity(const Harness &h)
             fail(Tr::tr("Layout segment \"%1\" starts and ends at the same node.").arg(s.id));
         if (s.lengthMm < 0)
             fail(Tr::tr("Layout segment \"%1\" has a negative length.").arg(s.id));
+    }
+    const QSet<QString> wires = uniqueIds(h.wires, Tr::tr("wire"));
+    uniqueIds(h.cables, Tr::tr("cable"));
+    QSet<QString> shields; // a shield wire belongs to one cable only, and is no conductor
+    QSet<QString> conductors;
+    for (const Cable &c : h.cables) {
+        if (c.wireIds.size() < 2)
+            fail(Tr::tr("Cable \"%1\" has fewer than two wires.").arg(c.id));
+        QSet<QString> seen;
+        for (const QString &id : c.wireIds) {
+            if (!wires.contains(id))
+                fail(Tr::tr("Cable \"%1\" references missing wire \"%2\".").arg(c.id, id));
+            if (seen.contains(id))
+                fail(Tr::tr("Cable \"%1\" lists wire \"%2\" more than once.").arg(c.id, id));
+            seen.insert(id);
+            conductors.insert(id);
+        }
+        if (c.shielded()) {
+            if (!wires.contains(c.shieldWireId))
+                fail(Tr::tr("Cable \"%1\" references missing shield wire \"%2\".").arg(c.id, c.shieldWireId));
+            if (shields.contains(c.shieldWireId))
+                fail(Tr::tr("Wire \"%1\" is the shield of more than one cable.").arg(c.shieldWireId));
+            shields.insert(c.shieldWireId);
+        }
+        if ((c.layLengthMm && *c.layLengthMm <= 0) || (c.jacketOdMm && *c.jacketOdMm <= 0))
+            fail(Tr::tr("Cable \"%1\" has a length or diameter that is not positive.").arg(c.id));
+    }
+    for (const QString &id : std::as_const(shields)) {
+        if (conductors.contains(id))
+            fail(Tr::tr("Wire \"%1\" is both a shield and a cable conductor.").arg(id));
     }
     for (const LayoutAccessory &a : h.accessories) {
         if (!segments.contains(a.segmentId))
@@ -673,7 +727,7 @@ QJsonObject writeWire(const Wire &w)
     o[u"gauge"] = QJsonObject{{u"value"_s, w.gauge.value},
                               {u"system"_s, enumToString(kGaugeSystems, w.gauge.system)}};
     o[u"wireTypeId"] = w.wireTypeId;
-    o[u"conductorKind"] = enumToString(kConductorKinds, w.conductorKind);
+    o.remove(u"conductorKind");
     if (w.lengthOverrideMm)
         o[u"lengthOverrideMm"] = *w.lengthOverrideMm;
     else
@@ -702,6 +756,30 @@ void writeSymbol(QJsonObject &o, SchematicSymbol symbol)
         o.remove(u"symbol");
     else
         o[u"symbol"] = enumToString(kSchematicSymbols, symbol);
+}
+
+QJsonObject writeCable(const Cable &c)
+{
+    QJsonObject o = c.extra;
+    o[u"id"] = c.id;
+    o[u"label"] = c.label;
+    QJsonArray wires;
+    for (const QString &id : c.wireIds)
+        wires.append(id);
+    o[u"wireIds"] = wires;
+    o[u"twisted"] = c.twisted;
+    for (auto [key, value] : {std::pair{u"layLengthMm"_s, c.layLengthMm}, std::pair{u"jacketOdMm"_s, c.jacketOdMm}}) {
+        if (value)
+            o[key] = *value;
+        else
+            o.remove(key);
+    }
+    o[u"shieldWireId"] = c.shieldWireId;
+    o[u"source"] = enumToString(kCableSources, c.source);
+    o[u"partNumber"] = c.partNumber;
+    o[u"shieldPartNumber"] = c.shieldPartNumber;
+    o[u"notes"] = c.notes;
+    return o;
 }
 
 QJsonObject writeSplice(const Splice &s)
@@ -803,6 +881,7 @@ QJsonObject writeSettings(const Settings &s)
     o[u"wasteFactorSleevingPercent"] = s.wasteFactorSleevingPercent;
     o[u"lengthRoundingIncrementMm"] = s.lengthRoundingIncrementMm;
     o[u"sleevingDiameterMarginPercent"] = s.sleevingDiameterMarginPercent;
+    o[u"twistTakeUpPercent"] = s.twistTakeUpPercent;
     return o;
 }
 
@@ -1118,7 +1197,7 @@ QByteArray toJsonArrayBytes(const std::vector<T> &items, WriteFn write)
 bool isKnownEntry(const QString &name)
 {
     return name == kManifestEntry || name == kHarnessEntry || name == kConnectorsEntry
-           || name == kWiresEntry || name == kSplicesEntry || name == kFreeEndsEntry || name == kLayoutEntry
+           || name == kWiresEntry || name == kCablesEntry || name == kSplicesEntry || name == kFreeEndsEntry || name == kLayoutEntry
            || name == kSchematicEntry || name == kLibraryEntry || name == kBomEntry;
 }
 
@@ -1144,6 +1223,7 @@ ZipEntries serializeHarness(const Harness &h)
 
     entries[QString(kConnectorsEntry)] = toJsonArrayBytes(h.connectors, writeConnector);
     entries[QString(kWiresEntry)] = toJsonArrayBytes(h.wires, writeWire);
+    entries[QString(kCablesEntry)] = toJsonArrayBytes(h.cables, writeCable);
     entries[QString(kSplicesEntry)] = toJsonArrayBytes(h.splices, writeSplice);
     entries[QString(kFreeEndsEntry)] = toJsonArrayBytes(h.freeEnds, writeFreeEnd);
 
@@ -1213,6 +1293,7 @@ std::optional<Harness> deserializeHarness(const ZipEntries &entries, QString *er
         h.connectors = readArray<Connector>(entryArray(entries, kConnectorsEntry),
                                             QStringLiteral("connectors"), readConnector);
         h.wires = readArray<Wire>(entryArray(entries, kWiresEntry), QStringLiteral("wires"), readWire);
+        h.cables = readArray<Cable>(entryArray(entries, kCablesEntry), QStringLiteral("cables"), readCable);
         h.splices = readArray<Splice>(entryArray(entries, kSplicesEntry), QStringLiteral("splices"),
                                       readSplice);
         h.freeEnds = readArray<FreeEnd>(entryArray(entries, kFreeEndsEntry), QStringLiteral("freeEnds"),

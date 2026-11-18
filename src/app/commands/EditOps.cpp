@@ -9,6 +9,7 @@
 #include "model/Queries.h"
 
 #include <QCoreApplication>
+#include <QRegularExpression>
 
 #include <algorithm>
 #include <cmath>
@@ -82,6 +83,35 @@ void unpairCuts(HarnessModel *model, const QSet<QString> &removedFreeEndIds, QUn
     }
 }
 
+// Removes wires (ids in model order) and the cables `cableIds`. Other cables lose those
+// wires first, and a cable left with fewer than two conductors goes (pruneCables); on undo
+// the wires come back before their cables.
+void removeWires(HarnessModel *model, const std::vector<QString> &wireIds, QUndoCommand *parent,
+                 const QSet<QString> &cableIds = {})
+{
+    const Harness &h = model->harness();
+    Harness after = h;
+    const QSet<QString> removed(wireIds.begin(), wireIds.end());
+    std::erase_if(after.wires, [&](const Wire &w) { return removed.contains(w.id); });
+    std::erase_if(after.cables, [&](const Cable &c) { return cableIds.contains(c.id); });
+    pruneCables(after);
+    for (auto it = h.cables.rbegin(); it != h.cables.rend(); ++it) {
+        const auto kept = std::find_if(after.cables.begin(), after.cables.end(),
+                                       [&](const Cable &c) { return c.id == it->id; });
+        if (kept == after.cables.end())
+            new RemoveEntityCommand<Cable>(model, it->id, {}, parent);
+        else if (*kept != *it)
+            new UpdateEntityCommand<Cable>(model, *kept, {}, parent);
+    }
+    std::vector<QString> ordered = wireIds;
+    std::sort(ordered.begin(), ordered.end(), [&](const QString &a, const QString &b) {
+        return model->indexOf<Wire>(a) > model->indexOf<Wire>(b);
+    });
+    // Remove from the back so the recorded indices restore the order.
+    for (const QString &id : ordered)
+        new RemoveEntityCommand<Wire>(model, id, {}, parent);
+}
+
 } // namespace
 
 std::vector<QString> wiresRemovedWith(const Harness &harness, const QSet<QString> &connectorIds,
@@ -140,7 +170,8 @@ std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QStrin
                                           const QSet<QString> &spliceIds,
                                           const QSet<QString> &freeEndIds,
                                           const QSet<QString> &wireIds,
-                                          const QSet<QString> &noteIds)
+                                          const QSet<QString> &noteIds,
+                                          const QSet<QString> &cableIds)
 {
     const Harness &h = model->harness();
     auto macro = std::make_unique<QUndoCommand>(Tr::tr("Delete"));
@@ -149,8 +180,7 @@ std::unique_ptr<QUndoCommand> removeItems(HarnessModel *model, const QSet<QStrin
     const std::vector<QString> wires = wiresRemovedWith(h, connectorIds, spliceIds, freeEndIds, wireIds);
     clearLayoutRefs(model, connectorIds + spliceIds + freeEndIds, macro.get());
     unpairCuts(model, freeEndIds, macro.get());
-    for (auto it = wires.rbegin(); it != wires.rend(); ++it)
-        new RemoveEntityCommand<Wire>(model, *it, {}, macro.get());
+    removeWires(model, wires, macro.get(), cableIds);
     for (auto it = h.freeEnds.rbegin(); it != h.freeEnds.rend(); ++it) {
         if (freeEndIds.contains(it->id))
             new RemoveEntityCommand<FreeEnd>(model, it->id, {}, macro.get());
@@ -188,13 +218,7 @@ std::unique_ptr<QUndoCommand> setConnectorPins(HarnessModel *model, const QStrin
     const std::vector<QString> lost = wiresLostByPinChange(model->harness(), connector, newPins);
     connector.pins = std::move(newPins);
     auto macro = std::make_unique<QUndoCommand>(text);
-    // Remove from the back so indices recorded for undo stay valid.
-    std::vector<QString> ordered = lost;
-    std::sort(ordered.begin(), ordered.end(), [&](const QString &a, const QString &b) {
-        return model->indexOf<Wire>(a) > model->indexOf<Wire>(b);
-    });
-    for (const QString &wireId : ordered)
-        new RemoveEntityCommand<Wire>(model, wireId, {}, macro.get());
+    removeWires(model, lost, macro.get());
     new UpdateEntityCommand<Connector>(model, std::move(connector), {}, macro.get());
     return macro;
 }
@@ -284,6 +308,7 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
     std::erase_if(fragment.wires, [&](const Wire &w) {
         return reused.contains(wireEndItemId(w.endA)) || reused.contains(wireEndItemId(w.endB));
     });
+    pruneCables(fragment);
 
     assignNewIds(fragment);
     for (auto &[key, placement] : fragment.schematic.placements) {
@@ -332,6 +357,8 @@ std::unique_ptr<QUndoCommand> pasteFragment(HarnessModel *model, Harness fragmen
         Placements p = placementsOf(EntityKind::Wire, w.id);
         new AddEntityCommand<Wire>(model, std::move(w), std::move(p), {}, macro.get());
     }
+    for (Cable &c : fragment.cables)
+        new AddEntityCommand<Cable>(model, std::move(c), {}, {}, macro.get());
     return macro;
 }
 
@@ -815,6 +842,16 @@ std::unique_ptr<QUndoCommand> cutWire(HarnessModel *model, const QString &wireId
         new SetPlacementsCommand(model, {{wireId, std::nullopt}}, {}, macro.get());
     new UpdateEntityCommand<Wire>(model, first, {}, macro.get());
     new AddEntityCommand<Wire>(model, second, std::move(secondPlacements), {}, macro.get());
+    // Both pieces of a cable conductor stay in the cable. A cut shield keeps its first piece
+    // as the shield; the second is an ordinary wire.
+    for (const Cable *cable : cablesOfWire(h, wireId)) {
+        Cable updated = *cable;
+        const auto it = std::find(updated.wireIds.begin(), updated.wireIds.end(), wireId);
+        if (it == updated.wireIds.end())
+            continue;
+        updated.wireIds.insert(it + 1, second.id);
+        new UpdateEntityCommand<Cable>(model, updated, {}, macro.get());
+    }
     if (newWireId)
         *newWireId = second.id;
     if (cutEndIds)
@@ -875,6 +912,99 @@ std::unique_ptr<QUndoCommand> updateFreeEnd(HarnessModel *model, const FreeEnd &
         }
     }
     return macro;
+}
+
+std::unique_ptr<QUndoCommand> makeCable(HarnessModel *model, const std::vector<QString> &wireIds,
+                                        const QString &label, QString *newCableId)
+{
+    const Harness &h = model->harness();
+    Cable cable;
+    cable.id = newId();
+    cable.label = label;
+    // Model order; shields stay shields.
+    for (const Wire &w : h.wires) {
+        const bool listed = std::find(wireIds.begin(), wireIds.end(), w.id) != wireIds.end();
+        const bool shield = std::any_of(h.cables.begin(), h.cables.end(),
+                                        [&](const Cable &c) { return c.shieldWireId == w.id; });
+        if (listed && !shield)
+            cable.wireIds.push_back(w.id);
+    }
+    if (cable.wireIds.size() < 2)
+        return nullptr;
+    if (newCableId)
+        *newCableId = cable.id;
+    return std::make_unique<AddEntityCommand<Cable>>(model, std::move(cable), Placements{}, Tr::tr("Make cable"));
+}
+
+QString nextCableLabel(const Harness &harness)
+{
+    int highest = 0;
+    static const QRegularExpression pattern(QStringLiteral("^TP(\\d+)$"));
+    for (const Cable &c : harness.cables) {
+        const QRegularExpressionMatch match = pattern.match(c.label);
+        if (match.hasMatch())
+            highest = std::max(highest, match.captured(1).toInt());
+    }
+    return QStringLiteral("TP%1").arg(highest + 1);
+}
+
+std::unique_ptr<QUndoCommand> addShieldWire(HarnessModel *model, const QString &cableId, QPointF atA,
+                                            QPointF atB, const QString &sheetId, QString *shieldWireId)
+{
+    const Cable *current = model->find<Cable>(cableId);
+    if (!current || current->shielded())
+        return nullptr;
+    const Wire *first = model->find<Wire>(current->wireIds.front());
+    auto macro = std::make_unique<QUndoCommand>(Tr::tr("Add shield wire"));
+    FreeEnd endA, endB;
+    for (auto [end, position] : {std::pair{&endA, atA}, std::pair{&endB, atB}}) {
+        end->id = newId();
+        end->kind = FreeEndKind::Bare;
+        SchematicPlacement placement;
+        placement.position = position;
+        placement.sheetId = sheetId;
+        new AddEntityCommand<FreeEnd>(model, *end, {{end->id, placement}}, {}, macro.get());
+    }
+    Wire shield;
+    shield.id = newId();
+    shield.name = current->label.isEmpty() ? Tr::tr("Shield") : Tr::tr("%1 shield").arg(current->label);
+    shield.circuitId = nextCircuitId(model->harness());
+    shield.endA = FreeEndRef{endA.id};
+    shield.endB = FreeEndRef{endB.id};
+    if (first) {
+        shield.gauge = first->gauge;
+        shield.factory = first->factory;
+    }
+    SchematicPlacement sheet;
+    sheet.sheetId = sheetId;
+    new AddEntityCommand<Wire>(model, shield, {{Schematic::wireSheetKey(shield.id), sheet}}, {}, macro.get());
+    Cable updated = *current;
+    updated.shieldWireId = shield.id;
+    new UpdateEntityCommand<Cable>(model, updated, {}, macro.get());
+    if (shieldWireId)
+        *shieldWireId = shield.id;
+    return macro;
+}
+
+std::unique_ptr<QUndoCommand> removeShieldWire(HarnessModel *model, const QString &cableId)
+{
+    const Cable *current = model->find<Cable>(cableId);
+    if (!current || !current->shielded())
+        return nullptr;
+    const Harness &h = model->harness();
+    // Its bare ends go too, unless other wires use them.
+    QSet<QString> ends;
+    if (const Wire *shield = model->find<Wire>(current->shieldWireId)) {
+        for (const WireEnd *end : {&shield->endA, &shield->endB}) {
+            const auto *free = std::get_if<FreeEndRef>(end);
+            const FreeEnd *item = free ? model->find<FreeEnd>(free->freeEndId) : nullptr;
+            if (item && item->kind == FreeEndKind::Bare && wiresOnFreeEnd(h, item->id).size() == 1)
+                ends.insert(item->id);
+        }
+    }
+    auto command = removeItems(model, {}, {}, ends, {current->shieldWireId});
+    command->setText(Tr::tr("Remove shield wire"));
+    return command;
 }
 
 std::vector<Pin> resizedPins(const std::vector<Pin> &pins, int count)

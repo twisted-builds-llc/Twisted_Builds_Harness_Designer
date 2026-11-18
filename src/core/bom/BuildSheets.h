@@ -30,6 +30,8 @@ struct PinoutRow
     QString stripeColor;
     Gauge gauge;
     QString otherEnd; // describeWireEnd() of the wire's other end
+    QStringList cables; // labels of the cables the wire is in
+    bool shield = false; // the wire is a cable's shield
 };
 
 struct PinoutTable

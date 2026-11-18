@@ -791,6 +791,96 @@ private slots:
         QVERIFY(!f.model()->find<FreeEnd>(cutB));
     }
 
+    // Selected wires become a twisted cable, drawn as a mark across their leads where they
+    // leave a connector side by side; a shield wire gets loose ends to attach; deleting the
+    // cable only ungroups.
+    void cablesOnTheSchematic()
+    {
+        Fixture f;
+        f.reset(placedSample()); // w1 ECU 1 - SENSOR 1, w4 ECU 3 - SENSOR 2, w5 ECU 4 - LAMP 1
+        const Harness before = f.model()->harness();
+        QUndoStack *stack = f.document.undoStack();
+        auto loadable = [&] {
+            QString error;
+            QVERIFY2(io::deserializeHarness(io::serializeHarness(f.model()->harness()), &error), qPrintable(error));
+        };
+
+        Selection one;
+        one.wires = {u"w1"_s};
+        f.selection.setSelection(one);
+        QVERIFY(!f.view.makeCableFromSelection()); // one wire is not a cable
+
+        Selection pair;
+        pair.wires = {u"w4"_s, u"w1"_s};
+        f.selection.setSelection(pair);
+        QVERIFY(f.view.makeCableFromSelection());
+        QCOMPARE(f.model()->harness().cables.size(), size_t(1));
+        const Cable cable = f.model()->harness().cables[0];
+        QCOMPARE(cable.label, u"TP1"_s);
+        QVERIFY(cable.twisted);
+        QCOMPARE(cable.wireIds, (std::vector<QString>{u"w1"_s, u"w4"_s})); // model order
+        QCOMPARE(f.selection.selection().cables, QSet<QString>{cable.id});
+        CableItem *item = f.scene()->cableItem(cable.id);
+        QVERIFY(item && item->isSelected());
+        // ECU 1 and 3 leave ECU's right side 40 apart, and SENSOR 1 and 2 its left side: a
+        // mark at each end, kMarkOffset along the leads.
+        QCOMPARE(item->marks().size(), size_t(2));
+        QVERIFY(item->tags().empty());
+        const WireItem *w1 = f.scene()->wireItem(u"w1"_s);
+        const CableItem::Mark &atEcu = item->marks()[0];
+        QCOMPARE(atEcu.x, w1->anchorA().point.x() + CableItem::kMarkOffset);
+        QCOMPARE(atEcu.ys.size(), size_t(2));
+        QCOMPARE(atEcu.ys[1] - atEcu.ys[0], 2 * ConnectorItem::kRowHeight);
+        loadable();
+
+        // Moving SENSOR keeps the marks on the leads.
+        SchematicPlacement moved = *f.model()->placement(u"sensor"_s);
+        moved.position += QPointF(100, 40);
+        stack->push(new SetPlacementsCommand(f.model(), {{u"sensor"_s, moved}}, {}));
+        QCOMPARE(item->marks()[1].x, w1->anchorB().point.x() - CableItem::kMarkOffset);
+
+        // A shield wire between two bare ends, drawn dotted.
+        QVERIFY(f.view.addShieldWire(cable.id));
+        const Cable &shielded = *f.model()->find<Cable>(cable.id);
+        QVERIFY(shielded.shielded());
+        const Wire &shield = *f.model()->find<Wire>(shielded.shieldWireId);
+        QCOMPARE(shield.name, u"TP1 shield"_s);
+        QCOMPARE(f.model()->find<FreeEnd>(std::get<FreeEndRef>(shield.endA).freeEndId)->kind, FreeEndKind::Bare);
+        QVERIFY(f.scene()->wireItem(shield.id)->isShield());
+        QVERIFY(!f.scene()->wireItem(u"w1"_s)->isShield());
+        QCOMPARE(f.selection.selection().wires, QSet<QString>{shield.id});
+        QVERIFY(!f.view.addShieldWire(cable.id)); // one shield only
+        loadable();
+        // Removing the shield takes its unused bare ends along.
+        stack->push(removeShieldWire(f.model(), cable.id).release());
+        QVERIFY(!f.model()->find<Cable>(cable.id)->shielded());
+        QCOMPARE(f.model()->harness().freeEnds.size(), before.freeEnds.size());
+        stack->undo();
+        QVERIFY(f.scene()->wireItem(f.model()->find<Cable>(cable.id)->shieldWireId)->isShield());
+
+        // Conductors that do not leave one item side by side get a tag each.
+        Selection apart;
+        apart.wires = {u"w1"_s, u"w5"_s};
+        f.selection.setSelection(apart);
+        QVERIFY(f.view.makeCableFromSelection());
+        const QString apartId = *f.selection.selection().cables.begin();
+        QVERIFY(f.scene()->cableItem(apartId)->marks().empty());
+        QCOMPARE(f.scene()->cableItem(apartId)->tags().size(), size_t(2));
+        QCOMPARE(f.model()->find<Cable>(apartId)->label, u"TP2"_s);
+
+        // Deleting a cable ungroups it: the wires stay.
+        f.view.deleteSelection();
+        QVERIFY(!f.model()->find<Cable>(apartId));
+        QVERIFY(!f.scene()->cableItem(apartId));
+        QCOMPARE(f.model()->harness().wires.size(), before.wires.size() + 1); // + the shield
+        loadable();
+
+        while (stack->canUndo())
+            stack->undo();
+        QVERIFY(f.model()->harness() == before);
+        QVERIFY(!f.scene()->cableItem(cable.id));
+    }
+
     // A cut on a routed wire puts both cut ends at one point in the loom, so an add-on drawn
     // from either cut end routes through the cut (hands-on test: two points, "not routed").
     void cutWireIntoTheLoom()
@@ -1581,6 +1671,24 @@ private slots:
         f.view.resize(1400, 900);
         f.view.zoomToFit();
         f.view.grab().save(imageDir() + u"/schematic-cut-factory.png"_s);
+        f.view.resetTransform();
+
+        // A shielded twisted pair and a bought triple with tags.
+        Harness cables = placedSample();
+        Cable tp;
+        tp.id = u"tp"_s;
+        tp.label = u"CAN"_s;
+        tp.wireIds = {u"w1"_s, u"w4"_s};
+        tp.shieldWireId = u"w2"_s;
+        cables.cables = {tp};
+        f.reset(cables);
+        f.view.resize(1400, 900);
+        f.view.zoomToFit();
+        f.view.grab().save(imageDir() + u"/schematic-cables.png"_s);
+        f.view.resetTransform();
+        f.view.centerOn(QPointF(450, 100));
+        f.view.scale(2, 2);
+        f.view.grab().save(imageDir() + u"/schematic-cables-zoom.png"_s);
         f.view.resetTransform();
 
         // Whole window, dark theme, with a wire and then a connector selected.

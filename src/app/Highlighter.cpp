@@ -56,6 +56,7 @@ void Highlighter::recompute()
     seed.wires = s.wires;
     seed.layoutNodes = s.layoutNodes;
     seed.layoutSegments = s.layoutSegments;
+    seed.cables = s.cables;
     const Harness &h = m_model->harness();
     m_current = calc::relatedItems(h, calc::LayoutGraph(h), seed);
     emit changed();

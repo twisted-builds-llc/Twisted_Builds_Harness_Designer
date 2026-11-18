@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "calc/Highlight.h"
 
+#include <algorithm>
+
 namespace tbh::calc {
 
 QString pinKey(const QString &connectorId, const QString &pinId)
@@ -15,7 +17,21 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
     set.pins = seed.pins;
     set.splices = seed.splices;
     set.freeEnds = seed.freeEnds;
-    set.wires = seed.wires;
+    // A cable stands for its wires; a wire in a cable brings the rest of the cable.
+    QSet<QString> seedWires = seed.wires;
+    for (const Cable &c : harness.cables) {
+        const bool seeded = seed.cables.contains(c.id)
+                            || std::any_of(c.wireIds.begin(), c.wireIds.end(),
+                                           [&](const QString &id) { return seed.wires.contains(id); })
+                            || (c.shielded() && seed.wires.contains(c.shieldWireId));
+        if (!seeded)
+            continue;
+        for (const QString &id : c.wireIds)
+            seedWires.insert(id);
+        if (c.shielded())
+            seedWires.insert(c.shieldWireId);
+    }
+    set.wires = seedWires;
     set.layoutNodes = seed.layoutNodes;
     set.layoutSegments = seed.layoutSegments;
 
@@ -69,7 +85,7 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
 
     for (const Wire &w : harness.wires) {
         const Route route = graph.route(w);
-        bool related = seed.wires.contains(w.id) || endTouchesSeed(w, false) || endTouchesSeed(w, true);
+        bool related = seedWires.contains(w.id) || endTouchesSeed(w, false) || endTouchesSeed(w, true);
         if (!related) {
             for (const QString &segment : route.segmentIds) {
                 if (seedSegments.contains(segment)) {
@@ -104,6 +120,11 @@ HighlightSet relatedItems(const Harness &harness, const LayoutGraph &graph, cons
                 set.layoutNodes.insert(nodes.second);
             }
         }
+    }
+    set.cables = seed.cables;
+    for (const Cable &c : harness.cables) {
+        if (std::any_of(c.wireIds.begin(), c.wireIds.end(), [&](const QString &id) { return set.wires.contains(id); }))
+            set.cables.insert(c.id);
     }
     // Seeded segments' own nodes.
     for (const QString &segment : std::as_const(seedSegments)) {

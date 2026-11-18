@@ -29,6 +29,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     , m_units(new QComboBox(this))
     , m_description(new CommitTextEdit(this))
     , m_serviceLoop(new QDoubleSpinBox(this))
+    , m_twistTakeUp(new QDoubleSpinBox(this))
     , m_rounding(new QLineEdit(this))
     , m_wasteWire(new QDoubleSpinBox(this))
     , m_wasteSleeving(new QDoubleSpinBox(this))
@@ -44,7 +45,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     info->addRow(tr("&Units:"), m_units);
     info->addRow(tr("&Description:"), m_description);
 
-    for (QDoubleSpinBox *percent : {m_serviceLoop, m_wasteWire, m_wasteSleeving, m_sleevingMargin}) {
+    for (QDoubleSpinBox *percent : {m_serviceLoop, m_twistTakeUp, m_wasteWire, m_wasteSleeving, m_sleevingMargin}) {
         percent->setRange(0, 100);
         percent->setDecimals(1);
         percent->setSuffix(QStringLiteral(" %"));
@@ -67,6 +68,10 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     auto *lengths = new QGroupBox(tr("Wire length"), this);
     auto *lengthsForm = new QFormLayout(lengths);
     lengthsForm->addRow(tr("Service loop:"), m_serviceLoop);
+    lengthsForm->addRow(tr("Twist take-up:"), m_twistTakeUp);
+    m_twistTakeUp->setToolTip(tr("Extra length for the wires of a twisted cable you build, as a percentage of "
+                                 "their run. The default is approximate: it depends on the twist rate and wire "
+                                 "size, so check it against a test piece."));
     lengthsForm->addRow(tr("Round cut length up to:"), lengthRow(m_rounding));
     m_rounding->setAccessibleName(tr("Round cut length up to"));
     m_rounding->setToolTip(tr("Cut lengths are rounded up to a multiple of this. 0 = no rounding."));
@@ -104,7 +109,7 @@ HarnessPanel::HarnessPanel(Document *document, QWidget *parent)
     connect(m_units, &QComboBox::activated, this, &HarnessPanel::commitInfo);
     m_description->onCommit = [this] { commitInfo(); };
     connect(m_rounding, &QLineEdit::editingFinished, this, &HarnessPanel::commitSettings);
-    for (QDoubleSpinBox *spin : {m_serviceLoop, m_wasteWire, m_wasteSleeving, m_packing, m_sleevingMargin})
+    for (QDoubleSpinBox *spin : {m_serviceLoop, m_twistTakeUp, m_wasteWire, m_wasteSleeving, m_packing, m_sleevingMargin})
         connect(spin, &QDoubleSpinBox::valueChanged, this, &HarnessPanel::commitSettings);
 
     HarnessModel *model = m_document->model();
@@ -120,7 +125,7 @@ void HarnessPanel::refresh()
     const HarnessInfo &info = h.info;
     const Settings &s = h.settings;
     const QSignalBlocker b1(m_name), b2(m_revision), b3(m_author), b4(m_units), b5(m_serviceLoop),
-        b6(m_wasteWire), b7(m_wasteSleeving), b8(m_packing), b9(m_sleevingMargin), b10(m_partNumber);
+        b6(m_wasteWire), b7(m_wasteSleeving), b8(m_packing), b9(m_sleevingMargin), b10(m_partNumber), b11(m_twistTakeUp);
     m_name->setText(info.name);
     m_partNumber->setText(info.partNumber);
     m_revision->setText(info.revision);
@@ -129,6 +134,7 @@ void HarnessPanel::refresh()
     m_description->setTextIfDifferent(info.description);
 
     m_serviceLoop->setValue(s.serviceLoopPercent);
+    m_twistTakeUp->setValue(s.twistTakeUpPercent);
     m_rounding->setText(formatLength(s.lengthRoundingIncrementMm, info.units, false));
     m_wasteWire->setValue(s.wasteFactorWirePercent);
     m_wasteSleeving->setValue(s.wasteFactorSleevingPercent);
@@ -163,6 +169,7 @@ void HarnessPanel::commitSettings()
     const Settings &current = model->harness().settings;
     Settings s = current;
     s.serviceLoopPercent = m_serviceLoop->value();
+    s.twistTakeUpPercent = m_twistTakeUp->value();
     s.wasteFactorWirePercent = m_wasteWire->value();
     s.wasteFactorSleevingPercent = m_wasteSleeving->value();
     s.packingFactor = m_packing->value();

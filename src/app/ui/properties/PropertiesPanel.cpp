@@ -2,6 +2,7 @@
 #include "ui/properties/PropertiesPanel.h"
 
 #include "SelectionModel.h"
+#include "ui/properties/CablePanel.h"
 #include "ui/properties/HarnessPanel.h"
 #include "ui/properties/ConnectorPanel.h"
 #include "ui/properties/LayoutPanels.h"
@@ -17,6 +18,7 @@ PropertiesPanel::PropertiesPanel(Document *document, SelectionModel *selection, 
     , m_harness(new HarnessPanel(document, this))
     , m_connector(new ConnectorPanel(document, this))
     , m_wires(new WirePanel(document, this))
+    , m_cable(new CablePanel(document, this))
     , m_splice(new SplicePanel(document, this))
     , m_freeEnd(new FreeEndEditor(document, this))
     , m_segment(new SegmentPanel(document, this))
@@ -27,7 +29,8 @@ PropertiesPanel::PropertiesPanel(Document *document, SelectionModel *selection, 
     m_mixed->setAlignment(Qt::AlignCenter);
     m_mixed->setEnabled(false);
     for (QWidget *page : {static_cast<QWidget *>(m_harness), static_cast<QWidget *>(m_connector),
-                          static_cast<QWidget *>(m_wires), static_cast<QWidget *>(m_splice),
+                          static_cast<QWidget *>(m_wires), static_cast<QWidget *>(m_cable),
+                          static_cast<QWidget *>(m_splice),
                           static_cast<QWidget *>(m_freeEnd),
                           static_cast<QWidget *>(m_segment), static_cast<QWidget *>(m_node),
                           static_cast<QWidget *>(m_accessory),
@@ -45,6 +48,12 @@ void PropertiesPanel::update()
     const qsizetype total = items + s.wires.size() + layoutItems;
     if (s.isEmpty()) {
         setCurrentWidget(m_harness);
+    } else if (s.cables.size() == 1 && total == 0) {
+        m_cable->setCable(*s.cables.begin());
+        setCurrentWidget(m_cable);
+    } else if (total == 0) { // several cables
+        m_mixed->setText(tr("%n item(s) selected", nullptr, int(s.cables.size())));
+        setCurrentWidget(m_mixed);
     } else if (s.layoutSegments.size() == 1 && total == 1) {
         m_segment->setSegment(*s.layoutSegments.begin());
         setCurrentWidget(m_segment);

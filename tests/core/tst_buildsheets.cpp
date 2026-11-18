@@ -115,6 +115,22 @@ private slots:
         QCOMPARE(tables[1].rows[1].otherEnd, u"ECU : 3"_s);
     }
 
+    // Pinout rows name the cables a wire is in, and mark a shield.
+    void pinoutCables()
+    {
+        Harness h = sample();
+        Cable cb = cable(u"cb"_s, u"TP"_s, {u"w1"_s, u"w4"_s});
+        cb.shieldWireId = u"w2"_s;
+        h.cables = {cb};
+        const auto tables = pinoutTables(h);
+        const PinoutTable &ecu = tables[0];
+        QCOMPARE(ecu.rows[0].cables, QStringList{u"TP"_s}); // ecu1: w1
+        QVERIFY(!ecu.rows[0].shield);
+        QCOMPARE(ecu.rows[1].cables, QStringList{u"TP"_s}); // ecu2: w2, the shield
+        QVERIFY(ecu.rows[1].shield);
+        QVERIFY(ecu.rows[3].cables.isEmpty()); // ecu4: w5
+    }
+
     void splicePinouts()
     {
         const auto tables = pinoutTables(bomSample());

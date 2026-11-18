@@ -77,8 +77,9 @@ double roundUpToIncrement(double value, double increment);
 // Every step of 8.1, kept so the UI can explain the number:
 //   base   = sum of route segment lengths
 //   ends   = allowance(end A) + allowance(end B)
-//   loop   = (base + ends) * serviceLoopPercent / 100
-//   total  = base + ends + loop
+//   twist  = base * twistTakeUpPercent / 100 for a conductor of a built twisted cable, else 0
+//   loop   = (base + ends + twist) * serviceLoopPercent / 100
+//   total  = base + ends + twist + loop
 //   cut    = roundUp(total, lengthRoundingIncrement), or the override if set
 struct WireLength
 {
@@ -87,6 +88,7 @@ struct WireLength
     double baseMm = 0;
     double endAllowanceAMm = 0;
     double endAllowanceBMm = 0;
+    double twistTakeUpMm = 0;
     double serviceLoopMm = 0;
     double totalMm = 0;
     double cutMm = 0;
@@ -97,6 +99,13 @@ struct WireLength
 };
 
 WireLength wireLength(const Harness &harness, const LayoutGraph &graph, const Wire &wire);
+
+// True if the wire is a conductor of a built, twisted cable (it gets the twist take-up).
+bool isTwistedByBuilder(const Harness &harness, const QString &wireId);
+
+// Length of the run a cable's conductors share in the layout: the summed lengths of the
+// segments every conductor is routed through. Empty if a conductor is not routed.
+std::optional<double> cableRunLengthMm(const LayoutGraph &graph, const Harness &harness, const Cable &cable);
 
 // Why a wire is not routed, e.g. "SENSOR : 2 is not placed in the layout". Empty for Ok.
 QString routeStatusReason(const Harness &harness, const Wire &wire, RouteStatus status);
@@ -152,16 +161,27 @@ struct Problem
 {
     // PartMismatch: itemId is the connector or free end whose part does not suit its wire
     // or housing (see calc/PartFit.h).
-    enum class Kind { UnroutedWire, SegmentWithoutLength, SleevingTooSmall, DuplicateCircuitId, PartMismatch };
+    // CableSplit / CableWithoutDiameter: itemId is the cable.
+    enum class Kind {
+        UnroutedWire,
+        SegmentWithoutLength,
+        SleevingTooSmall,
+        DuplicateCircuitId,
+        PartMismatch,
+        CableSplit,
+        CableWithoutDiameter
+    };
     Kind kind;
-    QString itemId; // wire or segment id
+    QString itemId; // wire, segment, connector, free end or cable id
     QString message;
 };
 
 // Issues the user should fix: unrouted wires, segments without a length, assigned
 // sleeving too small for its bundle (needs the effective library), and circuit ids used by
 // more than one wire (one problem per id, on its second wire), and connector parts that do
-// not suit their wires or housing (partProblems()).
+// not suit their wires or housing (partProblems()), twisted cables whose routed conductors
+// do not all take the same route (the twist would split), and bought cables without a
+// jacket diameter.
 std::vector<Problem> findProblems(const Harness &harness, const Library &library);
 
 } // namespace tbh::calc

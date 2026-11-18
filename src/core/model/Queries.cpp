@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QLocale>
+#include <QSet>
 
 #include <algorithm>
 
@@ -30,6 +31,29 @@ std::vector<QString> wiresWhere(const Harness &harness, Pred touches)
 }
 
 } // namespace
+
+std::vector<const Cable *> cablesOfWire(const Harness &harness, const QString &wireId)
+{
+    std::vector<const Cable *> result;
+    for (const Cable &c : harness.cables) {
+        if (c.contains(wireId))
+            result.push_back(&c);
+    }
+    return result;
+}
+
+void pruneCables(Harness &harness)
+{
+    QSet<QString> wires;
+    for (const Wire &w : harness.wires)
+        wires.insert(w.id);
+    for (Cable &c : harness.cables) {
+        std::erase_if(c.wireIds, [&](const QString &id) { return !wires.contains(id); });
+        if (!c.shieldWireId.isEmpty() && !wires.contains(c.shieldWireId))
+            c.shieldWireId.clear();
+    }
+    std::erase_if(harness.cables, [](const Cable &c) { return c.wireIds.size() < 2; });
+}
 
 std::vector<QString> wiresOnConnector(const Harness &harness, const QString &connectorId)
 {

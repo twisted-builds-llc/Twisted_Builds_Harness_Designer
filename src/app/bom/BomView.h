@@ -44,6 +44,7 @@ private:
     QLabel *m_summary;
     QTableWidget *m_wires;
     QTableWidget *m_cutList;
+    QTableWidget *m_cables;
     QTableWidget *m_sleeving;
     QTableWidget *m_parts;
     QTableWidget *m_extras;

@@ -259,6 +259,77 @@ private slots:
         QCOMPARE(problems[1].itemId, u"seg4"_s);
     }
 
+    // A built twisted cable's conductors get the twist take-up (default 5 % of the run);
+    // bought or untwisted cables do not.
+    void twistTakeUp()
+    {
+        Harness h = sample();
+        h.cables = {cable(u"tp"_s, u"TP"_s, {u"w1"_s, u"w4"_s})}; // twisted, built
+        const LayoutGraph g(h);
+        WireLength l = wireLength(h, g, wireById(h, u"w1"_s));
+        // base 750; ends 20; twist 750 * 5 % = 37.5; loop (750 + 20 + 37.5) * 5 % = 40.375;
+        // total 847.875; cut rounds up to 850.
+        QCOMPARE(l.twistTakeUpMm, 37.5);
+        QCOMPARE(l.serviceLoopMm, 40.375);
+        QCOMPARE(l.totalMm, 847.875);
+        QCOMPARE(l.cutMm, 850.0);
+        QVERIFY(isTwistedByBuilder(h, u"w4"_s));
+        QVERIFY(!isTwistedByBuilder(h, u"w2"_s));
+
+        // Take-up 10 %: twist 75; loop (750 + 20 + 75) * 5 % = 42.25; total 887.25; cut 890.
+        h.settings.twistTakeUpPercent = 10;
+        QCOMPARE(wireLength(h, g, wireById(h, u"w1"_s)).cutMm, 890.0);
+
+        // Bought (twisted at the factory) or not twisted: no take-up, 810 as in pinToPin.
+        h.cables[0].source = CableSource::Bought;
+        QCOMPARE(wireLength(h, g, wireById(h, u"w1"_s)).cutMm, 810.0);
+        h.cables[0].source = CableSource::Built;
+        h.cables[0].twisted = false;
+        QCOMPARE(wireLength(h, g, wireById(h, u"w1"_s)).cutMm, 810.0);
+        // A shield is no conductor: no take-up.
+        h.cables[0].twisted = true;
+        h.cables[0].shieldWireId = u"w2"_s;
+        QCOMPARE(wireLength(h, g, wireById(h, u"w2"_s)).twistTakeUpMm, 0.0);
+    }
+
+    // The run a cable's conductors share: segments every conductor is routed through.
+    void cableRunLength()
+    {
+        Harness h = sample();
+        const LayoutGraph g(h);
+        // w1 and w4 both run seg1 + seg2: 300 + 450 = 750.
+        QCOMPARE(cableRunLengthMm(g, h, cable(u"a"_s, {}, {u"w1"_s, u"w4"_s})), std::optional(750.0));
+        // w1 (seg1, seg2) and w2 (seg1, seg3) share seg1: 300.
+        QCOMPARE(cableRunLengthMm(g, h, cable(u"b"_s, {}, {u"w1"_s, u"w2"_s})), std::optional(300.0));
+        // w5 is not routed: unknown.
+        QVERIFY(!cableRunLengthMm(g, h, cable(u"c"_s, {}, {u"w1"_s, u"w5"_s})));
+    }
+
+    void cableProblems()
+    {
+        Harness h = sample();
+        Cable split = cable(u"split"_s, u"TP1"_s, {u"w1"_s, u"w2"_s}); // w2 leaves at the branch
+        Cable pair = cable(u"pair"_s, u"TP2"_s, {u"w1"_s, u"w4"_s});   // same route: fine
+        Cable bought = cable(u"bought"_s, u"CAN"_s, {u"w1"_s, u"w2"_s});
+        bought.twisted = false; // not twisted: a split is fine
+        bought.source = CableSource::Bought;
+        Cable withOd = bought;
+        withOd.id = u"od"_s;
+        withOd.jacketOdMm = 4.5;
+        h.cables = {split, pair, bought, withOd};
+        std::vector<Problem> found;
+        for (const Problem &p : findProblems(h, h.library)) {
+            if (p.kind == Problem::Kind::CableSplit || p.kind == Problem::Kind::CableWithoutDiameter)
+                found.push_back(p);
+        }
+        QCOMPARE(found.size(), size_t(2));
+        QCOMPARE(found[0].kind, Problem::Kind::CableSplit);
+        QCOMPARE(found[0].itemId, u"split"_s);
+        QVERIFY(found[0].message.contains(u"TP1"_s));
+        QCOMPARE(found[1].kind, Problem::Kind::CableWithoutDiameter);
+        QCOMPARE(found[1].itemId, u"bought"_s);
+    }
+
     void duplicateCircuitIds()
     {
         Harness h = sample();

@@ -215,6 +215,68 @@ private slots:
         QCOMPARE(withBackshell.parts[2].category, PartCategory::Backshell);
     }
 
+    // A bought cable: its conductors leave the wire lines (still in the cut list) and the
+    // cable is one piece, the run its conductors share.
+    void boughtCable()
+    {
+        Harness h = bomSample();
+        Cable cb = cable(u"cb"_s, u"CAN"_s, {u"w1"_s, u"w2"_s});
+        cb.source = CableSource::Bought;
+        cb.partNumber = u"CBL-2"_s;
+        h.cables = {cb};
+        const Bom bom = buildBom(h, bomLibrary());
+        // RED/WHT was w1 + w2 only: gone. BLK keeps w3 + w4 + w5.
+        QCOMPARE(bom.wires.size(), size_t(1));
+        QCOMPARE(bom.wires[0].baseColor, u"BLK"_s);
+        QCOMPARE(bom.cutList.size(), size_t(5));
+        QCOMPARE(bom.cutList[0].cables, QStringList{u"CAN"_s});
+        QVERIFY(!bom.cutList[0].shield);
+        // w1 (seg1, seg2) and w2 (seg1, seg3) share seg1: 300 mm (a multiple of 5);
+        // with 5 % waste 315.
+        QCOMPARE(bom.cables.size(), size_t(1));
+        const CableLine &line = bom.cables[0];
+        QCOMPARE(line.kind, CableLine::Kind::Cable);
+        QCOMPARE(line.partNumber, u"CBL-2"_s);
+        QCOMPARE(line.references, QStringList{u"CAN"_s});
+        QCOMPARE(line.pieces, 1);
+        QCOMPARE(line.lengthMm, 300.0);
+        QCOMPARE(line.lengthWithWasteMm, 315.0);
+        QCOMPARE(line.piecesWithoutLength, 0);
+
+        // Already in the factory harness: not counted.
+        for (Wire &w : h.wires)
+            w.factory = w.id == u"w1"_s || w.id == u"w2"_s;
+        QVERIFY(buildBom(h, bomLibrary()).cables.empty());
+    }
+
+    // A built twisted pair with a shield: conductors are wire (with the twist take-up), the
+    // shield wire is braid, measured along the pair's run.
+    void builtShieldedPair()
+    {
+        Harness h = bomSample();
+        Cable cb = cable(u"cb"_s, u"TP"_s, {u"w1"_s, u"w4"_s});
+        cb.shieldWireId = u"w2"_s;
+        h.cables = {cb};
+        const Bom bom = buildBom(h, bomLibrary());
+        // RED/WHT: w1 only (w2 is the shield). w1 cut 850 with the take-up (tst_wirelength).
+        QCOMPARE(bom.wires[0].pieces, 1);
+        QCOMPARE(bom.wires[0].lengthMm, 850.0);
+        // BLK unchanged: w3 105 + w4 1000 (override, no take-up); w5 unrouted.
+        QCOMPARE(bom.wires[1].lengthMm, 1105.0);
+        // Braid: run of w1 and w4, 750 mm; with 5 % waste 787.5. No part number: flagged.
+        QCOMPARE(bom.cables.size(), size_t(1));
+        QCOMPARE(bom.cables[0].kind, CableLine::Kind::ShieldBraid);
+        QCOMPARE(bom.cables[0].lengthMm, 750.0);
+        QCOMPARE(bom.cables[0].lengthWithWasteMm, 787.5);
+        QCOMPARE(bom.flaggedCount(), buildBom(bomSample(), bomLibrary()).flaggedCount() + 1);
+        const auto shield = std::find_if(bom.cutList.begin(), bom.cutList.end(),
+                                         [](const CutLine &c) { return c.wireId == u"w2"_s; });
+        QVERIFY(shield->shield);
+        // Without a shield a built cable is only wire.
+        h.cables[0].shieldWireId.clear();
+        QVERIFY(buildBom(h, bomLibrary()).cables.empty());
+    }
+
     void flagged()
     {
         // BLK group without length, connector and terminal lines without P/N, unknown sleeving.
@@ -236,7 +298,7 @@ private slots:
     {
         const Bom bom = buildBom(bomSample(), bomLibrary());
         const QString cut = sectionToCsv(bom, CsvSection::CutList, Units::Millimeters);
-        QVERIFY(cut.contains(u"\"5V, \"\"REF\"\"\",ECU : 1,SENSOR : 1,RED,WHT,18 AWG,,810,\r\n"_s));
+        QVERIFY(cut.contains(u"\"5V, \"\"REF\"\"\",ECU : 1,SENSOR : 1,RED,WHT,18 AWG,,,810,\r\n"_s));
         QVERIFY(cut.contains(u",,not routed\r\n"_s));
         QVERIFY(sectionToCsv(bom, CsvSection::Extras, Units::Millimeters)
                     .contains(u"TAPE,\"Cloth tape, 19 mm\",2,roll,\r\n"_s));
@@ -246,6 +308,23 @@ private slots:
         QVERIFY(all.startsWith(u"Wire\r\n"_s));
         QVERIFY(all.contains(u"\r\n\r\nCut list\r\n"_s));
         QVERIFY(all.contains(u"\r\n\r\nOther items\r\n"_s));
+        QVERIFY(all.contains(u"\r\n\r\nCables\r\n"_s));
+    }
+
+    void csvCables()
+    {
+        Harness h = bomSample();
+        Cable cb = cable(u"cb"_s, u"TP"_s, {u"w1"_s, u"w4"_s});
+        cb.shieldWireId = u"w2"_s;
+        h.cables = {cb};
+        const Bom bom = buildBom(h, bomLibrary());
+        // Braid 750 mm, 787.5 with waste (builtShieldedPair).
+        QCOMPARE(sectionToCsv(bom, CsvSection::Cables, Units::Millimeters),
+                 u"Kind,Part number,Pieces,Length (mm),Length with waste (mm),Pieces without length,Used at\r\n"
+                 "Shield braid,(no part number),1,750,787.5,0,TP\r\n"_s);
+        const QString cut = sectionToCsv(bom, CsvSection::CutList, Units::Millimeters);
+        QVERIFY(cut.contains(u",TP,850,"_s));        // w1, with the twist take-up
+        QVERIFY(cut.contains(u",TP shield,460,"_s)); // w2
     }
 
     void emptyHarness()

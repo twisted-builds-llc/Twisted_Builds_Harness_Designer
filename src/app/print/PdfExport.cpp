@@ -2,6 +2,7 @@
 #include "print/PdfExport.h"
 
 #include "SelectionModel.h"
+#include "bom/BomCsv.h"
 #include "bom/BuildSheets.h"
 #include "calc/WireLength.h"
 #include "layout/LayoutScene.h"
@@ -19,6 +20,7 @@
 #include <QPainter>
 #include <QPdfWriter>
 
+#include <algorithm>
 #include <functional>
 
 namespace tbh::app {
@@ -276,6 +278,7 @@ TableBlock cutListBlock(const Harness &harness, const Library &library)
                      {Tr::tr("Circuit ID"), 0.8},            {Tr::tr("Wire"), 1.7},
                      {Tr::tr("Gauge"), 1.0},
                      {Tr::tr("Color"), 1.7},                 {Tr::tr("Type"), 1.0},
+                     {Tr::tr("Cable"), 1.2},
                      {Tr::tr("Cut length"), 1.2, Qt::AlignRight}, {Tr::tr("From"), 2.4},
                      {Tr::tr("To"), 2.4},                    {Tr::tr("Note"), 1.3}};
     const auto lines = bom::cutListInCuttingOrder(bom::buildBom(harness, library).cutList);
@@ -289,6 +292,7 @@ TableBlock cutListBlock(const Harness &harness, const Library &library)
                               textCell(gaugeText(c.gauge)),
                               colorCell(c.baseColor, c.stripeColor),
                               textCell(c.wireTypeName),
+                              textCell(bom::cutLineCableText(c)),
                               textCell(c.cutMm ? formatLength(*c.cutMm, units) : QStringLiteral("—")),
                               textCell(c.endA),
                               textCell(c.endB),
@@ -297,11 +301,52 @@ TableBlock cutListBlock(const Harness &harness, const Library &library)
     return block;
 }
 
+// One row per cable: what it is, its wires by circuit id, the twist and the run its wires
+// share (where the jacket or braid goes). Empty without cables.
+std::vector<TableBlock> cableBlocks(const Harness &harness)
+{
+    if (harness.cables.empty())
+        return {};
+    const Units units = harness.info.units;
+    const calc::LayoutGraph graph(harness);
+    TableBlock block;
+    block.heading = Tr::tr("Cables");
+    block.columns = {{Tr::tr("Cable"), 0.9},       {Tr::tr("Kind"), 2.0},          {Tr::tr("Part number"), 1.6},
+                     {Tr::tr("Wires"), 2.4},       {Tr::tr("Shield"), 0.9},        {Tr::tr("One twist every"), 1.2},
+                     {Tr::tr("Run length"), 1.2, Qt::AlignRight}};
+    auto circuitOf = [&](const QString &wireId) {
+        const auto it = std::find_if(harness.wires.begin(), harness.wires.end(),
+                                     [&](const Wire &w) { return w.id == wireId; });
+        return it == harness.wires.end() ? QString() : (it->circuitId.isEmpty() ? it->name : it->circuitId);
+    };
+    for (const Cable &c : harness.cables) {
+        QStringList kind;
+        if (c.twisted)
+            kind << Tr::tr("twisted");
+        if (c.shielded())
+            kind << Tr::tr("shielded");
+        kind << (c.source == CableSource::Bought ? Tr::tr("bought") : Tr::tr("built"));
+        QStringList wires;
+        for (const QString &id : c.wireIds)
+            wires << circuitOf(id);
+        const QString partNumber = c.source == CableSource::Bought ? c.partNumber : c.shieldPartNumber;
+        const auto run = calc::cableRunLengthMm(graph, harness, c);
+        block.rows.push_back({textCell(c.label), textCell(kind.join(QStringLiteral(", "))), textCell(partNumber),
+                              textCell(wires.join(QStringLiteral(", "))),
+                              textCell(c.shielded() ? circuitOf(c.shieldWireId) : QStringLiteral("—")),
+                              textCell(c.twisted && c.layLengthMm ? formatLength(*c.layLengthMm, units)
+                                                                  : QStringLiteral("—")),
+                              textCell(run ? formatLength(*run, units) : Tr::tr("Not routed"))});
+    }
+    return {block};
+}
+
 std::vector<TableBlock> pinoutBlocks(const Harness &harness)
 {
     const std::vector<Column> columns = {{Tr::tr("Pin"), 0.7},    {Tr::tr("Circuit"), 2.0},
                                          {Tr::tr("Circuit ID"), 0.8}, {Tr::tr("Wire"), 1.7},
-                                         {Tr::tr("Color"), 1.7},  {Tr::tr("Gauge"), 1.0},   {Tr::tr("Goes to"), 2.6}};
+                                         {Tr::tr("Color"), 1.7},  {Tr::tr("Gauge"), 1.0},   {Tr::tr("Cable"), 0.9},
+                                         {Tr::tr("Goes to"), 2.6}};
     std::vector<TableBlock> blocks;
     for (const bom::PinoutTable &table : bom::pinoutTables(harness)) {
         TableBlock block;
@@ -319,7 +364,7 @@ std::vector<TableBlock> pinoutBlocks(const Harness &harness)
         for (const bom::PinoutRow &r : table.rows) {
             if (r.wireId.isEmpty()) {
                 block.rows.push_back({textCell(r.pin), textCell(r.circuit), Cell(), textCell(QStringLiteral("—")), Cell(), Cell(),
-                                      textCell(!r.cavityPlug ? Tr::tr("Empty")
+                                      Cell(), textCell(!r.cavityPlug ? Tr::tr("Empty")
                                                : r.plugPartNumber.isEmpty()
                                                    ? Tr::tr("Cavity plug")
                                                    : Tr::tr("Cavity plug %1").arg(r.plugPartNumber))});
@@ -327,7 +372,10 @@ std::vector<TableBlock> pinoutBlocks(const Harness &harness)
             }
             block.rows.push_back({textCell(r.pin), textCell(r.circuit), textCell(r.circuitId), textCell(r.wireName),
                                   colorCell(r.baseColor, r.stripeColor),
-                                  textCell(gaugeText(r.gauge)), textCell(r.otherEnd)});
+                                  textCell(gaugeText(r.gauge)),
+                                  textCell(r.shield && !r.cables.isEmpty() ? Tr::tr("%1 shield").arg(r.cables.front())
+                                                                           : r.cables.join(QStringLiteral(", "))),
+                                  textCell(r.otherEnd)});
         }
         blocks.push_back(std::move(block));
     }
@@ -550,7 +598,9 @@ int exportBuildPackage(const HarnessModel &source, const QString &path, const Pd
         }
     }
 
-    const std::vector<TableBlock> cutList{cutListBlock(harness, model.library())};
+    std::vector<TableBlock> cutList{cutListBlock(harness, model.library())};
+    for (TableBlock &block : cableBlocks(harness))
+        cutList.push_back(std::move(block));
     const std::vector<TableBlock> pinouts = pinoutBlocks(harness);
     auto addTableSheets = [&](const QString &title, const QString &subtitle, const std::vector<TableBlock> &blocks) {
         for (const std::vector<BlockSlice> &slices : paginate(blocks, content.height())) {

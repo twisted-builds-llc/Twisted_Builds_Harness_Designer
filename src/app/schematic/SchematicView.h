@@ -99,6 +99,13 @@ public:
     void askAndCutWire(const QString &wireId, const QPointF &scenePos);
     void replaceWithSplice(const QString &freeEndId);
 
+    // Groups the selected wires into a new twisted cable and selects it. False if fewer than
+    // two wires (that are not shields) are selected.
+    bool makeCableFromSelection();
+    // Gives a cable a shield wire with a loose (bare) end beside each end of its first
+    // conductor, ready to be dragged onto a splice, eyelet or pin, and selects the wire.
+    bool addShieldWire(const QString &cableId);
+
 signals:
     void statusMessage(const QString &message);
 

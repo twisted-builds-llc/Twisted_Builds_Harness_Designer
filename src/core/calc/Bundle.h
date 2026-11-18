@@ -26,11 +26,14 @@ WireDiameter wireOuterDiameter(const Library &library, const Wire &wire);
 struct BundleDiameter
 {
     double diameterMm = 0.0;
-    int wireCount = 0;
+    int wireCount = 0; // wires counted, excluding shields
     std::vector<QString> estimatedWireIds; // wires whose OD was estimated
 };
 
-// D = sqrt(sum(d_i^2) / k) with k = settings.packingFactor.
+// D = sqrt(sum(d_i^2) / k) with k = settings.packingFactor. A bought cable with a jacket
+// diameter whose conductors all run in `wireIds` counts as one item of that diameter (its
+// conductors and shield are inside; wireCount still counts the conductors). The shield
+// wire of a built cable is a braid over its wires and is not counted.
 BundleDiameter bundleDiameter(const Harness &harness, const Library &library,
                               const std::vector<QString> &wireIds);
 

@@ -2,6 +2,9 @@
 #include "calc/Bundle.h"
 
 #include <QHash>
+#include <QSet>
+
+#include <algorithm>
 
 #include <cmath>
 #include <numbers>
@@ -32,11 +35,33 @@ BundleDiameter bundleDiameter(const Harness &harness, const Library &library, co
     QHash<QString, const Wire *> wires;
     for (const Wire &w : harness.wires)
         wires.insert(w.id, &w);
+    const QSet<QString> here(wireIds.begin(), wireIds.end());
     BundleDiameter result;
     double sumOfSquares = 0.0;
+    // A bought cable whose conductors all run here is one jacket; its wires (and its shield)
+    // are inside it. A built cable's shield is a braid over its wires: not counted.
+    QSet<QString> inside;
+    for (const Cable &c : harness.cables) {
+        if (c.source == CableSource::Built) {
+            if (c.shielded())
+                inside.insert(c.shieldWireId);
+            continue;
+        }
+        const bool allHere = std::all_of(c.wireIds.begin(), c.wireIds.end(), [&](const QString &id) {
+            return here.contains(id) && !inside.contains(id);
+        });
+        if (!c.jacketOdMm || !allHere)
+            continue;
+        for (const QString &id : c.wireIds)
+            inside.insert(id);
+        if (c.shielded())
+            inside.insert(c.shieldWireId);
+        sumOfSquares += *c.jacketOdMm * *c.jacketOdMm;
+        result.wireCount += int(c.wireIds.size());
+    }
     for (const QString &id : wireIds) {
         const Wire *w = wires.value(id);
-        if (!w)
+        if (!w || inside.contains(id))
             continue;
         const WireDiameter d = wireOuterDiameter(library, *w);
         sumOfSquares += d.odMm * d.odMm;

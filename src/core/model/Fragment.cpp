@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "model/Fragment.h"
 
+#include "model/Queries.h"
+
 #include <QHash>
 
 namespace tbh {
@@ -63,12 +65,14 @@ Harness extractFragment(const Harness &harness, const QSet<QString> &connectorId
             copyPlacement(w.id);
         }
     }
+    fragment.cables = harness.cables;
+    pruneCables(fragment);
     return fragment;
 }
 
 void assignNewIds(Harness &fragment)
 {
-    QHash<QString, QString> connectorMap, pinMap, spliceMap, freeEndMap;
+    QHash<QString, QString> connectorMap, pinMap, spliceMap, freeEndMap, wireMap;
     std::map<QString, SchematicPlacement> placements;
     auto movePlacement = [&](const QString &oldKey, const QString &newKey) {
         const auto it = fragment.schematic.placements.find(oldKey);
@@ -117,9 +121,16 @@ void assignNewIds(Harness &fragment)
     for (Wire &w : fragment.wires) {
         const QString newWireId = newId();
         movePlacement(w.id, newWireId);
+        wireMap.insert(w.id, newWireId);
         w.id = newWireId;
         remapEnd(w.endA);
         remapEnd(w.endB);
+    }
+    for (Cable &c : fragment.cables) {
+        c.id = newId();
+        for (QString &id : c.wireIds)
+            id = wireMap.value(id);
+        c.shieldWireId = wireMap.value(c.shieldWireId);
     }
     fragment.schematic.placements = std::move(placements);
 }

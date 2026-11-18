@@ -38,6 +38,10 @@ PinoutRow wireRow(const Harness &harness, const Wire &wire, bool atEndA)
     row.stripeColor = wire.stripeColor;
     row.gauge = wire.gauge;
     row.otherEnd = describeWireEnd(harness, atEndA ? wire.endB : wire.endA);
+    for (const Cable *cable : cablesOfWire(harness, wire.id)) {
+        row.cables.append(cable->label);
+        row.shield = row.shield || cable->shieldWireId == wire.id;
+    }
     return row;
 }
 
