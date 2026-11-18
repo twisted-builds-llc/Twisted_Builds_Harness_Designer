@@ -7,6 +7,7 @@
 #include "model/Fragment.h"
 #include "model/Queries.h"
 #include "commands/HarnessCommands.h"
+#include "ui/properties/CablePanel.h"
 #include "ui/properties/ConnectorPanel.h"
 
 #include <QApplication>
@@ -17,7 +18,9 @@
 #include <QClipboard>
 #include <QCompleter>
 #include <QGuiApplication>
+#include <QLabel>
 #include <QLineEdit>
+#include <QPushButton>
 #include <QTableView>
 #include <QUndoStack>
 
@@ -302,6 +305,50 @@ private slots:
     }
 
     // Picking a library housing fills the connector; terminal cells offer its parts first.
+    // The cable panel keeps its rows at their natural height and shows no stray '&'.
+    void cablePanelLayout()
+    {
+        Document doc;
+        Harness h;
+        Connector a;
+        a.id = u"a"_s;
+        a.label = u"A"_s;
+        for (int i = 1; i <= 2; ++i)
+            a.pins.push_back(Pin{u"a%1"_s.arg(i), QString::number(i), {}, {}, {}, false, {}, {}, {}});
+        h.connectors = {a};
+        Wire w1, w2;
+        w1.id = u"w1"_s;
+        w1.endA = PinRef{u"a"_s, u"a1"_s};
+        w2.id = u"w2"_s;
+        w2.endA = PinRef{u"a"_s, u"a2"_s};
+        h.wires = {w1, w2};
+        h.cables = {cable(u"cb"_s, u"TP1"_s, {u"w1"_s, u"w2"_s})};
+        doc.model()->reset(h);
+
+        CablePanel panel(&doc);
+        panel.setCable(u"cb"_s);
+        panel.resize(400, 1200); // much taller than the rows need
+        panel.show();
+        QVERIFY(QTest::qWaitForWindowExposed(&panel));
+
+        for (QLabel *label : panel.findChildren<QLabel *>()) {
+            if (label->text().contains(u'&'))
+                QVERIFY2(label->buddy(), qPrintable(label->text()));
+        }
+        QPushButton *addShield = nullptr;
+        for (auto *button : panel.findChildren<QPushButton *>()) {
+            if (button->text() == u"Add Shield Wire"_s)
+                addShield = button;
+        }
+        QVERIFY(addShield && addShield->isVisible());
+        // Rows are not spread over the extra height: the shield button sits in the top half.
+        QVERIFY(addShield->mapTo(&panel, QPoint(0, 0)).y() < panel.height() / 2);
+
+        if (const QString out = qEnvironmentVariable("TBH_SCREENSHOT_DIR"); !out.isEmpty())
+            panel.grab().save(out + u"/cable-panel.png"_s);
+        panel.hide(); // a top-level panel would get a focus-out from its own destructor
+    }
+
     void connectorFromLibraryHousing()
     {
         Document doc;

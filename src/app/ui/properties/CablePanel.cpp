@@ -11,11 +11,13 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QFormLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 #include <QUndoStack>
+#include <QVBoxLayout>
 
 namespace tbh::app {
 
@@ -63,24 +65,44 @@ CablePanel::CablePanel(Document *document, QWidget *parent)
     m_wires->setWordWrap(true);
     m_wires->setTextInteractionFlags(Qt::TextSelectableByMouse);
     m_shield->setWordWrap(true);
+    m_addShield->setToolTip(tr("Adds a shield (drain) wire to this cable on the schematic. Draw its ends to where the shield lands."));
 
     auto *shieldButtons = new QHBoxLayout;
     shieldButtons->addWidget(m_addShield);
     shieldButtons->addWidget(m_removeShield);
     shieldButtons->addStretch();
 
-    auto *form = new QFormLayout(this);
+    // A row whose field is a layout needs its label's buddy set by hand, or the '&' shows.
+    auto buddyLabel = [this](const QString &text, QWidget *buddy) {
+        auto *label = new QLabel(text, this);
+        label->setBuddy(buddy);
+        return label;
+    };
+
+    auto *form = new QFormLayout;
     form->addRow(tr("&Label:"), m_label);
     form->addRow(QString(), m_twisted);
-    form->addRow(tr("One twist &every:"), withUnits(m_layLength, m_layUnits));
+    form->addRow(buddyLabel(tr("One twist &every:"), m_layLength), withUnits(m_layLength, m_layUnits));
     form->addRow(tr("&Source:"), m_source);
     form->addRow(tr("Cable &part number:"), m_partNumber);
-    form->addRow(tr("&Jacket diameter:"), withUnits(m_jacket, m_jacketUnits));
+    form->addRow(buddyLabel(tr("&Jacket diameter:"), m_jacket), withUnits(m_jacket, m_jacketUnits));
     form->addRow(tr("Wires:"), m_wires);
-    form->addRow(tr("Shield:"), m_shield);
-    form->addRow(QString(), shieldButtons);
-    form->addRow(tr("Shield p&art number:"), m_shieldPartNumber);
-    form->addRow(tr("&Notes:"), m_notes);
+
+    auto *shieldBox = new QGroupBox(tr("Shield"), this);
+    auto *shieldForm = new QFormLayout(shieldBox);
+    shieldForm->addRow(tr("Shield wire:"), m_shield);
+    shieldForm->addRow(QString(), shieldButtons);
+    shieldForm->addRow(tr("P&art number:"), m_shieldPartNumber);
+
+    auto *notesForm = new QFormLayout;
+    notesForm->addRow(tr("&Notes:"), m_notes);
+
+    // Rows keep their natural height at the top; only the stretch takes the extra space.
+    auto *layout = new QVBoxLayout(this);
+    layout->addLayout(form);
+    layout->addWidget(shieldBox);
+    layout->addLayout(notesForm);
+    layout->addStretch(1);
 
     for (QLineEdit *edit : {m_label, m_layLength, m_partNumber, m_jacket, m_shieldPartNumber})
         connect(edit, &QLineEdit::editingFinished, this, &CablePanel::commit);
