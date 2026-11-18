@@ -792,9 +792,44 @@ private slots:
         QVERIFY(!f.model()->find<FreeEnd>(cutB));
     }
 
-    // Selected wires become a twisted cable, drawn as a mark across their leads where they
-    // leave a connector side by side; a shield wire gets loose ends to attach; deleting the
+    // Selected wires become a twisted cable, drawn as one bundle along the route past their
+    // leads when they all run between the same two items; a shield wire gets loose ends to attach; deleting the
     // cable only ungroups.
+    // A wire on a pin between a cable's conductors, not in the cable, is not hidden under the
+    // bundle (hands-on test: J3/J4 LIN looked twisted in with the CAN pair).
+    void cableKeepsOffOtherWires()
+    {
+        Fixture f;
+        Harness h = ecuHarness(3, 1, 3); // ECU 1..3 to J1 1..3
+        h.schematic.placements[h.connectors[1].id].position = QPointF(600, 30);
+        Cable can;
+        can.id = u"can"_s;
+        can.wireIds = {h.wires[0].id, h.wires[2].id}; // pins 1 and 3; pin 2 is LIN
+        h.cables = {can};
+        f.reset(h);
+        const CableItem *item = f.scene()->cableItem(u"can"_s);
+        QVERIFY(item && item->bundle());
+        const WireItem *lin = f.scene()->wireItem(h.wires[1].id);
+        QCOMPARE(lin->leadsOnly(), 0.0);
+        const QPainterPath &path = item->bundle()->path;
+        // Level with pin 1 at both ends (the nearest conductor pin to the middle, first in
+        // the cable), 20 above LIN's legs at pin 2.
+        QCOMPARE(path.pointAtPercent(0).y(), f.scene()->wireItem(h.wires[0].id)->anchorA().point.y());
+        QCOMPARE(path.pointAtPercent(1).y(), f.scene()->wireItem(h.wires[0].id)->anchorB().point.y());
+        QCOMPARE(lin->anchorA().point.y() - path.pointAtPercent(0).y(), qreal(ConnectorItem::kRowHeight));
+        // J1 sits 30 lower: the bundle's and LIN's vertical runs overlap in height, so not
+        // at one x.
+        qreal bundleRun = 0; // x where the path is halfway down
+        const qreal midY = (path.pointAtPercent(0).y() + path.pointAtPercent(1).y()) / 2;
+        for (int k = 0; k <= 1000; ++k) {
+            const QPointF p = path.pointAtPercent(path.percentAtLength(path.length() * k / 1000));
+            if (std::abs(p.y() - midY) < 1)
+                bundleRun = p.x();
+        }
+        QVERIFY2(std::abs(bundleRun - lin->runX()) > item->bundle()->radius + WireItem::kPenWidth,
+                 qPrintable(u"bundle run %1, LIN run %2"_s.arg(bundleRun).arg(lin->runX())));
+    }
+
     // Strands of a twist: angle 2*pi*(turns + i/n), offset -cos, in front where sin > 0.
     void twistStrands()
     {
@@ -854,29 +889,46 @@ private slots:
         QCOMPARE(f.selection.selection().cables, QSet<QString>{cable.id});
         CableItem *item = f.scene()->cableItem(cable.id);
         QVERIFY(item && item->isSelected());
-        // ECU 1 and 3 leave ECU's right side 40 apart, and SENSOR 1 and 2 its left side: a
-        // twisted section at each end, kTwistStart along the leads.
-        QCOMPARE(item->marks().size(), size_t(2));
+        // ECU 1 and 3 (not side by side: 40 apart) leave ECU's right side, and SENSOR 1 and 2
+        // its left side: one twisted bundle from the end of the leads at ECU to those at
+        // SENSOR.
+        QVERIFY(item->bundle());
         QVERIFY(item->tags().empty());
         const WireItem *w1 = f.scene()->wireItem(u"w1"_s);
-        const CableItem::Mark &atEcu = item->marks()[0];
-        QCOMPARE(atEcu.left, w1->anchorA().point.x() + CableItem::kTwistStart);
-        QVERIFY(atEcu.right - atEcu.left >= CableItem::kMinTwistLength);
-        QVERIFY(atEcu.right - atEcu.left <= CableItem::kTwistLength);
-        QCOMPARE(atEcu.lanes.size(), size_t(2));
-        QCOMPARE(atEcu.lanes[1].y - atEcu.lanes[0].y, 2 * ConnectorItem::kRowHeight);
-        QCOMPARE(atEcu.lanes[0].baseColor, w1->wire().baseColor); // w1 is on ECU pin 1, the top lane
-        // The conductors are not drawn under the twisted sections; other wires are.
-        QCOMPARE(w1->cutouts().size(), size_t(2));
-        QCOMPARE(f.scene()->wireItem(u"w4"_s)->cutouts(), w1->cutouts());
-        QVERIFY(f.scene()->wireItem(u"w5"_s)->cutouts().empty());
+        const WireItem *w4 = f.scene()->wireItem(u"w4"_s);
+        auto bundleEnds = [&] {
+            const QPainterPath &path = item->bundle()->path;
+            return std::pair{path.pointAtPercent(0), path.pointAtPercent(1)};
+        };
+        {
+            const CableItem::Bundle &bundle = *item->bundle();
+            QCOMPARE(bundle.lanes.size(), size_t(2));
+            QCOMPARE(bundle.lanes[0].wireId, u"w1"_s);
+            QCOMPARE(bundle.lanes[1].yA - bundle.lanes[0].yA, 2 * ConnectorItem::kRowHeight);
+            QCOMPARE(bundle.lanes[0].baseColor, w1->wire().baseColor);
+            // Starts kLeadLength out of ECU, level with w1's pin (ECU 1 and 3 are equally
+            // near the middle, w1 first), not with pin 2 between them, which has a wire of
+            // its own.
+            const auto [start, end] = bundleEnds();
+            QCOMPARE(start.x(), w1->anchorA().point.x() + CableItem::kLeadLength);
+            QCOMPARE(start.y(), w1->anchorA().point.y());
+            QCOMPARE(end.x(), w1->anchorB().point.x() - CableItem::kLeadLength);
+            // Each strand leaves its lead at the lead's height and ends on its other lead.
+            QCOMPARE(bundle.strands[1].points.front().y(), w4->anchorA().point.y());
+            QCOMPARE(bundle.strands[1].points.back().y(), w4->anchorB().point.y());
+        }
+        // The conductors draw only their leads; other wires draw all of themselves.
+        QCOMPARE(w1->leadsOnly(), CableItem::kLeadLength);
+        QCOMPARE(w4->leadsOnly(), CableItem::kLeadLength);
+        QCOMPARE(f.scene()->wireItem(u"w5"_s)->leadsOnly(), 0.0);
+        QVERIFY(!w1->contains(QPointF(w1->runX(), w1->sceneBoundingRect().center().y())));
         loadable();
 
         // Moving SENSOR keeps the marks on the leads.
         SchematicPlacement moved = *f.model()->placement(u"sensor"_s);
         moved.position += QPointF(100, 40);
         stack->push(new SetPlacementsCommand(f.model(), {{u"sensor"_s, moved}}, {}));
-        QCOMPARE(item->marks()[1].right, w1->anchorB().point.x() - CableItem::kTwistStart);
+        QCOMPARE(bundleEnds().second.x(), w1->anchorB().point.x() - CableItem::kLeadLength);
 
         // A shield wire between two bare ends, drawn dotted.
         QVERIFY(f.view.addShieldWire(cable.id));
@@ -897,21 +949,21 @@ private slots:
         stack->undo();
         QVERIFY(f.scene()->wireItem(f.model()->find<Cable>(cable.id)->shieldWireId)->isShield());
 
-        // Conductors that do not leave one item side by side get a tag each.
+        // Conductors that do not run between the same two items get a tag on each end.
         Selection apart;
         apart.wires = {u"w1"_s, u"w5"_s};
         f.selection.setSelection(apart);
         QVERIFY(f.view.makeCableFromSelection());
         const QString apartId = *f.selection.selection().cables.begin();
-        QVERIFY(f.scene()->cableItem(apartId)->marks().empty());
-        QCOMPARE(f.scene()->cableItem(apartId)->tags().size(), size_t(2));
+        QVERIFY(!f.scene()->cableItem(apartId)->bundle());
+        QCOMPARE(f.scene()->cableItem(apartId)->tags().size(), size_t(4));
         QCOMPARE(f.model()->find<Cable>(apartId)->label, u"TP2"_s);
 
         // Deleting a cable ungroups it: the wires stay.
         f.view.deleteSelection();
         QVERIFY(!f.model()->find<Cable>(apartId));
         QVERIFY(!f.scene()->cableItem(apartId));
-        QVERIFY(f.scene()->wireItem(u"w5"_s)->cutouts().empty());
+        QCOMPARE(f.scene()->wireItem(u"w5"_s)->leadsOnly(), 0.0);
         QCOMPARE(f.model()->harness().wires.size(), before.wires.size() + 1); // + the shield
         loadable();
 
@@ -1730,6 +1782,45 @@ private slots:
         f.view.scale(2, 2);
         f.view.grab().save(imageDir() + u"/schematic-cables-zoom.png"_s);
         f.view.resetTransform();
+
+        // Five twisted conductors between two connectors at different heights.
+        Harness five = ecuHarness(5, 1, 5);
+        five.schematic.placements[five.connectors[1].id].position = QPointF(700, -260);
+        Cable bundle;
+        bundle.id = u"five"_s;
+        bundle.label = u"TP1"_s;
+        for (const Wire &w : five.wires)
+            bundle.wireIds.push_back(w.id);
+        five.cables = {bundle};
+        f.reset(five);
+        f.view.resize(1400, 900);
+        f.view.zoomToFit();
+        f.view.grab().save(imageDir() + u"/schematic-cable-five.png"_s);
+        f.view.resetTransform();
+
+        // A pair on pins 1 and 3 with LIN on pin 2 between, and a pair whose CanLow swaps
+        // places with LIN at the far end: LIN stays outside the bundle.
+        for (const bool swapped : {false, true}) {
+            Harness three = ecuHarness(3, 1, 3);
+            three.schematic.placements[three.connectors[1].id].position = QPointF(600, 30);
+            Cable pair;
+            pair.id = u"pair"_s;
+            pair.label = u"TP1"_s;
+            if (swapped) {
+                std::swap(three.wires[1].endB, three.wires[2].endB); // CanLow to 3, LIN to 2
+                pair.wireIds = {three.wires[0].id, three.wires[1].id};
+            } else {
+                pair.wireIds = {three.wires[0].id, three.wires[2].id};
+            }
+            three.wires[1 + int(swapped)].baseColor = u"GRN"_s;
+            three.wires[1 + int(swapped)].stripeColor.clear();
+            three.cables = {pair};
+            f.reset(three);
+            f.view.resize(1400, 500);
+            f.view.zoomToFit();
+            f.view.grab().save(imageDir() + (swapped ? u"/schematic-cable-swapped.png"_s : u"/schematic-cable-between.png"_s));
+            f.view.resetTransform();
+        }
 
         // Whole window, dark theme, with a wire and then a connector selected.
         const QString file = imageDir() + u"/sample.tbh"_s;

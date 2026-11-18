@@ -102,7 +102,10 @@ private:
     void removeCable(const QString &id);
     // Lays a cable's marks out over its conductors as drawn now.
     void updateCable(const QString &cableId);
-    void updateCablesOfWire(const QString &wireId);
+    // Whether a cable draws the wire as part of its bundle.
+    bool isBundled(const QString &wireId) const;
+    // After a wire moves: every cable, since a bundle keeps off the other wires' lines.
+    void updateCables();
     // Marks every cable's shield wire (drawn dotted).
     void applyShieldWires();
     void applyPlacement(PlacedItem *item);

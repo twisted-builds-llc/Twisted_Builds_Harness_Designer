@@ -5,6 +5,7 @@
 // SchematicScene keeps them in sync. Items never modify the model.
 
 #include "model/Harness.h"
+#include "ui/Twist.h"
 
 #include <QGraphicsItem>
 #include <QPainterPath>
@@ -232,9 +233,10 @@ public:
     // A cable's shield: drawn dotted.
     void setShield(bool shield);
     bool isShield() const { return m_shield; }
-    // Scene rects the wire is not drawn in: a twisted cable draws its conductors there.
-    void setCutouts(std::vector<QRectF> cutouts);
-    const std::vector<QRectF> &cutouts() const { return m_cutouts; }
+    // Draws (and hit-tests) only `length` of the wire straight out of each end; 0 = all of
+    // it. A cable draws the rest of its conductors as a bundle.
+    void setLeadsOnly(qreal length);
+    qreal leadsOnly() const { return m_leadsOnly; }
 
     // Orthogonal route between anchors with rounded bends; also used for the rubber-band
     // wire while drawing.
@@ -260,24 +262,23 @@ private:
     QString m_tag;
     QRectF m_tagRect;
     bool m_shield = false;
-    std::vector<QRectF> m_cutouts;
+    qreal m_leadsOnly = 0;
+    QPainterPath leadsClip() const;
     void updateShape();
 };
 
-// The marks of a twisted and/or shielded cable, drawn over its conductors' wires: where the
-// conductors leave one connector (or other item) side by side, a mark across their leads:
-// crossings between neighbors for a twist, a dashed oval around them for a shield, and the
-// cable's label. Where they do not run side by side, a small tag with the label on each
-// conductor instead. Clicking a mark or tag selects the cable.
+// A twisted and/or shielded cable, drawn over its conductors' wires. Where every conductor
+// runs between the same two items (each end leaving one side of one item), each conductor
+// keeps a straight lead of kLeadLength out of its pin, drawn by its own wire, and the leads
+// then gather into one bundle that follows a wire-like route to the other end: twisted
+// strands for a twisted cable, a dashed outline for a shield, and the cable's label near
+// each end. The bundle runs level with one of its own conductors' pins, so a wire on a pin
+// between them is not hidden under it. Otherwise a small tag with the label on each end of each conductor. Clicking the
+// bundle or a tag selects the cable.
 class CableItem : public QGraphicsItem
 {
 public:
-    // Where the leads leave their end item side by side, the cable is drawn over them as a
-    // twisted section (or, untwisted, a shield only) starting kTwistStart along the leads,
-    // kTwistLength long, shorter (down to kMinTwistLength) where a lead turns sooner.
-    static constexpr qreal kTwistStart = 8;
-    static constexpr qreal kTwistLength = 72;
-    static constexpr qreal kMinTwistLength = 36;
+    static constexpr qreal kLeadLength = 40;
 
     explicit CableItem(const Cable &cable);
 
@@ -286,30 +287,33 @@ public:
     QString id() const { return m_cable.id; }
     void setCable(const Cable &cable);
 
-    // One conductor's lead through a mark.
+    // One conductor in the bundle.
     struct Lane
     {
-        qreal y = 0;
+        QString wireId;
+        qreal yA = 0; // lead y at end A and end B
+        qreal yB = 0;
         QString baseColor; // the wire's color codes
         QString stripeColor;
         bool factory = false;
     };
-    // A section over the conductors' leads from scene x `left` to `right`, one lane per
-    // conductor, sorted top to bottom.
-    struct Mark
+    struct Bundle
     {
-        qreal left = 0;
-        qreal right = 0;
-        std::vector<Lane> lanes;
+        std::vector<Lane> lanes; // conductor order
+        // Bundle centerline from the end of the leads at end A to those at end B. Its first
+        // `gatherA` and last `gatherB` run straight while the leads gather in.
+        QPainterPath path;
+        qreal gatherA = 0;
+        qreal gatherB = 0;
+        qreal radius = 0; // half the bundle's width
+        std::vector<TwistStrand> strands; // one per lane, from lead end A to lead end B
     };
-    // Lays the marks out over the conductors' wire items as drawn. Hidden and off-sheet
-    // wires are left out; with none left the item has nothing to draw.
-    void follow(const std::vector<const WireItem *> &conductors);
-    const std::vector<Mark> &marks() const { return m_marks; }
+    // Lays the cable out over the conductors' wire items as drawn. Hidden and off-sheet
+    // wires are left out; with none left the item has nothing to draw. The bundle keeps off
+    // the lines of `others` (wires drawn whole, not in this cable) where it can.
+    void follow(const std::vector<const WireItem *> &conductors, const std::vector<const WireItem *> &others = {});
+    const std::optional<Bundle> &bundle() const { return m_bundle; }
     const std::vector<QPointF> &tags() const { return m_tags; }
-    // Scene rects the conductors are drawn in by this item (twisted marks), for
-    // WireItem::setCutouts.
-    std::vector<QRectF> conductorCutouts() const;
 
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
@@ -318,11 +322,11 @@ public:
 private:
     QString text() const;
     QRectF tagRect(const QPointF &at) const;
-    QRectF markRect(const Mark &mark) const;
+    std::vector<QRectF> labelRects() const;
     void updateShape();
 
     Cable m_cable;
-    std::vector<Mark> m_marks;
+    std::optional<Bundle> m_bundle;
     std::vector<QPointF> m_tags; // scene points on conductors' leads
     QPainterPath m_shape;
     QRectF m_bounds;

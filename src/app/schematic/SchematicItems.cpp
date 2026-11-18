@@ -821,11 +821,37 @@ void WireItem::setShield(bool shield)
     update();
 }
 
+QPainterPath WireItem::leadsClip() const
+{
+    // Scene rects (this item is never moved) along the lead out of each end.
+    constexpr qreal half = 8;
+    QPainterPath clip;
+    for (const Anchor &end : {m_a, m_b}) {
+        if (end.direction == 0)
+            continue;
+        const qreal x2 = end.point.x() + end.direction * m_leadsOnly;
+        clip.addRect(QRectF(QPointF(std::min(end.point.x(), x2), end.point.y() - half),
+                            QPointF(std::max(end.point.x(), x2), end.point.y() + half)));
+    }
+    return clip;
+}
+
+void WireItem::setLeadsOnly(qreal length)
+{
+    if (length == m_leadsOnly)
+        return;
+    prepareGeometryChange();
+    m_leadsOnly = length;
+    updateShape();
+}
+
 void WireItem::updateShape()
 {
     QPainterPathStroker stroker;
     stroker.setWidth(10);
     m_shape = stroker.createStroke(m_path);
+    if (m_leadsOnly > 0)
+        m_shape = m_shape.intersected(leadsClip());
     if (!m_tagRect.isNull())
         m_shape.addRect(m_tagRect);
 }
@@ -845,7 +871,7 @@ std::optional<qreal> WireItem::runDistance(const QPointF &scenePos) const
 {
     const qreal top = std::min(m_a.point.y(), m_b.point.y());
     const qreal bottom = std::max(m_a.point.y(), m_b.point.y());
-    if (isOffSheet() || bottom - top < 1e-6 || scenePos.y() < top || scenePos.y() > bottom)
+    if (isOffSheet() || m_leadsOnly > 0 || bottom - top < 1e-6 || scenePos.y() < top || scenePos.y() > bottom)
         return std::nullopt;
     return std::abs(scenePos.x() - runX());
 }
@@ -870,17 +896,8 @@ QPainterPath WireItem::shape() const
 void WireItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *)
 {
     painter->save();
-    if (!m_cutouts.empty()) {
-        // Not drawn where a twisted cable draws this conductor.
-        QPainterPath clip;
-        clip.addRect(boundingRect());
-        for (const QRectF &r : m_cutouts) {
-            QPainterPath cut;
-            cut.addRect(mapRectFromScene(r));
-            clip = clip.subtracted(cut);
-        }
-        painter->setClipPath(clip, Qt::IntersectClip);
-    }
+    if (m_leadsOnly > 0) // a cable draws the rest
+        painter->setClipPath(leadsClip(), Qt::IntersectClip);
     const QPalette pal = paletteOf(this);
     painter->setBrush(Qt::NoBrush);
     if (isSelected()) {
@@ -953,12 +970,16 @@ namespace {
 
 constexpr qreal kShieldMargin = 7; // shield outline beyond the outer strands
 constexpr qreal kLabelHeight = 14;
-constexpr qreal kTagOffset = 30;     // tag along the lead from its end
-constexpr qreal kTwistPitch = 22;    // length of one full twist as drawn
-constexpr qreal kTwistRamp = 14;     // leads gather into the bundle over this length
-constexpr qreal kTwistStep = 1.5;    // sampling along the twist
-// Leads further apart than this per conductor do not count as side by side.
-constexpr qreal kMaxLeadSpacing = 2.5 * ConnectorItem::kRowHeight;
+constexpr qreal kLabelInset = 36;  // label along the bundle from where the leads gather in
+constexpr qreal kTagOffset = 30;   // tag along the lead from its end
+// Length of one full twist as drawn: a loose twist, looser the more conductors there are
+// so each strand stays easy to follow.
+qreal twistPitch(size_t strands)
+{
+    return 36 + 10 * qreal(strands);
+}
+constexpr qreal kMinGather = 18;   // leads gather into the bundle over at least this length
+constexpr qreal kTwistStep = 1.5;  // sampling along the bundle
 
 QFont cableFont()
 {
@@ -968,29 +989,20 @@ QFont cableFont()
     return font;
 }
 
-// Half the bundle's height in a twisted section of `strands` conductors whose leads span
-// `spread`: wide enough to see each strand, never wider than the leads.
-qreal twistRadius(size_t strands, qreal spread)
+// Smooth 0..1 step.
+qreal smoothStep(qreal t)
 {
-    return std::min(spread / 2, 2 + 1.6 * qreal(strands));
-}
-
-// Smooth 0..1 step: the leads leave their lanes and gather into the bundle.
-qreal gather(qreal distance)
-{
-    const qreal t = std::clamp(distance / kTwistRamp, 0.0, 1.0);
+    t = std::clamp(t, 0.0, 1.0);
     return t * t * (3 - 2 * t);
 }
 
-} // namespace
-
-void WireItem::setCutouts(std::vector<QRectF> cutouts)
+// Leads spread `spread` apart gather into the bundle over this length: further apart, longer.
+qreal gatherLength(qreal spread)
 {
-    if (cutouts == m_cutouts)
-        return;
-    m_cutouts = std::move(cutouts);
-    update();
+    return std::max(kMinGather, 0.5 * spread);
 }
+
+} // namespace
 
 CableItem::CableItem(const Cable &cable)
     : m_cable(cable)
@@ -1020,83 +1032,203 @@ QString CableItem::text() const
     return QCoreApplication::translate("tbh::app::CableItem", "CBL");
 }
 
-void CableItem::follow(const std::vector<const WireItem *> &conductors)
+void CableItem::follow(const std::vector<const WireItem *> &conductors, const std::vector<const WireItem *> &others)
 {
     std::vector<const WireItem *> shown;
     for (const WireItem *w : conductors) {
         if (w && w->isVisible() && !w->isOffSheet())
             shown.push_back(w);
     }
-    m_marks.clear();
+    m_bundle.reset();
     m_tags.clear();
-    // Marks where the leads leave one item side by side: try each end of the first conductor
-    // and take, for every other conductor, its end nearest to that one.
-    if (shown.size() >= 2) {
-        for (const Anchor &ref : {shown.front()->anchorA(), shown.front()->anchorB()}) {
-            if (ref.direction == 0)
-                continue;
-            Mark mark;
-            qreal length = kTwistLength;
-            bool sideBySide = true;
-            for (const WireItem *w : shown) {
-                const Anchor &a = w->anchorA();
-                const Anchor &b = w->anchorB();
-                const Anchor &near = QLineF(a.point, ref.point).length() <= QLineF(b.point, ref.point).length() ? a : b;
-                // Same x and direction, and a lead long enough to carry the section before
-                // it turns.
-                const qreal lead = std::abs(w->runX() - near.point.x()) - kTwistStart - WireItem::kCornerRadius;
-                if (std::abs(near.point.x() - ref.point.x()) > 0.5 || near.direction != ref.direction
-                    || lead < kMinTwistLength) {
-                    sideBySide = false;
-                    break;
-                }
-                length = std::min(length, lead);
-                const Wire &wire = w->wire();
-                mark.lanes.push_back({near.point.y(), wire.baseColor, wire.stripeColor, wire.factory});
-            }
-            if (!sideBySide)
-                continue;
-            std::sort(mark.lanes.begin(), mark.lanes.end(), [](const Lane &l, const Lane &r) { return l.y < r.y; });
-            const qreal spread = mark.lanes.back().y - mark.lanes.front().y;
-            if (spread > kMaxLeadSpacing * qreal(mark.lanes.size() - 1))
-                continue;
-            const qreal from = ref.point.x() + ref.direction * kTwistStart;
-            const qreal to = from + ref.direction * length;
-            mark.left = std::min(from, to);
-            mark.right = std::max(from, to);
-            m_marks.push_back(std::move(mark));
-        }
-    }
-    if (m_marks.empty()) {
+    // A bundle when every conductor runs between the same two item sides: end A is the end
+    // nearest the first conductor's end A.
+    std::vector<std::pair<Anchor, Anchor>> ends; // per shown conductor: end A, end B
+    bool together = shown.size() >= 2;
+    if (together) {
+        const Anchor refA = shown.front()->anchorA();
+        const Anchor refB = shown.front()->anchorB();
+        auto sameSide = [](const Anchor &end, const Anchor &ref) {
+            return end.direction != 0 && end.direction == ref.direction && std::abs(end.point.x() - ref.point.x()) < 0.5;
+        };
         for (const WireItem *w : shown) {
             const Anchor &a = w->anchorA();
-            const int direction = a.direction == 0 ? 1 : a.direction;
-            m_tags.push_back(a.point + QPointF(direction * kTagOffset, 0));
+            const Anchor &b = w->anchorB();
+            const bool aFirst = QLineF(a.point, refA.point).length() <= QLineF(b.point, refA.point).length();
+            const Anchor &near = aFirst ? a : b;
+            const Anchor &far = aFirst ? b : a;
+            if (!sameSide(near, refA) || !sameSide(far, refB)) {
+                together = false;
+                break;
+            }
+            ends.emplace_back(near, far);
         }
     }
+    if (!together) {
+        for (const WireItem *w : shown) {
+            for (const Anchor &end : {w->anchorA(), w->anchorB()}) {
+                const int direction = end.direction == 0 ? 1 : end.direction;
+                m_tags.push_back(end.point + QPointF(direction * kTagOffset, 0));
+            }
+        }
+        prepareGeometryChange();
+        updateShape();
+        return;
+    }
+
+    Bundle bundle;
+    const Anchor &a0 = ends.front().first;
+    const Anchor &b0 = ends.front().second;
+    qreal minA = a0.point.y(), maxA = minA, minB = b0.point.y(), maxB = minB, runSum = 0;
+    for (size_t i = 0; i < shown.size(); ++i) {
+        const Wire &wire = shown[i]->wire();
+        const qreal yA = ends[i].first.point.y();
+        const qreal yB = ends[i].second.point.y();
+        bundle.lanes.push_back({wire.id, yA, yB, wire.baseColor, wire.stripeColor, wire.factory});
+        minA = std::min(minA, yA);
+        maxA = std::max(maxA, yA);
+        minB = std::min(minB, yB);
+        maxB = std::max(maxB, yB);
+        runSum += shown[i]->runX();
+    }
+    const size_t n = bundle.lanes.size();
+    bundle.radius = 2 + 2.2 * qreal(n); // loose: room to see each strand
+    bundle.gatherA = gatherLength(maxA - minA);
+    bundle.gatherB = gatherLength(maxB - minB);
+
+    // Lines drawn by other wires, which the bundle should not lie on: horizontal legs
+    // (y, x range) and vertical runs (x, y range).
+    struct Line
+    {
+        qreal at, from, to;
+    };
+    std::vector<Line> legs, runs;
+    for (const WireItem *w : others) {
+        if (!w || !w->isVisible() || w->isOffSheet() || w->leadsOnly() > 0)
+            continue;
+        const QPointF a = w->anchorA().point;
+        const QPointF b = w->anchorB().point;
+        const qreal x = w->runX();
+        legs.push_back({a.y(), std::min(a.x(), x), std::max(a.x(), x)});
+        legs.push_back({b.y(), std::min(b.x(), x), std::max(b.x(), x)});
+        runs.push_back({x, std::min(a.y(), b.y()), std::max(a.y(), b.y())});
+    }
+    const qreal clearance = bundle.radius + WireItem::kPenWidth + 2;
+    auto blocked = [clearance](const std::vector<Line> &lines, qreal at, qreal from, qreal to) {
+        if (from > to)
+            std::swap(from, to);
+        return std::any_of(lines.begin(), lines.end(), [&](const Line &l) {
+            return std::abs(l.at - at) < clearance && l.from < to && l.to > from;
+        });
+    };
+
+    // Centerline: out of each end past the leads and the gathering, then along one vertical
+    // run where the conductors' runs are on average, kept clear of the gathering if it can be
+    // and moved off other wires' runs.
+    qreal run = runSum / qreal(n);
+    const qreal xA = a0.point.x() + a0.direction * kLeadLength;
+    const qreal xB = b0.point.x() + b0.direction * kLeadLength;
+    // Level with the conductor pin nearest the middle of each end whose way to the run is
+    // clear (else the nearest): a wire on a pin between the conductors stays visible.
+    auto levelAt = [&](bool endA, qreal mid) {
+        std::vector<qreal> ys;
+        for (const Lane &lane : bundle.lanes)
+            ys.push_back(endA ? lane.yA : lane.yB);
+        std::stable_sort(ys.begin(), ys.end(),
+                         [mid](qreal l, qreal r) { return std::abs(l - mid) < std::abs(r - mid) - 1e-6; });
+        for (const qreal y : ys) {
+            if (!blocked(legs, y, endA ? xA : xB, run))
+                return y;
+        }
+        return ys.front();
+    };
+    const QPointF startA(xA, levelAt(true, (minA + maxA) / 2));
+    const QPointF startB(xB, levelAt(false, (minB + maxB) / 2));
+    const QPointF gatheredA = startA + QPointF(a0.direction * bundle.gatherA, 0);
+    const QPointF gatheredB = startB + QPointF(b0.direction * bundle.gatherB, 0);
+    qreal lo = -1e9, hi = 1e9;
+    for (const auto &[at, direction] : {std::pair{gatheredA, a0.direction}, std::pair{gatheredB, b0.direction}}) {
+        if (direction > 0)
+            lo = std::max(lo, at.x() + WireItem::kCornerRadius);
+        else
+            hi = std::min(hi, at.x() - WireItem::kCornerRadius);
+    }
+    if (lo <= hi)
+        run = std::clamp(run, lo, hi);
+    if (std::abs(startA.y() - startB.y()) > 0.5 && blocked(runs, run, startA.y(), startB.y())) {
+        // Try steps either side, nearest first, staying clear of the gathering.
+        const qreal step = 2 * clearance;
+        for (int k = 1; k <= 20; ++k) {
+            const qreal x = run + (k % 2 ? 1 : -1) * step * ((k + 1) / 2);
+            if ((lo > hi || (x >= lo && x <= hi)) && !blocked(runs, x, startA.y(), startB.y())) {
+                run = x;
+                break;
+            }
+        }
+    }
+    bundle.path = WireItem::roundedPath(
+        {startA, gatheredA, QPointF(run, startA.y()), QPointF(run, startB.y()), gatheredB, startB},
+        WireItem::kCornerRadius);
+
+    // Strands: each leaves its lead, gathers into the bundle and twists (or, untwisted, runs
+    // side by side) along it, a whole number of turns, then spreads out to its lead at end B.
+    const qreal length = bundle.path.length();
+    const qreal turns = std::max(1.0, std::round(length / twistPitch(n)));
+    const int steps = std::max(2, int(std::ceil(length / kTwistStep)));
+    std::vector<QPointF> centers;
+    centers.reserve(steps + 1);
+    for (int k = 0; k <= steps; ++k)
+        centers.push_back(bundle.path.pointAtPercent(bundle.path.percentAtLength(length * k / steps)));
+    bundle.strands.resize(n);
+    for (int k = 0; k <= steps; ++k) {
+        const qreal s = length * k / steps;
+        const QPointF tangent = centers[std::min(k + 1, steps)] - centers[std::max(k - 1, 0)];
+        const qreal tangentLength = std::hypot(tangent.x(), tangent.y());
+        const QPointF normal = tangentLength > 1e-9 ? QPointF(-tangent.y(), tangent.x()) / tangentLength : QPointF(0, 1);
+        for (size_t i = 0; i < n; ++i) {
+            TwistPoint p;
+            if (m_cable.twisted)
+                p = twistAt(int(i), int(n), turns * s / length);
+            else
+                p = {n > 1 ? -1 + 2 * qreal(i) / qreal(n - 1) : 0, true};
+            QPointF point = centers[k] + normal * bundle.radius * p.offset;
+            // Out of and back into the leads, along the straight ends of the centerline.
+            const qreal inA = smoothStep(s / bundle.gatherA);
+            const qreal inB = smoothStep((length - s) / bundle.gatherB);
+            if (inA < 1)
+                point.setY(bundle.lanes[i].yA + (point.y() - bundle.lanes[i].yA) * inA);
+            else if (inB < 1)
+                point.setY(bundle.lanes[i].yB + (point.y() - bundle.lanes[i].yB) * inB);
+            bundle.strands[i].points.push_back(point);
+            bundle.strands[i].front.push_back(p.front);
+        }
+    }
+    m_bundle = std::move(bundle);
     prepareGeometryChange();
     updateShape();
 }
 
-std::vector<QRectF> CableItem::conductorCutouts() const
+std::vector<QRectF> CableItem::labelRects() const
 {
     std::vector<QRectF> rects;
-    if (!m_cable.twisted)
+    if (!m_bundle)
         return rects;
-    const qreal pad = WireItem::kPenWidth + 4; // wire outline and selection glow
-    for (const Mark &mark : m_marks)
-        rects.emplace_back(QPointF(mark.left, mark.lanes.front().y - pad), QPointF(mark.right, mark.lanes.back().y + pad));
+    const Bundle &b = *m_bundle;
+    const qreal width = QFontMetricsF(cableFont()).horizontalAdvance(text()) + 4;
+    const qreal length = b.path.length();
+    std::vector<qreal> at;
+    const qreal first = b.gatherA + kLabelInset;
+    const qreal last = length - b.gatherB - kLabelInset;
+    if (last - first > 2 * width)
+        at = {first, last};
+    else
+        at = {length / 2};
+    const qreal above = b.radius + (m_cable.shielded() ? kShieldMargin : 3);
+    for (const qreal s : at) {
+        const QPointF c = b.path.pointAtPercent(b.path.percentAtLength(s));
+        rects.emplace_back(c.x() - width / 2, c.y() - above - kLabelHeight, width, kLabelHeight);
+    }
     return rects;
-}
-
-QRectF CableItem::markRect(const Mark &mark) const
-{
-    const qreal top = mark.lanes.front().y - kShieldMargin - kLabelHeight;
-    const qreal bottom = mark.lanes.back().y + kShieldMargin;
-    const qreal center = (mark.left + mark.right) / 2;
-    const qreal half = std::max((mark.right - mark.left) / 2 + 2,
-                                QFontMetricsF(cableFont()).horizontalAdvance(text()) / 2 + 2);
-    return QRectF(center - half, top, 2 * half, bottom - top);
 }
 
 QRectF CableItem::tagRect(const QPointF &at) const
@@ -1108,11 +1240,25 @@ QRectF CableItem::tagRect(const QPointF &at) const
 void CableItem::updateShape()
 {
     m_shape = QPainterPath();
-    for (const Mark &mark : m_marks)
-        m_shape.addRect(markRect(mark));
+    if (m_bundle) {
+        QPainterPathStroker stroker;
+        stroker.setWidth(2 * (m_bundle->radius + kShieldMargin));
+        m_shape = stroker.createStroke(m_bundle->path);
+        for (const QRectF &r : labelRects())
+            m_shape.addRect(r);
+    }
     for (const QPointF &tag : m_tags)
         m_shape.addRect(tagRect(tag));
-    m_bounds = m_shape.boundingRect().adjusted(-2, -2, 2, 2);
+    m_shape.setFillRule(Qt::WindingFill);
+    m_bounds = m_shape.boundingRect().adjusted(-4, -4, 4, 4);
+    if (m_bundle) {
+        // Strands spread out to the leads beyond the stroke.
+        for (const TwistStrand &strand : m_bundle->strands) {
+            m_bounds = m_bounds.united(QPolygonF(QList<QPointF>(strand.points.begin(), strand.points.end()))
+                                           .boundingRect()
+                                           .adjusted(-6, -6, 6, 6));
+        }
+    }
 }
 
 QRectF CableItem::boundingRect() const
@@ -1133,74 +1279,51 @@ void CableItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidg
     const QColor gap = canvasBackgroundColor(pal);
     painter->setRenderHint(QPainter::Antialiasing);
     painter->setFont(cableFont());
-    for (const Mark &mark : m_marks) {
-        const qreal top = mark.lanes.front().y;
-        const qreal bottom = mark.lanes.back().y;
-        const size_t n = mark.lanes.size();
-        const qreal length = mark.right - mark.left;
-        // Bundle edges, for the shield outline: the leads at the ends, the twist between.
-        qreal bundleTop = top;
-        qreal bundleBottom = bottom;
-        if (m_cable.twisted) {
-            // Each lead gathers into a bundle that twists along, a whole number of turns,
-            // and spreads back out to its lane.
-            const qreal center = (top + bottom) / 2;
-            const qreal radius = twistRadius(n, bottom - top);
-            const qreal turns = std::max(1.0, std::round((length - kTwistRamp) / kTwistPitch));
-            const int steps = std::max(2, int(std::ceil(length / kTwistStep)));
-            std::vector<TwistStrand> strands(n);
-            for (size_t i = 0; i < n; ++i) {
-                for (int k = 0; k <= steps; ++k) {
-                    const qreal x = mark.left + length * k / steps;
-                    const qreal t = (x - mark.left) / length;
-                    const TwistPoint p = twistAt(int(i), int(n), turns * t);
-                    const qreal e = gather(std::min(x - mark.left, mark.right - x));
-                    const qreal lane = mark.lanes[i].y;
-                    strands[i].points.emplace_back(x, lane + (center + radius * p.offset - lane) * e);
-                    strands[i].front.push_back(p.front);
-                }
-            }
-            if (isSelected()) {
-                painter->setPen(QPen(pal.color(QPalette::Highlight), 2 * radius + WireItem::kPenWidth + 5,
-                                     Qt::SolidLine, Qt::RoundCap));
-                painter->drawLine(QPointF(mark.left + kTwistRamp / 2, center), QPointF(mark.right - kTwistRamp / 2, center));
-            }
-            drawTwist(strands, [&](size_t i, const QPolygonF &run) {
-                const Lane &lane = mark.lanes[i];
-                QColor color = wireColor(lane.baseColor);
-                if (!color.isValid())
-                    color = mix(pal.color(QPalette::Text), pal.color(QPalette::Base), 0.4);
-                painter->save();
-                if (lane.factory)
-                    painter->setOpacity(0.6);
-                // A gap around each run: where it crosses over another, that one breaks.
+    if (m_bundle) {
+        const Bundle &b = *m_bundle;
+        if (isSelected()) {
+            painter->setPen(QPen(pal.color(QPalette::Highlight), 2 * b.radius + WireItem::kPenWidth + 5,
+                                 Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+            painter->setBrush(Qt::NoBrush);
+            painter->drawPath(b.path);
+        }
+        drawTwist(b.strands, [&](size_t i, const QPolygonF &run) {
+            const Lane &lane = b.lanes[i];
+            QColor color = wireColor(lane.baseColor);
+            if (!color.isValid())
+                color = mix(pal.color(QPalette::Text), pal.color(QPalette::Base), 0.4);
+            painter->save();
+            if (lane.factory)
+                painter->setOpacity(0.6);
+            // A gap around each run: where it crosses over another, that one breaks.
+            if (m_cable.twisted) {
                 painter->setPen(QPen(gap, WireItem::kPenWidth + 3.5, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
                 painter->drawPolyline(run);
-                painter->setPen(QPen(outline, WireItem::kPenWidth + 1.5, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+            }
+            painter->setPen(QPen(outline, WireItem::kPenWidth + 1.5, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+            painter->drawPolyline(run);
+            painter->setPen(QPen(color, WireItem::kPenWidth, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
+            painter->drawPolyline(run);
+            const QColor stripe = wireColor(lane.stripeColor);
+            if (stripe.isValid()) {
+                painter->setPen(QPen(stripe, WireItem::kPenWidth * 0.4, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
                 painter->drawPolyline(run);
-                painter->setPen(QPen(color, WireItem::kPenWidth, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
-                painter->drawPolyline(run);
-                const QColor stripe = wireColor(lane.stripeColor);
-                if (stripe.isValid()) {
-                    painter->setPen(QPen(stripe, WireItem::kPenWidth * 0.4, Qt::SolidLine, Qt::FlatCap, Qt::RoundJoin));
-                    painter->drawPolyline(run);
-                }
-                painter->restore();
-            });
-            bundleTop = std::min(top, center - radius);
-            bundleBottom = std::max(bottom, center + radius);
-        }
+            }
+            painter->restore();
+        });
         if (m_cable.shielded()) {
-            // The shield wraps the section.
+            // The shield wraps the bundle.
+            QPainterPathStroker stroker;
+            stroker.setWidth(2 * (b.radius + kShieldMargin));
+            stroker.setCapStyle(Qt::FlatCap);
+            stroker.setJoinStyle(Qt::RoundJoin);
             painter->setPen(QPen(ink, 1.4, Qt::DashLine));
             painter->setBrush(Qt::NoBrush);
-            const QRectF r(QPointF(mark.left, bundleTop - kShieldMargin), QPointF(mark.right, bundleBottom + kShieldMargin));
-            painter->drawRoundedRect(r, kShieldMargin + 2, kShieldMargin + 2);
+            painter->drawPath(stroker.createStroke(b.path).simplified());
         }
         painter->setPen(ink);
-        const qreal center = (mark.left + mark.right) / 2;
-        painter->drawText(QRectF(center - 60, top - kShieldMargin - kLabelHeight, 120, kLabelHeight),
-                          Qt::AlignHCenter | Qt::AlignBottom, text());
+        for (const QRectF &r : labelRects())
+            painter->drawText(r, Qt::AlignHCenter | Qt::AlignBottom, text());
     }
     for (const QPointF &tag : m_tags) {
         const QRectF r = tagRect(tag);

@@ -63,14 +63,13 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
 - Flying leads, eyelets, ring terminals and bare ends are `FreeEnd` entities (schema 2,
   `freeEnds.json`; v1 files migrate on open), placed on the schematic like splices
   (Place > Add Flying Lead F / Add Eyelet E) and wired from their leads. Merged to `main`.
-- Canvas pan preferences and the v0.1.1 release prep are on branch `canvas-pan-preferences`,
-  pushed to GitHub but **not merged or pushed to `main`** (user is testing the v0.1.1 draft
-  release first; merge only when the user says so): Edit > Preferences picks
+- Canvas pan preferences (branch `canvas-pan-preferences`, merged to `main` with the v0.1.1
+  features): Edit > Preferences picks
   an extra pan input (right drag, where a right-click without movement still opens the menu, or
   Space + left drag; middle drag always pans) and "Scroll wheel pans" (Ctrl+wheel zooms); pinch
   zooms; touchscreens: one finger = left button, two fingers pinch zoom + pan
   (`CanvasView::handleTouch`). Panning is intercepted in `CanvasView::viewportEvent` before subclasses see the mouse.
-- **v0.1.1 feature set done on branch `v0.1.1-features`** (built on `canvas-pan-preferences`;
+- **v0.1.1 feature set merged to `main`** (2026-11-18; built on branch `v0.1.1-features`, on `canvas-pan-preferences`;
   touch pinch/pan, pin table bulk edit + Plug P/N column, circuit IDs, Wired to column /
   Connect Pin To, connector/terminal/seal/plug library with seed data, CSV import and fit
   warnings, layout labels with covers, zip ties, backshells/strain relief, cutting a wire
@@ -86,16 +85,14 @@ run the `screenshots`/`screenshot` test functions in `tests/app`.
   G), autosave status in the status bar, wire end handles, renamed circuit text follows its
   net (`renameCircuitText`), optional circuit text suggestions (off by default). Cuts placed like splices (plan section
   5e): the two cut ends know each other (`FreeEnd::pairedCutId`) and go to one layout point,
-  which drags/types into a loom like a splice (`isLoomPoint`). Tagged
-  `v0.1.1` from that branch for a draft release the user is testing. **Not merged to `main`**:
-  merge only when the user says so. Bug review fixes (plan 5f: factory sleeving left out of the
+  which drags/types into a loom like a splice (`isLoomPoint`). Bug review fixes (plan 5f: factory sleeving left out of the
   BOM unless `addOnSleeving`, unplug clears the plug P/N, labels/ties follow a moved splice) and
-  `main`'s example harness are on the branch; v0.1.1 re-tagged from it for a new draft.
-  Details and decisions: `docs/V0.1.1_PLAN.md`. Twisted / shielded cables (plan 5g) on
-  the branch: `Cable` entity in `cables.json` (**schema 4**), any number of conductor wires
+  `main`'s example harness are included. v0.1.1 tagged from `main` for a draft release.
+  Details and decisions: `docs/V0.1.1_PLAN.md`. Twisted / shielded cables (plan 5g): `Cable` entity in `cables.json` (**schema 4**), any number of conductor wires
   plus an optional shield wire, built or bought, twist take-up setting, Cables BOM tab,
   `CablePanel`; the conductors are drawn twisting around each other on the schematic
-  (`CableItem`, `WireItem::setCutouts`) and along layout bundles (`WireStripe::twist`),
+  as one loose twisted bundle along the whole route past straight leads, kept off other wires'
+  lines (`CableItem`, `WireItem::setLeadsOnly`, plan 5g item f) and along layout bundles (`WireStripe::twist`),
   helix math in `ui/Twist.*`. Last feature for v0.1.1.
 - Still open (not in any finished milestone): UI for manual wire route overrides (`routeSegmentIds`), keyboard-only wire/segment drawing,
   translations for languages other than English.

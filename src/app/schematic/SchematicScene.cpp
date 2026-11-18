@@ -210,18 +210,19 @@ void SchematicScene::addCable(const Cable &cable)
 
 void SchematicScene::removeCable(const QString &id)
 {
-    if (CableItem *item = m_cables.value(id)) {
-        for (const QString &wireId : item->cable().wireIds) {
-            if (WireItem *wire = m_wires.value(wireId))
-                wire->setCutouts({});
-        }
-    }
+    const std::vector<QString> wireIds = m_cables.contains(id) ? m_cables.value(id)->cable().wireIds
+                                                               : std::vector<QString>{};
     delete m_cables.take(id);
     for (auto it = m_cablesByWire.begin(); it != m_cablesByWire.end();) {
         if (it.value() == id)
             it = m_cablesByWire.erase(it);
         else
             ++it;
+    }
+    // Drawn whole again unless another cable bundles them.
+    for (const QString &wireId : wireIds) {
+        if (WireItem *wire = m_wires.value(wireId))
+            wire->setLeadsOnly(isBundled(wireId) ? CableItem::kLeadLength : 0);
     }
 }
 
@@ -233,20 +234,38 @@ void SchematicScene::updateCable(const QString &cableId)
     std::vector<const WireItem *> conductors;
     for (const QString &id : item->cable().wireIds)
         conductors.push_back(m_wires.value(id));
-    item->follow(conductors);
-    // The cable draws its twisted conductors itself there.
-    const std::vector<QRectF> cutouts = item->conductorCutouts();
+    std::vector<const WireItem *> others;
+    for (auto it = m_wires.cbegin(); it != m_wires.cend(); ++it) {
+        if (!m_cablesByWire.contains(it.key(), cableId))
+            others.push_back(it.value());
+    }
+    item->follow(conductors, others);
+    // A cable draws its bundled conductors itself past their leads.
     for (const QString &id : item->cable().wireIds) {
         if (WireItem *wire = m_wires.value(id))
-            wire->setCutouts(cutouts);
+            wire->setLeadsOnly(isBundled(id) ? CableItem::kLeadLength : 0);
     }
 }
 
-void SchematicScene::updateCablesOfWire(const QString &wireId)
+bool SchematicScene::isBundled(const QString &wireId) const
+{
+    for (const QString &cableId : m_cablesByWire.values(wireId)) {
+        const CableItem *cable = m_cables.value(cableId);
+        if (!cable || !cable->bundle())
+            continue;
+        for (const CableItem::Lane &lane : cable->bundle()->lanes) {
+            if (lane.wireId == wireId)
+                return true;
+        }
+    }
+    return false;
+}
+
+void SchematicScene::updateCables()
 {
     if (m_building)
         return;
-    const QList<QString> cables = m_cablesByWire.values(wireId);
+    const QList<QString> cables = m_cables.keys();
     for (const QString &id : cables)
         updateCable(id);
 }
@@ -385,7 +404,7 @@ Anchor SchematicScene::endAnchor(const Wire &wire, bool endB) const
 void SchematicScene::updateWire(const QString &wireId)
 {
     routeWire(wireId);
-    updateCablesOfWire(wireId);
+    updateCables();
 }
 
 void SchematicScene::routeWire(const QString &wireId)
@@ -506,10 +525,7 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
     case EntityKind::Cable:
         if (CableItem *item = m_cables.value(id)) {
             const Cable &cable = *m_model->find<Cable>(id);
-            for (const QString &wireId : item->cable().wireIds) {
-                if (WireItem *wire = m_wires.value(wireId))
-                    wire->setCutouts({}); // updateCable() sets them again on the conductors
-            }
+            const std::vector<QString> oldWireIds = item->cable().wireIds;
             item->setCable(cable);
             // Conductors may have changed: index them again.
             for (auto it = m_cablesByWire.begin(); it != m_cablesByWire.end();)
@@ -517,6 +533,10 @@ void SchematicScene::onChanged(EntityKind kind, const QString &id)
             for (const QString &wireId : cable.wireIds)
                 m_cablesByWire.insert(wireId, id);
             updateCable(id);
+            for (const QString &wireId : oldWireIds) { // conductors no longer in the cable
+                if (WireItem *wire = m_wires.value(wireId))
+                    wire->setLeadsOnly(isBundled(wireId) ? CableItem::kLeadLength : 0);
+            }
             applyShieldWires();
         }
         break;
